@@ -75,6 +75,115 @@ class AuthViewModel : ViewModel() {
   private val _lockoutRemainingSeconds = MutableStateFlow(0L)
   val lockoutRemainingSeconds: StateFlow<Long> = _lockoutRemainingSeconds.asStateFlow()
 
+  // First-Time Activation Code States
+  private val _activationCode = MutableStateFlow("")
+  val activationCode: StateFlow<String> = _activationCode.asStateFlow()
+
+  private val _newPasswordInput = MutableStateFlow("")
+  val newPasswordInput: StateFlow<String> = _newPasswordInput.asStateFlow()
+
+  private val _confirmPasswordInput = MutableStateFlow("")
+  val confirmPasswordInput: StateFlow<String> = _confirmPasswordInput.asStateFlow()
+
+  private val _accountStatus = MutableStateFlow(com.example.data.AccountStatusInfo(exists = false, role = null, displayName = "", isActivated = true))
+  val accountStatus: StateFlow<com.example.data.AccountStatusInfo> = _accountStatus.asStateFlow()
+
+  private val _manualActivationOverride = MutableStateFlow<Boolean?>(null)
+  val manualActivationOverride: StateFlow<Boolean?> = _manualActivationOverride.asStateFlow()
+
+  init {
+    viewModelScope.launch {
+      // Proactively check for existing Firebase Auth session upon launch
+      FirebaseAuthService.checkExistingSession(
+        onSessionFound = { userEmail, role, uid ->
+          _identifier.value = userEmail
+          _accountStatus.value = com.example.data.AccountStatusInfo(
+            exists = true,
+            role = role,
+            displayName = userEmail.substringBefore("@"),
+            isActivated = true
+          )
+        },
+        onNoSession = {
+          val currentId = AppRepository.currentUserIdentifier.value
+          if (currentId.isNotBlank() && _identifier.value.isBlank()) {
+            onIdentifierChanged(currentId)
+          }
+        }
+      )
+    }
+  }
+
+  fun setManualActivationOverride(override: Boolean?) {
+    _manualActivationOverride.value = override
+    _loginError.value = null
+  }
+
+  fun onActivationCodeChanged(code: String) {
+    _activationCode.value = code
+    _loginError.value = null
+  }
+
+  fun onNewPasswordInputChanged(pwd: String) {
+    _newPasswordInput.value = pwd
+    _loginError.value = null
+  }
+
+  fun onConfirmPasswordInputChanged(pwd: String) {
+    _confirmPasswordInput.value = pwd
+    _loginError.value = null
+  }
+
+  fun activateAccountWithCode(onSuccess: (UserRole) -> Unit) {
+    val cleanIdentifier = _identifier.value.trim()
+    val cleanCode = _activationCode.value.trim()
+    val newPwd = _newPasswordInput.value.trim()
+    val confirmPwd = _confirmPasswordInput.value.trim()
+
+    if (cleanIdentifier.isBlank()) {
+      _loginError.value = "Please enter your registered email or mobile number."
+      return
+    }
+
+    if (cleanCode.isBlank()) {
+      _loginError.value = "Please enter your 6-digit activation code."
+      return
+    }
+
+    if (newPwd.length < 6) {
+      _loginError.value = "Password must be at least 6 characters long."
+      return
+    }
+
+    if (newPwd != confirmPwd) {
+      _loginError.value = "Passwords do not match. Please re-enter."
+      return
+    }
+
+    _isLoading.value = true
+    _loginError.value = null
+
+    viewModelScope.launch {
+      val (isValid, detectedRole, errorMsg) = AppRepository.activateAccountWithCodeAndSetPassword(
+        identifier = cleanIdentifier,
+        activationCode = cleanCode,
+        newPassword = newPwd
+      )
+
+      if (isValid && detectedRole != null) {
+        val loggedIn = AppRepository.login(cleanIdentifier, detectedRole)
+        _isLoading.value = false
+        _successMessage.value = "Account Activated & Password Set Successfully! Welcome to My Tuition."
+        _accountStatus.value = _accountStatus.value.copy(isActivated = true)
+        _manualActivationOverride.value = null
+        onSuccess(detectedRole)
+      } else {
+        _isLoading.value = false
+        _loginError.value = errorMsg ?: "Invalid activation code. Please check the code provided by your Institute Admin."
+      }
+    }
+  }
+
   // Structured Auth Audit Trail
   private val _authAuditLogs = MutableStateFlow<List<StructuredAuthAttempt>>(emptyList())
   val authAuditLogs: StateFlow<List<StructuredAuthAttempt>> = _authAuditLogs.asStateFlow()
@@ -89,6 +198,7 @@ class AuthViewModel : ViewModel() {
   fun onIdentifierChanged(value: String) {
     _identifier.value = value
     _loginError.value = null
+    _accountStatus.value = AppRepository.getAccountStatus(value)
     checkLockoutState(value)
   }
 

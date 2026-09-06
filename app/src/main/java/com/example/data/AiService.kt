@@ -3,14 +3,17 @@ package com.example.data
 import kotlinx.coroutines.delay
 
 object AiService {
-  const val NV_API_KEY = "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"
+  val NV_API_KEY: String
+    get() = System.getenv("NVIDIA_API_KEY") ?: ""
 
   fun hasValidKey(): Boolean {
     return NV_API_KEY.isNotBlank() && NV_API_KEY.startsWith("nvapi-")
   }
 
   suspend fun askAssistant(prompt: String, contextSubject: String): String {
-    delay(800) // Simulating network latency & RBAC filter processing
+    if (!NetworkConnectivityManager.isOnline.value) {
+      return "📡 **Offline Mode (Read-Only)**:\nAI features require an active internet connection to query AI models. You are currently viewing cached tuition data updated before disconnect. Please reconnect to the internet to use AI features."
+    }
 
     val currentRole = AppRepository.currentRole.value
     val pLower = prompt.lowercase()
@@ -60,7 +63,6 @@ object AiService {
   }
 
   suspend fun generatePerformanceInsights(testName: String, score: Int): String {
-    delay(600)
     return if (score > 240) {
       "🌟 **NVIDIA Diagnostic Engine ($testName)**:\nOutstanding score ($score/300)! Conceptual mastery in Electromagnetism and Calculus is in the top 1% percentile. Focus on multi-correct JEE Advanced PYQs."
     } else if (score > 180) {

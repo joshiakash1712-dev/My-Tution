@@ -4,6 +4,8 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.animation.*
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -36,22 +38,37 @@ import com.example.ui.parent.*
 import com.example.ui.student.*
 import com.example.ui.teacher.*
 import com.example.ui.theme.MyApplicationTheme
+import com.example.ui.theme.pressSpring
 
 class MainActivity : ComponentActivity() {
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
-    AppRepository.initialize(applicationContext)
-    FirebaseAppCheckManager.initialize(applicationContext)
+    try {
+      AppRepository.initialize(applicationContext)
+      FirebaseAppCheckManager.initialize(applicationContext)
+    } catch (e: Exception) {
+      android.util.Log.e("MainActivity", "Startup initialization error: ${e.message}", e)
+    }
 
-    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
-      if (checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
-        requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 101)
+    try {
+      if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+        if (checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+          requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 101)
+        }
       }
+    } catch (e: Exception) {
+      android.util.Log.w("MainActivity", "Notification permission request skipped: ${e.message}")
     }
 
     enableEdgeToEdge()
     setContent {
-      MyApplicationTheme(dynamicColor = false) {
+      val darkThemeMode by AppRepository.darkThemeMode.collectAsState()
+      val isDark = when (darkThemeMode) {
+        DarkThemeMode.DARK -> true
+        DarkThemeMode.LIGHT -> false
+        DarkThemeMode.SYSTEM -> androidx.compose.foundation.isSystemInDarkTheme()
+      }
+      MyApplicationTheme(darkTheme = isDark, dynamicColor = false) {
         Surface(
           modifier = Modifier.fillMaxSize(),
           color = MaterialTheme.colorScheme.background
@@ -71,6 +88,7 @@ fun MyTuitionApp() {
   val currentUserIdentifier by AppRepository.currentUserIdentifier.collectAsState()
   val currentRole by AppRepository.currentRole.collectAsState()
   val passwordResetNotice by AppRepository.passwordResetNotice.collectAsState()
+  val offlineActionBlockedNotice by AppRepository.offlineActionBlockedNotice.collectAsState()
 
   var currentTabIndex by remember { mutableStateOf(0) }
   var searchQuery by remember { mutableStateOf("") }
@@ -91,29 +109,30 @@ fun MyTuitionApp() {
   val bottomTabs = remember(currentRole) {
     when (currentRole) {
       UserRole.ADMIN -> listOf(
-        "Dashboard" to Icons.Default.Home,
-        "Students" to Icons.Default.People,
-        "Staff" to Icons.Default.Badge,
-        "Batches" to Icons.Default.Class,
-        "Timetable" to Icons.Default.Schedule
+        "Dashboard" to Icons.Outlined.Home,
+        "Students" to Icons.Outlined.People,
+        "Fees" to Icons.Outlined.ReceiptLong,
+        "Staff" to Icons.Outlined.Badge,
+        "Batches" to Icons.Outlined.Layers,
+        "Timetable" to Icons.Outlined.Schedule
       )
       UserRole.TEACHER -> listOf(
-        "Dashboard" to Icons.Default.Home,
-        "Attendance" to Icons.Default.FactCheck,
-        "Tests & Marks" to Icons.Default.Assessment,
-        "Timetable" to Icons.Default.Schedule
+        "Dashboard" to Icons.Outlined.Home,
+        "Attendance" to Icons.Outlined.FactCheck,
+        "Tests & Marks" to Icons.Outlined.Assessment,
+        "Timetable" to Icons.Outlined.Schedule
       )
       UserRole.STUDENT -> listOf(
-        "Dashboard" to Icons.Default.Home,
-        "Timetable" to Icons.Default.Schedule,
-        "CBT Test" to Icons.Default.Quiz,
-        "Gemini AI" to Icons.Default.AutoAwesome
+        "Dashboard" to Icons.Outlined.Home,
+        "Timetable" to Icons.Outlined.Schedule,
+        "CBT Test" to Icons.Outlined.Quiz,
+        "Gemini AI" to Icons.Outlined.AutoAwesome
       )
       UserRole.PARENT -> listOf(
-        "Dashboard" to Icons.Default.Home,
-        "Attendance" to Icons.Default.CalendarToday,
-        "Test Standing" to Icons.Default.Assessment,
-        "Timetable" to Icons.Default.Schedule
+        "Dashboard" to Icons.Outlined.Home,
+        "Attendance" to Icons.Outlined.CalendarMonth,
+        "Test Standing" to Icons.Outlined.Assessment,
+        "Timetable" to Icons.Outlined.Schedule
       )
     }
   }
@@ -245,13 +264,23 @@ fun MyTuitionApp() {
             ) {
               bottomTabs.forEachIndexed { index, (label, icon) ->
                 val isSelected = currentTabIndex == index
-                val itemBg = if (isSelected) Color(0xFF334155) else Color.Transparent
-                val itemTextColor = if (isSelected) Color.White else Color(0xFF94A3B8)
-                val iconTint = if (isSelected) Color(0xFF38BDF8) else Color(0xFF64748B)
+                val itemBg by animateColorAsState(
+                  targetValue = if (isSelected) Color(0xFF334155) else Color.Transparent,
+                  label = "sidebar_bg"
+                )
+                val itemTextColor by animateColorAsState(
+                  targetValue = if (isSelected) Color.White else Color(0xFF94A3B8),
+                  label = "sidebar_txt"
+                )
+                val iconTint by animateColorAsState(
+                  targetValue = if (isSelected) Color(0xFF38BDF8) else Color(0xFF64748B),
+                  label = "sidebar_icon_tint"
+                )
 
                 Row(
                   modifier = Modifier
                     .fillMaxWidth()
+                    .pressSpring(0.96f)
                     .clip(RoundedCornerShape(10.dp))
                     .background(itemBg)
                     .clickable {
@@ -358,19 +387,37 @@ fun MyTuitionApp() {
               .fillMaxSize()
               .weight(1f)
           ) {
-            if (isProfileOpen) {
-              ProfileScreen(
-                currentRole = currentRole,
-                userIdentifier = currentUserIdentifier,
-                onLogout = { AppRepository.logout() },
-                onClose = { isProfileOpen = false }
-              )
-            } else {
-              when (currentRole) {
-                UserRole.ADMIN -> AdminMainContent(currentTabIndex, searchQuery, { stu -> activeStudentForModal = stu }, { index -> currentTabIndex = index })
-                UserRole.TEACHER -> TeacherMainContent(currentTabIndex, { index -> currentTabIndex = index })
-                UserRole.STUDENT -> StudentMainContent(currentTabIndex, { index -> currentTabIndex = index })
-                UserRole.PARENT -> ParentMainContent(currentTabIndex, { index -> currentTabIndex = index })
+            AnimatedContent(
+              targetState = isProfileOpen,
+              transitionSpec = {
+                fadeIn(animationSpec = tween(120, easing = FastOutSlowInEasing))
+                  .togetherWith(fadeOut(animationSpec = tween(80, easing = FastOutLinearInEasing)))
+              },
+              label = "desktop_profile_transition"
+            ) { showProfile ->
+              if (showProfile) {
+                ProfileScreen(
+                  currentRole = currentRole,
+                  userIdentifier = currentUserIdentifier,
+                  onLogout = { AppRepository.logout() },
+                  onClose = { isProfileOpen = false }
+                )
+              } else {
+                AnimatedContent(
+                  targetState = currentTabIndex,
+                  transitionSpec = {
+                    fadeIn(animationSpec = tween(100, easing = FastOutSlowInEasing))
+                      .togetherWith(fadeOut(animationSpec = tween(70, easing = FastOutLinearInEasing)))
+                  },
+                  label = "desktop_tab_transition"
+                ) { tabIndex ->
+                  when (currentRole) {
+                    UserRole.ADMIN -> AdminMainContent(tabIndex, searchQuery, { stu -> activeStudentForModal = stu }, { index -> currentTabIndex = index })
+                    UserRole.TEACHER -> TeacherMainContent(tabIndex, { index -> currentTabIndex = index })
+                    UserRole.STUDENT -> StudentMainContent(tabIndex, { index -> currentTabIndex = index })
+                    UserRole.PARENT -> ParentMainContent(tabIndex, { index -> currentTabIndex = index })
+                  }
+                }
               }
             }
           }
@@ -381,6 +428,7 @@ fun MyTuitionApp() {
       Scaffold(
         modifier = Modifier.fillMaxSize(),
         containerColor = MaterialTheme.colorScheme.background,
+        contentWindowInsets = WindowInsets(0.dp),
         topBar = {
           Column {
             GeoHeader(
@@ -444,19 +492,37 @@ fun MyTuitionApp() {
             .fillMaxSize()
             .padding(innerPadding)
         ) {
-          if (isProfileOpen) {
-            ProfileScreen(
-              currentRole = currentRole,
-              userIdentifier = currentUserIdentifier,
-              onLogout = { AppRepository.logout() },
-              onClose = { isProfileOpen = false }
-            )
-          } else {
-            when (currentRole) {
-              UserRole.ADMIN -> AdminMainContent(currentTabIndex, searchQuery, { stu -> activeStudentForModal = stu }, { index -> currentTabIndex = index })
-              UserRole.TEACHER -> TeacherMainContent(currentTabIndex, { index -> currentTabIndex = index })
-              UserRole.STUDENT -> StudentMainContent(currentTabIndex, { index -> currentTabIndex = index })
-              UserRole.PARENT -> ParentMainContent(currentTabIndex, { index -> currentTabIndex = index })
+          AnimatedContent(
+            targetState = isProfileOpen,
+            transitionSpec = {
+              fadeIn(animationSpec = tween(120, easing = FastOutSlowInEasing))
+                .togetherWith(fadeOut(animationSpec = tween(80, easing = FastOutLinearInEasing)))
+            },
+            label = "phone_profile_transition"
+          ) { showProfile ->
+            if (showProfile) {
+              ProfileScreen(
+                currentRole = currentRole,
+                userIdentifier = currentUserIdentifier,
+                onLogout = { AppRepository.logout() },
+                onClose = { isProfileOpen = false }
+              )
+            } else {
+              AnimatedContent(
+                targetState = currentTabIndex,
+                transitionSpec = {
+                  fadeIn(animationSpec = tween(100, easing = FastOutSlowInEasing))
+                    .togetherWith(fadeOut(animationSpec = tween(70, easing = FastOutLinearInEasing)))
+                },
+                label = "phone_tab_transition"
+              ) { tabIndex ->
+                when (currentRole) {
+                  UserRole.ADMIN -> AdminMainContent(tabIndex, searchQuery, { stu -> activeStudentForModal = stu }, { index -> currentTabIndex = index })
+                  UserRole.TEACHER -> TeacherMainContent(tabIndex, { index -> currentTabIndex = index })
+                  UserRole.STUDENT -> StudentMainContent(tabIndex, { index -> currentTabIndex = index })
+                  UserRole.PARENT -> ParentMainContent(tabIndex, { index -> currentTabIndex = index })
+                }
+              }
             }
           }
         }

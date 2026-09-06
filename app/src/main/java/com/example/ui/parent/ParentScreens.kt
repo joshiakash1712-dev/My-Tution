@@ -1,5 +1,6 @@
 package com.example.ui.parent
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -174,13 +175,7 @@ fun ParentDashboardTab(
 fun ParentAttendanceTab(child: Student) {
   val attendanceList by AppRepository.attendance.collectAsState()
   val childAttendance = remember(attendanceList, child) { attendanceList.filter { it.studentId == child.id || it.studentName == child.name } }
-  var isParentAttendanceLoading by remember { mutableStateOf(true) }
-
-  LaunchedEffect(Unit) {
-    isParentAttendanceLoading = true
-    kotlinx.coroutines.delay(800)
-    isParentAttendanceLoading = false
-  }
+  var isParentAttendanceLoading by remember { mutableStateOf(false) }
 
   LazyColumn(
     modifier = Modifier.fillMaxSize(),
@@ -271,6 +266,13 @@ fun ParentTestPerformanceTab(child: Student, tests: List<TestRecord>) {
         subtitle = "Institute Average 74% • ${child.name}'s Average ${child.overallAvg}%",
         tagText = "TOP 2% PERCENTILE",
         icon = Icons.Default.Analytics
+      )
+    }
+
+    item {
+      StudentGradeProgressDashboard(
+        student = child,
+        tests = tests
       )
     }
 
@@ -370,29 +372,28 @@ fun ParentFeeStatusTab(feeRecord: FeeRecord) {
             verticalAlignment = Alignment.CenterVertically
           ) {
             Column {
-              Text("Amount: ₹${feeRecord.paidAmount} • Mode: UPI Secure Online", fontSize = 12.sp, color = Color(0xFF44474E))
-              Text("Transaction: TXN-${feeRecord.id.takeLast(6).uppercase()}", fontSize = 10.sp, color = Color(0xFF74777F))
+              Text("Amount: ₹${feeRecord.paidAmount} • Mode: UPI Secure Online", fontSize = 12.sp, color = Color(0xFF94A3B8))
+              Text("Transaction: TXN-${feeRecord.id.takeLast(6).uppercase()}", fontSize = 10.sp, color = Color(0xFF64748B))
             }
             IconButton(onClick = { 
               completedPaymentAmount = feeRecord.paidAmount
               showReceiptDialog = true 
             }) {
-              Icon(Icons.Default.ReceiptLong, contentDescription = "View Receipt", tint = Color(0xFF0061A4))
+              Icon(Icons.Default.ReceiptLong, contentDescription = "View Receipt", tint = Color(0xFF38BDF8))
             }
           }
         }
       }
     } else {
       item {
-        Card(
-          colors = CardDefaults.cardColors(containerColor = Color(0xFFF1F5F9)),
-          modifier = Modifier.fillMaxWidth(),
-          shape = RoundedCornerShape(16.dp)
-        ) {
-          Box(modifier = Modifier.padding(16.dp), contentAlignment = Alignment.Center) {
-            Text("No paid receipts found yet. Pay outstanding dues online.", fontSize = 12.sp, color = Color(0xFF64748B))
-          }
-        }
+        SectionEmptyState(
+          icon = Icons.Default.ReceiptLong,
+          title = "No Payment Receipts Generated",
+          description = "Payment receipts and downloadable transaction invoices will be stored here automatically once you clear tuition installments.",
+          actionLabel = if (feeRecord.pendingAmount > 0) "Pay Installment ₹${feeRecord.pendingAmount}" else null,
+          onActionClick = if (feeRecord.pendingAmount > 0) { { showPaymentGateway = true } } else null,
+          accentColor = Color(0xFF4ADE80)
+        )
       }
     }
   }
@@ -420,14 +421,9 @@ fun SimulatedPaymentGatewayDialog(
   var selectedBank by remember { mutableStateOf("HDFC Bank") }
   val banks = listOf("HDFC Bank", "SBI", "ICICI Bank", "Axis Bank")
 
-  var timerTicks by remember { mutableStateOf(4) }
-  
   if (paymentStep == 1) {
     LaunchedEffect(Unit) {
-      while (timerTicks > 0) {
-        kotlinx.coroutines.delay(800L)
-        timerTicks--
-      }
+      kotlinx.coroutines.delay(350L)
       onPaymentSuccess(amount)
       paymentStep = 2
     }
@@ -437,7 +433,7 @@ fun SimulatedPaymentGatewayDialog(
     onDismissRequest = { if (paymentStep != 1) onDismiss() },
     title = {
       Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Icon(Icons.Default.Security, contentDescription = null, tint = Color(0xFF15803D))
+        Icon(Icons.Default.Security, contentDescription = null, tint = Color(0xFF4ADE80))
         Text(
           text = when (paymentStep) {
             0 -> "FSI Secure Payment Gateway"
@@ -445,7 +441,8 @@ fun SimulatedPaymentGatewayDialog(
             else -> "Payment Successful 🎉"
           },
           fontWeight = FontWeight.Bold,
-          fontSize = 16.sp
+          fontSize = 16.sp,
+          color = Color(0xFFF8FAFC)
         )
       }
     },
@@ -457,8 +454,9 @@ fun SimulatedPaymentGatewayDialog(
         if (paymentStep == 0) {
           // Amount Indicator
           Surface(
-            color = Color(0xFFF1F5F9),
+            color = Color(0xFF182438),
             shape = RoundedCornerShape(12.dp),
+            border = BorderStroke(1.dp, Color(0xFF1E2D42)),
             modifier = Modifier.fillMaxWidth()
           ) {
             Row(
@@ -466,8 +464,8 @@ fun SimulatedPaymentGatewayDialog(
               horizontalArrangement = Arrangement.SpaceBetween,
               verticalAlignment = Alignment.CenterVertically
             ) {
-              Text("Payable Amount:", fontSize = 12.sp, color = Color(0xFF64748B))
-              Text("₹$amount", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))
+              Text("Payable Amount:", fontSize = 12.sp, color = Color(0xFF94A3B8))
+              Text("₹$amount", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color(0xFF38BDF8))
             }
           }
 
@@ -479,13 +477,13 @@ fun SimulatedPaymentGatewayDialog(
             listOf("UPI", "Card", "Netbanking").forEach { method ->
               val isSel = selectedMethod == method
               Surface(
-                color = if (isSel) MaterialTheme.colorScheme.primaryContainer else Color(0xFFF1F5F9),
+                color = if (isSel) Color(0xFF0284C7) else Color(0xFF182438),
                 shape = RoundedCornerShape(12.dp),
                 modifier = Modifier
                   .weight(1f)
                   .border(
                     width = 1.dp,
-                    color = if (isSel) MaterialTheme.colorScheme.primary else Color.Transparent,
+                    color = if (isSel) Color(0xFF38BDF8) else Color(0xFF1E2D42),
                     shape = RoundedCornerShape(12.dp)
                   )
                   .clickable { selectedMethod = method }
@@ -498,7 +496,7 @@ fun SimulatedPaymentGatewayDialog(
                     text = method,
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
-                    color = if (isSel) MaterialTheme.colorScheme.primary else Color(0xFF475569)
+                    color = if (isSel) Color.White else Color(0xFF94A3B8)
                   )
                 }
               }
@@ -568,7 +566,7 @@ fun SimulatedPaymentGatewayDialog(
               }
             }
             "Netbanking" -> {
-              Text("Select Popular Indian Bank", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = Color(0xFF64748B))
+              Text("Select Popular Indian Bank", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = Color(0xFF94A3B8))
               Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -576,19 +574,19 @@ fun SimulatedPaymentGatewayDialog(
                 banks.take(2).forEach { bank ->
                   val isSel = selectedBank == bank
                   Surface(
-                    color = if (isSel) MaterialTheme.colorScheme.primaryContainer else Color(0xFFF1F5F9),
+                    color = if (isSel) Color(0xFF0284C7) else Color(0xFF182438),
                     shape = RoundedCornerShape(10.dp),
                     modifier = Modifier
                       .weight(1f)
                       .border(
                         1.dp,
-                        if (isSel) MaterialTheme.colorScheme.primary else Color.Transparent,
+                        if (isSel) Color(0xFF38BDF8) else Color(0xFF1E2D42),
                         RoundedCornerShape(10.dp)
                       )
                       .clickable { selectedBank = bank }
                   ) {
                     Box(modifier = Modifier.padding(10.dp), contentAlignment = Alignment.Center) {
-                      Text(bank, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = if (isSel) MaterialTheme.colorScheme.primary else Color(0xFF475569))
+                      Text(bank, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = if (isSel) Color.White else Color(0xFF94A3B8))
                     }
                   }
                 }
@@ -600,19 +598,19 @@ fun SimulatedPaymentGatewayDialog(
                 banks.drop(2).forEach { bank ->
                   val isSel = selectedBank == bank
                   Surface(
-                    color = if (isSel) MaterialTheme.colorScheme.primaryContainer else Color(0xFFF1F5F9),
+                    color = if (isSel) Color(0xFF0284C7) else Color(0xFF182438),
                     shape = RoundedCornerShape(10.dp),
                     modifier = Modifier
                       .weight(1f)
                       .border(
                         1.dp,
-                        if (isSel) MaterialTheme.colorScheme.primary else Color.Transparent,
+                        if (isSel) Color(0xFF38BDF8) else Color(0xFF1E2D42),
                         RoundedCornerShape(10.dp)
                       )
                       .clickable { selectedBank = bank }
                   ) {
                     Box(modifier = Modifier.padding(10.dp), contentAlignment = Alignment.Center) {
-                      Text(bank, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = if (isSel) MaterialTheme.colorScheme.primary else Color(0xFF475569))
+                      Text(bank, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = if (isSel) Color.White else Color(0xFF94A3B8))
                     }
                   }
                 }
@@ -627,7 +625,7 @@ fun SimulatedPaymentGatewayDialog(
           ) {
             CircularProgressIndicator(color = MaterialTheme.colorScheme.primary, modifier = Modifier.size(48.dp))
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-              Text("Communicating with payment server...", fontSize = 13.sp, fontWeight = FontWeight.Medium, color = Color(0xFF475569))
+              Text("Communicating with payment server...", fontSize = 13.sp, fontWeight = FontWeight.Medium, color = Color(0xFFF8FAFC))
               Text("Please do not refresh or press back.", fontSize = 11.sp, color = Color(0xFF94A3B8))
             }
           }
@@ -638,14 +636,14 @@ fun SimulatedPaymentGatewayDialog(
             verticalArrangement = Arrangement.spacedBy(12.dp)
           ) {
             Box(
-              modifier = Modifier.size(56.dp).clip(CircleShape).background(Color(0xFFDCFCE7)),
+              modifier = Modifier.size(56.dp).clip(CircleShape).background(Color(0xFF064E3B)),
               contentAlignment = Alignment.Center
             ) {
-              Icon(Icons.Default.Check, contentDescription = null, tint = Color(0xFF15803D), modifier = Modifier.size(32.dp))
+              Icon(Icons.Default.Check, contentDescription = null, tint = Color(0xFF4ADE80), modifier = Modifier.size(32.dp))
             }
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-              Text("₹$amount Received Successfully", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color(0xFF15803D))
-              Text("Tuition fee ledger updated. Receipt generated.", fontSize = 11.sp, color = Color(0xFF64748B))
+              Text("₹$amount Received Successfully", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color(0xFF4ADE80))
+              Text("Tuition fee ledger updated. Receipt generated.", fontSize = 11.sp, color = Color(0xFF94A3B8))
             }
           }
         }
@@ -655,7 +653,7 @@ fun SimulatedPaymentGatewayDialog(
       if (paymentStep == 0) {
         Button(
           onClick = { paymentStep = 1 },
-          colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF15803D)),
+          colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7)),
           shape = RoundedCornerShape(12.dp),
           modifier = Modifier.fillMaxWidth()
         ) {
@@ -664,7 +662,7 @@ fun SimulatedPaymentGatewayDialog(
       } else if (paymentStep == 2) {
         Button(
           onClick = { onDismiss() },
-          colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF15803D)),
+          colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7)),
           shape = RoundedCornerShape(12.dp),
           modifier = Modifier.fillMaxWidth()
         ) {
@@ -675,7 +673,7 @@ fun SimulatedPaymentGatewayDialog(
     dismissButton = {
       if (paymentStep == 0) {
         TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) {
-          Text("Cancel Process")
+          Text("Cancel Process", color = Color(0xFF94A3B8))
         }
       }
     },
@@ -694,8 +692,8 @@ fun ParentReceiptDialog(
     onDismissRequest = onDismiss,
     title = {
       Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Icon(Icons.Default.ReceiptLong, contentDescription = null, tint = Color(0xFF15803D))
-        Text("Digital Payment Receipt", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+        Icon(Icons.Default.ReceiptLong, contentDescription = null, tint = Color(0xFF4ADE80))
+        Text("Digital Payment Receipt", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color(0xFFF8FAFC))
       }
     },
     text = {
@@ -703,44 +701,44 @@ fun ParentReceiptDialog(
         modifier = Modifier
           .fillMaxWidth()
           .clip(RoundedCornerShape(12.dp))
-          .background(Color(0xFFF8FAFC))
-          .border(1.dp, Color(0xFFE2E8F0), RoundedCornerShape(12.dp))
+          .background(Color(0xFF0D1526))
+          .border(1.dp, Color(0xFF1E2D42), RoundedCornerShape(12.dp))
           .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
       ) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-          Text("Receipt No:", fontSize = 11.sp, color = Color(0xFF64748B))
-          Text("REC-${System.currentTimeMillis().toString().takeLast(8).uppercase()}", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))
+          Text("Receipt No:", fontSize = 11.sp, color = Color(0xFF94A3B8))
+          Text("REC-${System.currentTimeMillis().toString().takeLast(8).uppercase()}", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF38BDF8))
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-          Text("Date & Time:", fontSize = 11.sp, color = Color(0xFF64748B))
-          Text(AppRepository.getCurrentDateStr() + " • Online", fontSize = 11.sp, color = Color(0xFF0F172A))
+          Text("Date & Time:", fontSize = 11.sp, color = Color(0xFF94A3B8))
+          Text(AppRepository.getCurrentDateStr() + " • Online", fontSize = 11.sp, color = Color(0xFFF8FAFC))
         }
-        HorizontalDivider(color = Color(0xFFE2E8F0))
+        HorizontalDivider(color = Color(0xFF1E2D42))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-          Text("Student Name:", fontSize = 12.sp, color = Color(0xFF64748B))
-          Text(feeRecord.studentName, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))
-        }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-          Text("Session Term:", fontSize = 12.sp, color = Color(0xFF64748B))
-          Text(feeRecord.month, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF475569))
-        }
-        HorizontalDivider(color = Color(0xFFE2E8F0))
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-          Text("Total Installment:", fontSize = 12.sp, color = Color(0xFF64748B))
-          Text("₹${feeRecord.feeAmount}", fontSize = 12.sp, color = Color(0xFF0F172A))
+          Text("Student Name:", fontSize = 12.sp, color = Color(0xFF94A3B8))
+          Text(feeRecord.studentName, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFFF8FAFC))
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-          Text("Amount Paid:", fontSize = 13.sp, color = Color(0xFF15803D), fontWeight = FontWeight.Bold)
-          Text("₹$payAmt", fontSize = 13.sp, fontWeight = FontWeight.ExtraBold, color = Color(0xFF15803D))
+          Text("Session Term:", fontSize = 12.sp, color = Color(0xFF94A3B8))
+          Text(feeRecord.month, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFFCBD5E1))
+        }
+        HorizontalDivider(color = Color(0xFF1E2D42))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+          Text("Total Installment:", fontSize = 12.sp, color = Color(0xFF94A3B8))
+          Text("₹${feeRecord.feeAmount}", fontSize = 12.sp, color = Color(0xFFF8FAFC))
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-          Text("Current Balance:", fontSize = 12.sp, color = Color(0xFFB91C1C))
-          Text("₹${(feeRecord.pendingAmount).coerceAtLeast(0)}", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFFB91C1C))
+          Text("Amount Paid:", fontSize = 13.sp, color = Color(0xFF4ADE80), fontWeight = FontWeight.Bold)
+          Text("₹$payAmt", fontSize = 13.sp, fontWeight = FontWeight.ExtraBold, color = Color(0xFF4ADE80))
+        }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+          Text("Current Balance:", fontSize = 12.sp, color = Color(0xFFF87171))
+          Text("₹${(feeRecord.pendingAmount).coerceAtLeast(0)}", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFFF87171))
         }
         Spacer(modifier = Modifier.height(4.dp))
         Surface(
-          color = Color(0xFFDCFCE7),
+          color = Color(0xFF064E3B),
           shape = RoundedCornerShape(8.dp),
           modifier = Modifier.align(Alignment.CenterHorizontally)
         ) {
@@ -748,7 +746,7 @@ fun ParentReceiptDialog(
             "ONLINE PAYMENT VERIFIED",
             fontSize = 10.sp,
             fontWeight = FontWeight.ExtraBold,
-            color = Color(0xFF15803D),
+            color = Color(0xFF6EE7B7),
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
           )
         }
@@ -757,7 +755,7 @@ fun ParentReceiptDialog(
     confirmButton = {
       Button(
         onClick = onDismiss,
-        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF15803D)),
+        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7)),
         shape = RoundedCornerShape(12.dp),
         modifier = Modifier.fillMaxWidth()
       ) {

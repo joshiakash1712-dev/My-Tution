@@ -11,6 +11,7 @@ object SeedData {
   )
 
   val defaultBatches = listOf(
+    Batch("BATCH_8TH", "8th Standard", "07:30 AM – 09:00 AM", 28, "Prof. Joshi"),
     batch10thSciA,
     Batch("BATCH_11_SCI_B", "11th - Science (B)", "09:45 AM – 11:15 AM", 32, "Prof. Patil"),
     Batch("BATCH_JEE_APEX_M", "JEE Apex Morning", "11:30 AM – 01:00 PM", 52, "Er. Kulkarni"),
@@ -547,21 +548,93 @@ object SeedData {
   }
 
   fun getDefaultFeeRecords(): List<FeeRecord> {
-    return get12thScienceStudents().take(20).mapIndexed { idx, stu ->
-      val fee = 45000
-      val paid = if (idx % 2 == 0) 45000 else 25000
-      val pending = fee - paid
+    val demoStudents = get15DemoStudents()
+    return demoStudents.mapIndexed { idx, stu ->
+      val monthlyFee = 6400
+      val (paid, status, dueDate) = when {
+        idx < 10 -> Triple(6400, "Paid", "10/08/2026")
+        idx < 13 -> Triple(3200, "Pending", "15/08/2026")
+        else -> Triple(0, "Overdue", "05/08/2026")
+      }
+      val pending = monthlyFee - paid
       FeeRecord(
-        id = "F_12S_${idx + 1}",
+        id = "F_2026_AUG_${idx + 1}",
         studentName = stu.name,
-        feeAmount = fee,
-        dueDate = "05/08/2026",
+        feeAmount = monthlyFee,
+        dueDate = dueDate,
         paidAmount = paid,
         pendingAmount = pending,
-        paymentStatus = if (pending == 0) "Paid" else "Pending",
-        month = "July 2026"
+        paymentStatus = status,
+        month = "August 2026"
       )
     }
+  }
+
+  fun getDefaultFeePayments(): List<StudentFeePayment> {
+    val monthsData = listOf(
+      "April 2026" to listOf(
+        Triple("10/04/2026", 28000.0, "Paid"),
+        Triple("18/04/2026", 32000.0, "Paid"),
+        Triple("26/04/2026", 24000.0, "Paid"),
+        Triple("30/04/2026", 12000.0, "Pending")
+      ),
+      "May 2026" to listOf(
+        Triple("06/05/2026", 32000.0, "Paid"),
+        Triple("16/05/2026", 35000.0, "Paid"),
+        Triple("24/05/2026", 25000.0, "Paid"),
+        Triple("31/05/2026", 4000.0, "Pending")
+      ),
+      "June 2026" to listOf(
+        Triple("05/06/2026", 45000.0, "Paid"),
+        Triple("15/06/2026", 42000.0, "Paid"),
+        Triple("28/06/2026", 25000.0, "Paid"),
+        Triple("30/06/2026", 8000.0, "Pending")
+      ),
+      "July 2026" to listOf(
+        Triple("08/07/2026", 30000.0, "Paid"),
+        Triple("18/07/2026", 32000.0, "Paid"),
+        Triple("28/07/2026", 26000.0, "Paid"),
+        Triple("31/07/2026", 8000.0, "Pending")
+      ),
+      "August 2026" to listOf(
+        Triple("04/08/2026", 34000.0, "Paid"),
+        Triple("12/08/2026", 26000.0, "Paid"),
+        Triple("20/08/2026", 13600.0, "Paid"),
+        Triple("22/08/2026", 9600.0, "Pending"),
+        Triple("25/08/2026", 12800.0, "Overdue")
+      )
+    )
+    val modes = listOf("UPI", "Cash", "Net Banking", "UPI", "Card")
+    val students = get15DemoStudents()
+    val payments = mutableListOf<StudentFeePayment>()
+    var pIdx = 0
+
+    monthsData.forEachIndexed { mIdx, (mth, transactions) ->
+      transactions.forEachIndexed { dIdx, (dateStr, amt, status) ->
+        val stu = students[pIdx % students.size]
+        val mode = modes[pIdx % modes.size]
+        
+        payments.add(
+          StudentFeePayment(
+            id = "PAY_2026_${1001 + pIdx}",
+            studentId = stu.id,
+            studentName = stu.name,
+            amount = amt,
+            paymentDate = dateStr,
+            paymentStatus = status,
+            feeType = if (pIdx % 3 == 0) "Monthly Tuition" else if (pIdx % 3 == 1) "Lab & Study Material" else "Installment 2",
+            paymentMode = mode,
+            receiptNo = "REC-2026-${1001 + pIdx}",
+            month = mth,
+            remarks = "Session 2026-27 tuition installment",
+            recordedBy = "Admin",
+            timestamp = System.currentTimeMillis() - ((4 - mIdx) * 30L * 86400000L) - (dIdx * 86400000L * 2)
+          )
+        )
+        pIdx++
+      }
+    }
+    return payments
   }
 
   fun getDefaultTestRecords(): List<TestRecord> {
@@ -580,6 +653,95 @@ object SeedData {
         aiAnalysisStrong = listOf("Electrostatics Field Calculations", "Nomenclature & Isomerism"),
         aiAnalysisWeak = listOf("Capacitance Edge Cases", "Reaction Mechanisms"),
         aiSuggestion = "Schedule 2 dedicated doubt clearance sessions on Capacitance for 12th Science batch."
+      )
+    )
+  }
+
+  fun getDefaultTimetableEntries(): List<DynamicTimetableEntry> {
+    val now = System.currentTimeMillis()
+    return listOf(
+      // Active entries (within 23 hours)
+      DynamicTimetableEntry(
+        id = "DTT_SEED_01",
+        subject = "Physics • Wave Optics & Interference",
+        batch = "11th Science",
+        startTime = "02:00 PM",
+        endTime = "03:30 PM",
+        createdAt = now - (2 * 60 * 60 * 1000L), // 2 hours ago -> 21 hours left
+        teacherName = "Prof. Patil"
+      ),
+      DynamicTimetableEntry(
+        id = "DTT_SEED_02",
+        subject = "Chemistry • Organic Reaction Mechanisms",
+        batch = "11th Science",
+        startTime = "03:45 PM",
+        endTime = "05:15 PM",
+        createdAt = now - (2 * 60 * 60 * 1000L),
+        teacherName = "Prof. Deshmukh"
+      ),
+      DynamicTimetableEntry(
+        id = "DTT_SEED_03",
+        subject = "Mathematics • Advanced Calculus & Limits",
+        batch = "JEE Apex Morning",
+        startTime = "11:30 AM",
+        endTime = "01:00 PM",
+        createdAt = now - (4 * 60 * 60 * 1000L), // 4 hours ago -> 19 hours left
+        teacherName = "Er. Kulkarni"
+      ),
+      DynamicTimetableEntry(
+        id = "DTT_SEED_04",
+        subject = "Physics • Modern Physics & Quantum Mechanics",
+        batch = "12th Science",
+        startTime = "08:00 AM",
+        endTime = "09:30 AM",
+        createdAt = now - (6 * 60 * 60 * 1000L), // 6 hours ago -> 17 hours left
+        teacherName = "Prof. Shrirang Deshmukh"
+      ),
+      DynamicTimetableEntry(
+        id = "DTT_SEED_05",
+        subject = "Mathematics • Linear Equations & Graphing",
+        batch = "8th Standard",
+        startTime = "07:30 AM",
+        endTime = "09:00 AM",
+        createdAt = now - (3 * 60 * 60 * 1000L), // 3 hours ago -> 20 hours left
+        teacherName = "Prof. Joshi"
+      ),
+      DynamicTimetableEntry(
+        id = "DTT_SEED_06",
+        subject = "Biology • Genetics & Molecular Inheritance",
+        batch = "NEET Zenith",
+        startTime = "08:00 AM",
+        endTime = "09:30 AM",
+        createdAt = now - (5 * 60 * 60 * 1000L), // 5 hours ago -> 18 hours left
+        teacherName = "Dr. Shinde"
+      ),
+      // Archived entries (strictly > 23 hours ago, permanently stored in database)
+      DynamicTimetableEntry(
+        id = "DTT_SEED_ARCHIVE_01",
+        subject = "Physics • Ray Optics Numerical Drill",
+        batch = "12th Science",
+        startTime = "08:00 AM",
+        endTime = "09:30 AM",
+        createdAt = now - (26 * 60 * 60 * 1000L), // 26 hours ago -> Archived
+        teacherName = "Prof. Shrirang Deshmukh"
+      ),
+      DynamicTimetableEntry(
+        id = "DTT_SEED_ARCHIVE_02",
+        subject = "Mathematics • Vectors & 3D Geometry PYQs",
+        batch = "JEE Apex Morning",
+        startTime = "11:30 AM",
+        endTime = "01:00 PM",
+        createdAt = now - (28 * 60 * 60 * 1000L), // 28 hours ago -> Archived
+        teacherName = "Er. Kulkarni"
+      ),
+      DynamicTimetableEntry(
+        id = "DTT_SEED_ARCHIVE_03",
+        subject = "Science • Force & Pressure Practical Concepts",
+        batch = "8th Standard",
+        startTime = "07:30 AM",
+        endTime = "09:00 AM",
+        createdAt = now - (48 * 60 * 60 * 1000L), // 48 hours ago -> Archived
+        teacherName = "Prof. Joshi"
       )
     )
   }

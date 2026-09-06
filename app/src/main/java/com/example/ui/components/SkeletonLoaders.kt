@@ -19,9 +19,9 @@ import androidx.compose.ui.unit.dp
 @Composable
 fun shimmerBrush(targetValue: Float = 1000f): Brush {
   val shimmerColors = listOf(
-    Color(0xFFE2E8F0),
-    Color(0xFFEEF2F6),
-    Color(0xFFE2E8F0)
+    Color(0xFF111C2E),
+    Color(0xFF1E2D42),
+    Color(0xFF111C2E)
   )
 
   val transition = rememberInfiniteTransition(label = "shimmer")
@@ -59,8 +59,8 @@ fun StudentProfileSkeleton() {
   Card(
     modifier = Modifier
       .fillMaxWidth()
-      .border(1.dp, Color(0xFFE2E8F0), RoundedCornerShape(16.dp)),
-    colors = CardDefaults.cardColors(containerColor = Color.White),
+      .border(1.dp, Color(0xFF1E2D42), RoundedCornerShape(16.dp)),
+    colors = CardDefaults.cardColors(containerColor = Color(0xFF0D1526)),
     shape = RoundedCornerShape(16.dp)
   ) {
     Column(modifier = Modifier.padding(16.dp)) {
@@ -152,8 +152,8 @@ fun AttendanceRecordSkeleton() {
   Card(
     modifier = Modifier
       .fillMaxWidth()
-      .border(1.dp, Color(0xFFE2E8F0), RoundedCornerShape(16.dp)),
-    colors = CardDefaults.cardColors(containerColor = Color.White),
+      .border(1.dp, Color(0xFF1E2D42), RoundedCornerShape(16.dp)),
+    colors = CardDefaults.cardColors(containerColor = Color(0xFF0D1526)),
     shape = RoundedCornerShape(16.dp)
   ) {
     Column(modifier = Modifier.padding(14.dp)) {
@@ -175,7 +175,7 @@ fun AttendanceRecordSkeleton() {
         ShimmerBox(modifier = Modifier.width(90.dp).height(20.dp), shape = RoundedCornerShape(8.dp))
       }
       
-      HorizontalDivider(color = Color(0xFFE2E8F0), modifier = Modifier.padding(vertical = 10.dp))
+      HorizontalDivider(color = Color(0xFF1E2D42), modifier = Modifier.padding(vertical = 10.dp))
       
       Row(
         modifier = Modifier.fillMaxWidth(),

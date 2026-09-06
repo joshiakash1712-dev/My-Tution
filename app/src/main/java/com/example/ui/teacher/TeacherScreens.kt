@@ -67,23 +67,27 @@ fun TeacherDashboardTab(
 
     AlertDialog(
       onDismissRequest = { showTeacherAnnouncementDialog = false },
+      containerColor = Color(0xFF111C2E),
+      titleContentColor = Color.White,
+      textContentColor = Color(0xFF94A3B8),
       title = {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-          Icon(Icons.Default.Campaign, contentDescription = null, tint = Color(0xFF0061A4))
-          Text("Send Class Announcement", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+          Icon(Icons.Default.Campaign, contentDescription = null, tint = Color(0xFF38BDF8))
+          Text("Send Class Announcement", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color.White)
         }
       },
       text = {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
           if (announcementSentNotice != null) {
             Surface(
-              color = Color(0xFFDCFCE7),
+              color = Color(0xFF064E3B),
+              border = BorderStroke(1.dp, Color(0xFF059669)),
               shape = RoundedCornerShape(8.dp),
               modifier = Modifier.fillMaxWidth()
             ) {
               Text(
                 announcementSentNotice!!,
-                color = Color(0xFF15803D),
+                color = Color(0xFF4ADE80),
                 fontSize = 12.sp,
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier.padding(10.dp)
@@ -91,7 +95,7 @@ fun TeacherDashboardTab(
             }
           }
 
-          Text("Target Audience:", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF475569))
+          Text("Target Audience:", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFFCBD5E1))
           Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -99,10 +103,10 @@ fun TeacherDashboardTab(
             listOf("Everyone", "Parents Only", "Teachers Only").forEach { aud ->
               val isSelected = selectedAudience == aud
               Surface(
-                color = if (isSelected) Color(0xFF0061A4) else Color(0xFFF1F5F9),
-                contentColor = if (isSelected) Color.White else Color(0xFF334155),
+                color = if (isSelected) Color(0xFF0284C7) else Color(0xFF0D1526),
+                contentColor = if (isSelected) Color.White else Color(0xFF94A3B8),
                 shape = RoundedCornerShape(8.dp),
-                border = BorderStroke(1.dp, if (isSelected) Color(0xFF004D84) else Color(0xFFE2E8F0)),
+                border = BorderStroke(1.dp, if (isSelected) Color(0xFF38BDF8) else Color(0xFF1E2D42)),
                 modifier = Modifier
                   .weight(1f)
                   .clickable { selectedAudience = aud }
@@ -127,18 +131,19 @@ fun TeacherDashboardTab(
             }
           }
 
-          Text("Select Batch / Class:", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF475569))
+          Text("Select Batch / Class:", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFFCBD5E1))
           ScrollableTabRow(
             selectedTabIndex = (listOf("All Batches") + batches.map { it.name }).indexOf(selectedBatchForAnnc).coerceAtLeast(0),
             edgePadding = 0.dp,
-            containerColor = Color(0xFFF1F5F9),
+            containerColor = Color(0xFF0D1526),
+            contentColor = Color(0xFF38BDF8),
             modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp))
           ) {
             (listOf("All Batches") + batches.map { it.name }).forEach { bName ->
               Tab(
                 selected = selectedBatchForAnnc == bName,
                 onClick = { selectedBatchForAnnc = bName },
-                text = { Text(bName, fontSize = 11.sp, fontWeight = FontWeight.Bold) }
+                text = { Text(bName, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = if (selectedBatchForAnnc == bName) Color(0xFF38BDF8) else Color(0xFF94A3B8)) }
               )
             }
           }
@@ -146,8 +151,8 @@ fun TeacherDashboardTab(
           OutlinedTextField(
             value = anncTitle,
             onValueChange = { anncTitle = it },
-            label = { Text("Announcement Title") },
-            placeholder = { Text("e.g. Physics Extra Class Tomorrow") },
+            label = { Text("Announcement Title", color = Color(0xFF94A3B8)) },
+            placeholder = { Text("e.g. Physics Extra Class Tomorrow", color = Color(0xFF64748B)) },
             singleLine = true,
             modifier = Modifier.fillMaxWidth()
           )
@@ -155,8 +160,8 @@ fun TeacherDashboardTab(
           OutlinedTextField(
             value = anncMessage,
             onValueChange = { anncMessage = it },
-            label = { Text("Announcement Details") },
-            placeholder = { Text("Enter detailed notes or instructions for $selectedAudience...") },
+            label = { Text("Announcement Details", color = Color(0xFF94A3B8)) },
+            placeholder = { Text("Enter detailed notes or instructions for $selectedAudience...", color = Color(0xFF64748B)) },
             maxLines = 4,
             modifier = Modifier.fillMaxWidth()
           )
@@ -188,7 +193,7 @@ fun TeacherDashboardTab(
             }
           },
           shape = RoundedCornerShape(10.dp),
-          colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0061A4))
+          colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7))
         ) {
           Icon(Icons.Default.CloudUpload, contentDescription = null, modifier = Modifier.size(16.dp))
           Spacer(Modifier.width(6.dp))
@@ -197,7 +202,7 @@ fun TeacherDashboardTab(
       },
       dismissButton = {
         TextButton(onClick = { showTeacherAnnouncementDialog = false }) {
-          Text("Close")
+          Text("Close", color = Color(0xFF94A3B8))
         }
       }
     )
@@ -234,8 +239,8 @@ fun TeacherDashboardTab(
         modifier = Modifier
           .fillMaxWidth()
           .clickable { showTeacherAnnouncementDialog = true },
-        colors = CardDefaults.cardColors(containerColor = Color(0xFFEFF6FF)),
-        border = BorderStroke(1.dp, Color(0xFFBFDBFE)),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF111C2E)),
+        border = BorderStroke(1.dp, Color(0xFF1E2D42)),
         shape = RoundedCornerShape(16.dp)
       ) {
         Row(
@@ -247,16 +252,16 @@ fun TeacherDashboardTab(
             modifier = Modifier
               .size(44.dp)
               .clip(CircleShape)
-              .background(Color(0xFF0061A4)),
+              .background(Color(0xFF0284C7)),
             contentAlignment = Alignment.Center
           ) {
             Icon(Icons.Default.Campaign, contentDescription = null, tint = Color.White, modifier = Modifier.size(24.dp))
           }
           Column(modifier = Modifier.weight(1f)) {
-            Text("Send Class Announcement", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = Color(0xFF1E3A8A))
-            Text("Broadcast instant push notifications & alerts to your batches", fontSize = 12.sp, color = Color(0xFF3B82F6))
+            Text("Send Class Announcement", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = Color(0xFFF8FAFC))
+            Text("Broadcast instant push notifications & alerts to your batches", fontSize = 12.sp, color = Color(0xFF94A3B8))
           }
-          Icon(Icons.Default.ChevronRight, contentDescription = null, tint = Color(0xFF0061A4))
+          Icon(Icons.Default.ChevronRight, contentDescription = null, tint = Color(0xFF38BDF8))
         }
       }
     }
@@ -266,7 +271,11 @@ fun TeacherDashboardTab(
       GeoSectionCard(title = "Today's Schedule (Monday)") {
         val todaySchedule = timetable.filter { it.day.equals("Monday", true) }
         if (todaySchedule.isEmpty()) {
-          Text("No classes today", fontStyle = androidx.compose.ui.text.font.FontStyle.Italic, color = Color(0xFF74777F))
+          DashboardEmptyStates.TodaysSchedule(
+            onScheduleClass = { onTabChange(3) }, // Switch to Timetable tab
+            onAcademicSetup = null,
+            modifier = Modifier.padding(vertical = 4.dp)
+          )
         } else {
           Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             todaySchedule.forEach { cl ->
@@ -376,84 +385,11 @@ fun TeacherDashboardTab(
 
 @Composable
 fun TeacherAttendanceTab(students: List<Student>, batches: List<Batch>) {
-  var selectedTabState by remember { mutableStateOf(0) } // 0 = Take Attendance, 1 = History & Edit Logs
-  val liveAttendanceList by AppRepository.attendance.collectAsState()
-  val currentDateStr = AppRepository.getCurrentDateStr()
-
-  var showReasonDialogForStudent by remember { mutableStateOf<Student?>(null) }
-  var selectedReasonBatch by remember { mutableStateOf("") }
-
-  if (showReasonDialogForStudent != null) {
-    val stu = showReasonDialogForStudent!!
-    var selectedReasonOption by remember { mutableStateOf("Medical Leave") }
-    var customReasonText by remember { mutableStateOf("") }
-    val reasons = listOf("Medical Leave", "Family Outing", "Exam Prep", "Weather / Rain", "Other")
-
-    AlertDialog(
-      onDismissRequest = { showReasonDialogForStudent = null },
-      title = { Text("Reason for Absence: ${stu.name}", fontWeight = FontWeight.Bold, fontSize = 16.sp) },
-      text = {
-        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-          Text("Select predefined reason or enter custom text below:", fontSize = 12.sp, color = Color(0xFF64748B))
-          Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            reasons.take(3).forEach { opt ->
-              val isSel = selectedReasonOption == opt
-              Surface(
-                color = if (isSel) Color(0xFFEFF6FF) else Color(0xFFF1F5F9),
-                border = androidx.compose.foundation.BorderStroke(1.dp, if (isSel) Color(0xFF0061A4) else Color.Transparent),
-                shape = RoundedCornerShape(8.dp),
-                modifier = Modifier.clickable { selectedReasonOption = opt }.weight(1f)
-              ) {
-                Text(opt, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
-              }
-            }
-          }
-          Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            reasons.drop(3).forEach { opt ->
-              val isSel = selectedReasonOption == opt
-              Surface(
-                color = if (isSel) Color(0xFFEFF6FF) else Color(0xFFF1F5F9),
-                border = androidx.compose.foundation.BorderStroke(1.dp, if (isSel) Color(0xFF0061A4) else Color.Transparent),
-                shape = RoundedCornerShape(8.dp),
-                modifier = Modifier.clickable { selectedReasonOption = opt }.weight(1f)
-              ) {
-                Text(opt, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
-              }
-            }
-          }
-
-          if (selectedReasonOption == "Other") {
-            OutlinedTextField(
-              value = customReasonText,
-              onValueChange = { customReasonText = it },
-              label = { Text("Enter Custom Reason") },
-              modifier = Modifier.fillMaxWidth(),
-              singleLine = true
-            )
-          }
-        }
-      },
-      confirmButton = {
-        TextButton(
-          onClick = {
-            val finalReason = if (selectedReasonOption == "Other") customReasonText else selectedReasonOption
-            AppRepository.saveSingleAttendance(stu.id, stu.name, selectedReasonBatch, currentDateStr, "Absent", finalReason)
-            showReasonDialogForStudent = null
-          }
-        ) {
-          Text("Mark Absent", fontWeight = FontWeight.Bold, color = Color(0xFFEF4444))
-        }
-      },
-      dismissButton = {
-        TextButton(onClick = { showReasonDialogForStudent = null }) {
-          Text("Cancel")
-        }
-      }
-    )
-  }
+  var selectedTabState by remember { mutableStateOf(0) } // 0 = Daily Register, 1 = Card Flow, 2 = Attendance History & Monthly Analytics
+  val currentUserId by AppRepository.currentUserIdentifier.collectAsState()
 
   Column(modifier = Modifier.fillMaxSize()) {
-    // Top Tabs: Mark Attendance vs. Logs (Scrollable to prevent squished texts on mobile)
+    // Top Tabs: Daily Register vs Card Flow vs Attendance History
     ScrollableTabRow(
       selectedTabIndex = selectedTabState,
       containerColor = MaterialTheme.colorScheme.surface,
@@ -464,30 +400,46 @@ fun TeacherAttendanceTab(students: List<Student>, batches: List<Batch>) {
       Tab(
         selected = selectedTabState == 0,
         onClick = { selectedTabState = 0 },
-        text = { Text("Take Attendance", fontWeight = FontWeight.Bold, fontSize = 13.sp) },
-        icon = { Icon(imageVector = Icons.Default.HowToReg, contentDescription = "Take Attendance Icon", modifier = Modifier.size(18.dp)) }
+        text = { Text("Daily Register", fontWeight = FontWeight.Bold, fontSize = 13.sp) },
+        icon = { Icon(imageVector = Icons.Default.FactCheck, contentDescription = "Daily Register Icon", modifier = Modifier.size(18.dp)) }
       )
       Tab(
         selected = selectedTabState == 1,
         onClick = { selectedTabState = 1 },
-        text = { Text("History & Edit Logs", fontWeight = FontWeight.Bold, fontSize = 13.sp) },
+        text = { Text("Card Flow", fontWeight = FontWeight.Bold, fontSize = 13.sp) },
+        icon = { Icon(imageVector = Icons.Default.HowToReg, contentDescription = "Card Flow Icon", modifier = Modifier.size(18.dp)) }
+      )
+      Tab(
+        selected = selectedTabState == 2,
+        onClick = { selectedTabState = 2 },
+        text = { Text("Attendance History", fontWeight = FontWeight.Bold, fontSize = 13.sp) },
         icon = { Icon(imageVector = Icons.Default.History, contentDescription = "History Icon", modifier = Modifier.size(18.dp)) }
       )
     }
 
-    if (selectedTabState == 0) {
-      // 1. MARK ATTENDANCE SUB-TAB (Redesigned One-Student-at-a-Time Flow)
-      TakeAttendanceWorkflow(
-        onFinishWorkflow = { selectedTabState = 1 },
-        onOpenHistoryLogs = { selectedTabState = 1 }
-      )
-    } else {
-      // 2. ATTENDANCE HISTORY & EDIT LOGS (Day/Month/Year filtering, 22-Hour edit window, Room DB)
-      val currentUserId by AppRepository.currentUserIdentifier.collectAsState()
-      com.example.ui.attendance.AttendanceHistoryView(
-        currentUserRole = "Teacher",
-        currentUserId = currentUserId.ifBlank { "teacher_fsi" }
-      )
+    when (selectedTabState) {
+      0 -> {
+        // 1. FAST DAILY ROLL CALL REGISTER (Room Database Daily Attendance)
+        com.example.ui.attendance.DailyAttendanceRegister(
+          currentUserRole = "Teacher",
+          currentUserId = currentUserId.ifBlank { "teacher_fsi" },
+          onNavigateToHistory = { selectedTabState = 2 }
+        )
+      }
+      1 -> {
+        // 2. GUIDED CARD-SWIPE ATTENDANCE WORKFLOW
+        TakeAttendanceWorkflow(
+          onFinishWorkflow = { selectedTabState = 2 },
+          onOpenHistoryLogs = { selectedTabState = 2 }
+        )
+      }
+      else -> {
+        // 3. ATTENDANCE HISTORY & MONTHLY SUMMARY (Day/Month/Year filtering, 22-Hour edit window, Room DB)
+        com.example.ui.attendance.AttendanceHistoryView(
+          currentUserRole = "Teacher",
+          currentUserId = currentUserId.ifBlank { "teacher_fsi" }
+        )
+      }
     }
   }
 }
@@ -573,26 +525,63 @@ fun TeacherTestsTab(tests: List<TestRecord>, students: List<Student>) {
             horizontalArrangement = Arrangement.spacedBy(10.dp)
           ) {
             Column(
-              modifier = Modifier.weight(1f).clip(RoundedCornerShape(12.dp)).background(Color(0xFFEFF6FF)).padding(10.dp),
+              modifier = Modifier.weight(1f).clip(RoundedCornerShape(12.dp)).background(Color(0xFF182438)).border(1.dp, Color(0xFF1E2D42), RoundedCornerShape(12.dp)).padding(10.dp),
               horizontalAlignment = Alignment.CenterHorizontally
             ) {
-              Text("Class Avg", fontSize = 11.sp, color = Color(0xFF64748B))
-              Text("$classAverage / ${selectedTest!!.totalMarks}", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0061A4))
+              Text("Class Avg", fontSize = 11.sp, color = Color(0xFF94A3B8))
+              Text("$classAverage / ${selectedTest!!.totalMarks}", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF38BDF8))
             }
             Column(
-              modifier = Modifier.weight(1f).clip(RoundedCornerShape(12.dp)).background(Color(0xFFDCFCE7)).padding(10.dp),
+              modifier = Modifier.weight(1f).clip(RoundedCornerShape(12.dp)).background(Color(0xFF064E3B)).border(1.dp, Color(0xFF047857), RoundedCornerShape(12.dp)).padding(10.dp),
               horizontalAlignment = Alignment.CenterHorizontally
             ) {
-              Text("Highest Score", fontSize = 11.sp, color = Color(0xFF64748B))
-              Text("$maxScore / ${selectedTest!!.totalMarks}", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF15803D))
+              Text("Highest Score", fontSize = 11.sp, color = Color(0xFF6EE7B7))
+              Text("$maxScore / ${selectedTest!!.totalMarks}", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF4ADE80))
             }
             Column(
-              modifier = Modifier.weight(1f).clip(RoundedCornerShape(12.dp)).background(Color(0xFFFEE2E2)).padding(10.dp),
+              modifier = Modifier.weight(1f).clip(RoundedCornerShape(12.dp)).background(Color(0xFF450A0A)).border(1.dp, Color(0xFF991B1B), RoundedCornerShape(12.dp)).padding(10.dp),
               horizontalAlignment = Alignment.CenterHorizontally
             ) {
-              Text("Lowest Score", fontSize = 11.sp, color = Color(0xFF64748B))
-              Text("$minScore / ${selectedTest!!.totalMarks}", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFFB91C1C))
+              Text("Lowest Score", fontSize = 11.sp, color = Color(0xFFFCA5A5))
+              Text("$minScore / ${selectedTest!!.totalMarks}", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFFF87171))
             }
+          }
+        }
+      }
+
+      item {
+        var inspectedStudent by remember(students) { mutableStateOf(students.firstOrNull()) }
+
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+          Text("Individual Learner Progression", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color(0xFFF8FAFC))
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+          ) {
+            students.take(5).forEach { st ->
+              val isSel = inspectedStudent?.id == st.id
+              Surface(
+                color = if (isSel) Color(0xFF0284C7) else Color(0xFF182438),
+                shape = RoundedCornerShape(8.dp),
+                border = BorderStroke(1.dp, if (isSel) Color(0xFF38BDF8) else Color(0xFF1E2D42)),
+                modifier = Modifier.clickable { inspectedStudent = st }
+              ) {
+                Text(
+                  st.name.take(12),
+                  fontSize = 11.sp,
+                  fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal,
+                  color = if (isSel) Color.White else Color(0xFF94A3B8),
+                  modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                )
+              }
+            }
+          }
+
+          if (inspectedStudent != null) {
+            StudentGradeProgressDashboard(
+              student = inspectedStudent!!,
+              tests = tests
+            )
           }
         }
       }
@@ -683,15 +672,15 @@ fun TeacherWeeklyTimetableList(timetable: List<TimetableItem>) {
           modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(20.dp))
-            .background(if (isThisDay) Color(0xFFD1E4FF) else Color.White)
-            .border(1.dp, if (isThisDay) Color(0xFF0061A4) else Color(0xFFEEF0F6), RoundedCornerShape(20.dp))
+            .background(if (isThisDay) Color(0xFF182438) else Color(0xFF111C2E))
+            .border(1.dp, if (isThisDay) Color(0xFF38BDF8) else Color(0xFF1E2D42), RoundedCornerShape(20.dp))
             .padding(16.dp),
           verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
           Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text(dayName.uppercase(), fontWeight = FontWeight.Bold, fontSize = 13.sp, color = if (isThisDay) Color(0xFF001D36) else MaterialTheme.colorScheme.onSurface)
+            Text(dayName.uppercase(), fontWeight = FontWeight.Bold, fontSize = 13.sp, color = if (isThisDay) Color(0xFF38BDF8) else Color(0xFFF8FAFC))
             if (isThisDay) {
-              Surface(color = Color(0xFF0061A4), shape = CircleShape) {
+              Surface(color = Color(0xFF0284C7), shape = CircleShape) {
                 Text("TODAY", fontSize = 9.sp, color = Color.White, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp))
               }
             }

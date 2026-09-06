@@ -1,5 +1,6 @@
 package com.example.ui.student
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -126,7 +127,15 @@ fun StudentDashboardTab(
       }
     }
 
-    // 4. Badges & Gamification Showcase
+    // 4. Recharts-based Visual Grade Progress Dashboard
+    item {
+      StudentGradeProgressDashboard(
+        student = student,
+        tests = tests
+      )
+    }
+
+    // 5. Badges & Gamification Showcase
     item {
       GeoSectionCard(title = "Earned Achievements (${badges.count { it.earned }})") {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -434,14 +443,15 @@ fun StudentOnlineTestTab() {
             }
             Spacer(Modifier.height(8.dp))
             Surface(
-              color = Color(0xFFEFF6FF),
+              color = Color(0xFF182438),
               shape = RoundedCornerShape(10.dp),
+              border = BorderStroke(1.dp, Color(0xFF1E2D42)),
               modifier = Modifier.fillMaxWidth()
             ) {
               Text(
                 text = explanation,
                 fontSize = 11.sp,
-                color = Color(0xFF0061A4),
+                color = Color(0xFF38BDF8),
                 modifier = Modifier.padding(10.dp),
                 fontStyle = androidx.compose.ui.text.font.FontStyle.Italic
               )
@@ -451,7 +461,7 @@ fun StudentOnlineTestTab() {
       }
 
       item {
-        Button(onClick = { testSubmitted = false }, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0061A4))) { Text("Back to Test Portal") }
+        Button(onClick = { testSubmitted = false }, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7))) { Text("Back to Test Portal") }
       }
     }
   }
@@ -472,12 +482,12 @@ fun StudentAiAssistantTab(student: Student) {
     Column(modifier = Modifier.weight(1f)) {
       Row(Modifier.fillMaxWidth().padding(bottom = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-          Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = Color(0xFF0061A4))
+          Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = Color(0xFF38BDF8))
           Spacer(Modifier.width(8.dp))
-          Text("Gemini Academic Assistant", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+          Text("Gemini Academic Assistant", fontWeight = FontWeight.Bold, fontSize = 18.sp, color = Color(0xFFF8FAFC))
         }
-        Surface(color = if (AiService.hasValidKey()) Color(0xFFD1F2D1) else Color(0xFFD1E4FF), shape = RoundedCornerShape(10.dp)) {
-          Text(if (AiService.hasValidKey()) "CLOUD GEMINI" else "HYBRID ENGINE", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Color(0xFF001D36), modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
+        Surface(color = if (AiService.hasValidKey()) Color(0xFF064E3B) else Color(0xFF182438), shape = RoundedCornerShape(10.dp), border = BorderStroke(1.dp, Color(0xFF1E2D42))) {
+          Text(if (AiService.hasValidKey()) "CLOUD GEMINI" else "HYBRID ENGINE", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = if (AiService.hasValidKey()) Color(0xFF6EE7B7) else Color(0xFF38BDF8), modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
         }
       }
 
@@ -493,12 +503,13 @@ fun StudentAiAssistantTab(student: Student) {
               modifier = Modifier
                 .fillMaxWidth(0.85f)
                 .clip(RoundedCornerShape(20.dp))
-                .background(if (isUser) Color(0xFF0061A4) else Color(0xFFD1E4FF))
+                .background(if (isUser) Color(0xFF0284C7) else Color(0xFF111C2E))
+                .border(1.dp, if (isUser) Color(0xFF38BDF8) else Color(0xFF1E2D42), RoundedCornerShape(20.dp))
                 .padding(14.dp)
             ) {
               Text(
                 text = if (isUser) msg.removePrefix("You: ") else msg,
-                color = if (isUser) Color.White else Color(0xFF001D36),
+                color = Color(0xFFF8FAFC),
                 fontSize = 13.sp
               )
             }
@@ -737,11 +748,16 @@ fun StudentStudyTrackerTab(studyLogs: List<StudyLogItem>, doubts: List<DoubtItem
 
           if (db.reply != null) {
             Spacer(Modifier.height(6.dp))
-            Surface(color = Color(0xFFD1F2D1), shape = RoundedCornerShape(10.dp), modifier = Modifier.fillMaxWidth()) {
+            Surface(
+              color = Color(0xFF064E3B),
+              shape = RoundedCornerShape(10.dp),
+              border = BorderStroke(1.dp, Color(0xFF047857)),
+              modifier = Modifier.fillMaxWidth()
+            ) {
               Text(
                 text = if (db.reply!!.startsWith("🤖")) db.reply!! else "✅ Faculty Reply: ${db.reply}",
                 fontSize = 12.sp,
-                color = Color(0xFF072711),
+                color = Color(0xFF6EE7B7),
                 modifier = Modifier.padding(10.dp)
               )
             }

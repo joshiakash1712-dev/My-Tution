@@ -24,6 +24,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.AppRepository
@@ -53,13 +54,13 @@ fun AttendanceHistoryView(
   var selectedYear by remember { mutableStateOf(todayCal.get(Calendar.YEAR)) }
   var filterBySpecificDate by remember { mutableStateOf(false) }
 
-  var searchQuery by remember { mutableStateOf("") }
   var selectedBatchFilter by remember { mutableStateOf("All") }
   var selectedStatusFilter by remember { mutableStateOf("All") }
   var systemFeedbackMsg by remember { mutableStateOf<String?>(null) }
   var showDatePickerDialog by remember { mutableStateOf(false) }
   var editingRecordForReason by remember { mutableStateOf<AttendanceRecord?>(null) }
   var customReasonText by remember { mutableStateOf("") }
+  var historySubSection by remember { mutableIntStateOf(0) } // 0 = Date / Daily Audit Logs, 1 = Monthly Summary & Analytics
 
   val monthNames = listOf(
     "Jan", "Feb", "Mar", "Apr", "May", "Jun",
@@ -71,7 +72,7 @@ fun AttendanceHistoryView(
     "July", "August", "September", "October", "November", "December"
   )
 
-  val yearsList = listOf(2024, 2025, 2026, 2027)
+  val yearsList = listOf(2023, 2024, 2025, 2026, 2027, 2028, 2029, 2030)
 
   // Max days in currently selected month/year
   val maxDaysInMonth = remember(selectedMonth, selectedYear) {
@@ -99,7 +100,6 @@ fun AttendanceHistoryView(
     selectedDay,
     selectedMonth,
     selectedYear,
-    searchQuery,
     selectedBatchFilter,
     selectedStatusFilter
   ) {
@@ -116,30 +116,21 @@ fun AttendanceHistoryView(
         }
       }
 
-      // 2. Search filter
-      val matchesSearch = if (searchQuery.isBlank()) {
-        true
-      } else {
-        record.studentName.contains(searchQuery, ignoreCase = true) ||
-          record.studentId.contains(searchQuery, ignoreCase = true) ||
-          record.batchName.contains(searchQuery, ignoreCase = true)
-      }
-
-      // 3. Batch filter
+      // 2. Batch filter
       val matchesBatch = if (selectedBatchFilter == "All") {
         true
       } else {
         record.batchName.equals(selectedBatchFilter, ignoreCase = true)
       }
 
-      // 4. Status filter
+      // 3. Status filter
       val matchesStatus = if (selectedStatusFilter == "All") {
         true
       } else {
         record.status.equals(selectedStatusFilter, ignoreCase = true)
       }
 
-      matchesDate && matchesSearch && matchesBatch && matchesStatus
+      matchesDate && matchesBatch && matchesStatus
     }.sortedByDescending { it.timestamp }
   }
 
@@ -147,69 +138,73 @@ fun AttendanceHistoryView(
   val totalCount = filteredRecords.size
   val presentCount = filteredRecords.count { it.status.equals("Present", ignoreCase = true) }
   val absentCount = filteredRecords.count { it.status.equals("Absent", ignoreCase = true) }
-  val lateCount = filteredRecords.count { it.status.equals("Late", ignoreCase = true) }
   val attendanceRate = if (totalCount > 0) ((presentCount.toFloat() / totalCount) * 100).toInt() else 0
 
-  LazyColumn(
-    modifier = modifier.fillMaxSize(),
-    contentPadding = PaddingValues(16.dp),
-    verticalArrangement = Arrangement.spacedBy(12.dp)
-  ) {
-    // 1. POLICY & REGULATION CARD (Rules 1 & 2)
-    item {
-      Card(
-        colors = CardDefaults.cardColors(
-          containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
-        ),
-        shape = RoundedCornerShape(16.dp),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)),
-        modifier = Modifier.fillMaxWidth()
+  Column(modifier = modifier.fillMaxSize()) {
+    // Top Sub-Navigation Strip inside Attendance History: Daily / Audit Logs vs Monthly Summary
+    Surface(
+      color = Color(0xFF0F172A),
+      modifier = Modifier.fillMaxWidth()
+    ) {
+      Row(
+        modifier = Modifier
+          .fillMaxWidth()
+          .padding(horizontal = 14.dp, vertical = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
       ) {
-        Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-          Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        listOf(
+          0 to ("Daily & Audit Logs" to Icons.Default.CalendarMonth),
+          1 to ("Monthly Summary & Analytics" to Icons.Default.Assessment)
+        ).forEach { (idx, item) ->
+          val (label, icon) = item
+          val isSelected = historySubSection == idx
+          Surface(
+            color = if (isSelected) Color(0xFF2563EB) else Color(0xFF1E293B),
+            shape = RoundedCornerShape(10.dp),
+            modifier = Modifier
+              .weight(1f)
+              .clickable { historySubSection = idx }
           ) {
-            Box(
-              modifier = Modifier
-                .size(28.dp)
-                .clip(CircleShape)
-                .background(Color(0xFF0284C7).copy(alpha = 0.15f)),
-              contentAlignment = Alignment.Center
+            Row(
+              modifier = Modifier.padding(vertical = 8.dp, horizontal = 8.dp),
+              horizontalArrangement = Arrangement.Center,
+              verticalAlignment = Alignment.CenterVertically
             ) {
               Icon(
-                imageVector = Icons.Default.Shield,
-                contentDescription = null,
-                tint = Color(0xFF0284C7),
-                modifier = Modifier.size(16.dp)
+                imageVector = icon,
+                contentDescription = label,
+                tint = if (isSelected) Color.White else Color(0xFF94A3B8),
+                modifier = Modifier.size(15.dp)
+              )
+              Spacer(Modifier.width(6.dp))
+              Text(
+                text = label,
+                fontSize = 11.sp,
+                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                color = if (isSelected) Color.White else Color(0xFF94A3B8),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
               )
             }
-            Text(
-              text = "FSI Attendance History & Retention Policy",
-              fontWeight = FontWeight.Bold,
-              fontSize = 13.sp,
-              color = MaterialTheme.colorScheme.onSurface
-            )
           }
-
-          Text(
-            text = "• 22-Hour Edit Window: Records can be updated within exactly 22 hours of submission. Once 22h elapse, logs are locked to prevent tampering.\n• Non-Permanent Database Storage: Attendance audit history is maintained on a rolling lifecycle with real-time Room database access anytime.",
-            fontSize = 11.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            lineHeight = 16.sp
-          )
         }
       }
     }
 
-    // 2. DAY / MONTH / YEAR SELECTOR (Rule 3)
+    if (historySubSection == 0) {
+      LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+      ) {
+    // 1. UNIVERSAL DATE SELECTOR (Any Date, Any Month, Any Year)
     item {
       Card(
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF0D1526)),
         shape = RoundedCornerShape(16.dp),
         border = BorderStroke(
           1.dp,
-          if (filterBySpecificDate) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant
+          if (filterBySpecificDate) Color(0xFF38BDF8) else Color(0xFF1E2D42)
         ),
         modifier = Modifier.fillMaxWidth()
       ) {
@@ -227,20 +222,31 @@ fun AttendanceHistoryView(
               Icon(
                 imageVector = Icons.Default.CalendarMonth,
                 contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
+                tint = Color(0xFF38BDF8),
                 modifier = Modifier.size(20.dp)
               )
               Text(
-                text = "Date Selector (Day / Month / Year)",
+                text = "Date Filter (Day / Month / Year)",
                 fontWeight = FontWeight.Bold,
                 fontSize = 14.sp,
-                color = MaterialTheme.colorScheme.onSurface
+                color = Color.White
               )
             }
 
             FilterChip(
               selected = filterBySpecificDate,
               onClick = { filterBySpecificDate = !filterBySpecificDate },
+              colors = FilterChipDefaults.filterChipColors(
+                containerColor = Color(0xFF111C2E),
+                labelColor = Color(0xFF94A3B8),
+                selectedContainerColor = Color(0xFF0284C7),
+                selectedLabelColor = Color.White
+              ),
+              border = FilterChipDefaults.filterChipBorder(
+                enabled = true,
+                selected = filterBySpecificDate,
+                borderColor = if (filterBySpecificDate) Color(0xFF38BDF8) else Color(0xFF1E2D42)
+              ),
               label = {
                 Text(
                   text = if (filterBySpecificDate) "Date Filter: ON" else "Show All Dates",
@@ -258,7 +264,7 @@ fun AttendanceHistoryView(
             )
           }
 
-          // Quick Date Shortcuts
+          // Quick Date Shortcuts & Calendar Picker Button
           Row(
             modifier = Modifier
               .fillMaxWidth()
@@ -273,6 +279,11 @@ fun AttendanceHistoryView(
                 selectedYear = cal.get(Calendar.YEAR)
                 filterBySpecificDate = true
               },
+              colors = SuggestionChipDefaults.suggestionChipColors(
+                containerColor = Color(0xFF111C2E),
+                labelColor = Color(0xFFCBD5E1)
+              ),
+              border = SuggestionChipDefaults.suggestionChipBorder(enabled = true, borderColor = Color(0xFF1E2D42)),
               label = { Text("Today (${todayCal.get(Calendar.DAY_OF_MONTH)} ${monthNames[todayCal.get(Calendar.MONTH)]})", fontSize = 11.sp) }
             )
 
@@ -285,19 +296,34 @@ fun AttendanceHistoryView(
                 selectedYear = cal.get(Calendar.YEAR)
                 filterBySpecificDate = true
               },
+              colors = SuggestionChipDefaults.suggestionChipColors(
+                containerColor = Color(0xFF111C2E),
+                labelColor = Color(0xFFCBD5E1)
+              ),
+              border = SuggestionChipDefaults.suggestionChipBorder(enabled = true, borderColor = Color(0xFF1E2D42)),
               label = { Text("Yesterday", fontSize = 11.sp) }
             )
 
             SuggestionChip(
               onClick = { showDatePickerDialog = true },
-              label = { Text("Open Calendar Picker", fontSize = 11.sp) },
-              icon = { Icon(Icons.Default.Event, contentDescription = null, modifier = Modifier.size(14.dp)) }
+              colors = SuggestionChipDefaults.suggestionChipColors(
+                containerColor = Color(0xFF111C2E),
+                labelColor = Color(0xFF38BDF8)
+              ),
+              border = SuggestionChipDefaults.suggestionChipBorder(enabled = true, borderColor = Color(0xFF1E2D42)),
+              label = { Text("Calendar Picker", fontSize = 11.sp) },
+              icon = { Icon(Icons.Default.Event, contentDescription = null, modifier = Modifier.size(14.dp), tint = Color(0xFF38BDF8)) }
             )
 
             if (filterBySpecificDate) {
               SuggestionChip(
                 onClick = { filterBySpecificDate = false },
-                label = { Text("Clear Date Filter", fontSize = 11.sp, color = MaterialTheme.colorScheme.error) }
+                colors = SuggestionChipDefaults.suggestionChipColors(
+                  containerColor = Color(0xFF0284C7).copy(alpha = 0.2f),
+                  labelColor = Color(0xFF38BDF8)
+                ),
+                border = SuggestionChipDefaults.suggestionChipBorder(enabled = true, borderColor = Color(0xFF0284C7)),
+                label = { Text("View All Records", fontSize = 11.sp, color = Color(0xFF38BDF8)) }
               )
             }
           }
@@ -305,12 +331,13 @@ fun AttendanceHistoryView(
           // Active Date Selectors (Day, Month, Year Pickers)
           AnimatedVisibility(visible = filterBySpecificDate) {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-              HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+              HorizontalDivider(color = Color(0xFF1E2D42))
 
               // Selected Date Indicator
               Surface(
-                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
+                color = Color(0xFF0284C7).copy(alpha = 0.15f),
                 shape = RoundedCornerShape(10.dp),
+                border = BorderStroke(1.dp, Color(0xFF0284C7).copy(alpha = 0.3f)),
                 modifier = Modifier.fillMaxWidth()
               ) {
                 Row(
@@ -319,21 +346,50 @@ fun AttendanceHistoryView(
                   verticalAlignment = Alignment.CenterVertically
                 ) {
                   Text(
-                    text = "Filtering Attendance for: $formattedSelectedDate",
+                    text = "Filtering Records for: $formattedSelectedDate",
                     fontWeight = FontWeight.Bold,
                     fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                    color = Color(0xFF38BDF8)
                   )
                   Text(
                     text = "${fullMonthNames[selectedMonth - 1]} $selectedYear",
                     fontSize = 11.sp,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                    color = Color(0xFF94A3B8)
                   )
                 }
               }
 
-              // 1. Month Picker Row
-              Text("Month:", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+              // 1. Year Picker Row
+              Text("Year:", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF94A3B8))
+              Row(
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+              ) {
+                yearsList.forEach { y ->
+                  val isSelected = selectedYear == y
+                  Surface(
+                    onClick = { selectedYear = y },
+                    shape = RoundedCornerShape(8.dp),
+                    color = if (isSelected) Color(0xFF0284C7) else Color(0xFF111C2E),
+                    border = BorderStroke(1.dp, if (isSelected) Color(0xFF38BDF8) else Color(0xFF1E2D42)),
+                    modifier = Modifier.padding(vertical = 2.dp)
+                  ) {
+                    Text(
+                      text = "$y",
+                      fontSize = 11.sp,
+                      textAlign = TextAlign.Center,
+                      fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                      color = if (isSelected) Color.White else Color(0xFF94A3B8),
+                      modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                    )
+                  }
+                }
+              }
+
+              // 2. Month Picker Row
+              Text("Month:", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF94A3B8))
               Row(
                 modifier = Modifier
                   .fillMaxWidth()
@@ -346,22 +402,23 @@ fun AttendanceHistoryView(
                   Surface(
                     onClick = { selectedMonth = monthNum },
                     shape = RoundedCornerShape(8.dp),
-                    color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+                    color = if (isSelected) Color(0xFF0284C7) else Color(0xFF111C2E),
+                    border = BorderStroke(1.dp, if (isSelected) Color(0xFF38BDF8) else Color(0xFF1E2D42)),
                     modifier = Modifier.padding(vertical = 2.dp)
                   ) {
                     Text(
                       text = mName,
                       fontSize = 11.sp,
                       fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                      color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                      color = if (isSelected) Color.White else Color(0xFF94A3B8),
                       modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
                     )
                   }
                 }
               }
 
-              // 2. Day Picker Row
-              Text("Day:", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+              // 3. Day Picker Row
+              Text("Day:", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF94A3B8))
               Row(
                 modifier = Modifier
                   .fillMaxWidth()
@@ -373,41 +430,16 @@ fun AttendanceHistoryView(
                   Surface(
                     onClick = { selectedDay = dayNum },
                     shape = RoundedCornerShape(8.dp),
-                    color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+                    color = if (isSelected) Color(0xFF0284C7) else Color(0xFF111C2E),
+                    border = BorderStroke(1.dp, if (isSelected) Color(0xFF38BDF8) else Color(0xFF1E2D42)),
                     modifier = Modifier.padding(vertical = 2.dp)
                   ) {
                     Text(
                       text = "$dayNum",
                       fontSize = 11.sp,
                       fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                      color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                      color = if (isSelected) Color.White else Color(0xFF94A3B8),
                       modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)
-                    )
-                  }
-                }
-              }
-
-              // 3. Year Picker Row
-              Text("Year:", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
-              Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-              ) {
-                yearsList.forEach { y ->
-                  val isSelected = selectedYear == y
-                  Surface(
-                    onClick = { selectedYear = y },
-                    shape = RoundedCornerShape(8.dp),
-                    color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
-                    modifier = Modifier.weight(1f)
-                  ) {
-                    Text(
-                      text = "$y",
-                      fontSize = 11.sp,
-                      textAlign = TextAlign.Center,
-                      fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                      color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
-                      modifier = Modifier.padding(vertical = 6.dp)
                     )
                   }
                 }
@@ -418,12 +450,12 @@ fun AttendanceHistoryView(
       }
     }
 
-    // 3. METRICS SUMMARY BAR
+    // 2. METRICS SUMMARY BAR
     item {
       Card(
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF0D1526)),
         shape = RoundedCornerShape(16.dp),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        border = BorderStroke(1.dp, Color(0xFF1E2D42)),
         modifier = Modifier.fillMaxWidth()
       ) {
         Row(
@@ -434,49 +466,31 @@ fun AttendanceHistoryView(
           verticalAlignment = Alignment.CenterVertically
         ) {
           Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1f)) {
-            Text("TOTAL", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.outline)
-            Text("$totalCount", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+            Text("TOTAL", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFF94A3B8))
+            Text("$totalCount", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White)
           }
-          VerticalDivider(modifier = Modifier.height(28.dp), color = MaterialTheme.colorScheme.outlineVariant)
+          VerticalDivider(modifier = Modifier.height(28.dp), color = Color(0xFF1E2D42))
           Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1f)) {
-            Text("PRESENT", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFF16A34A))
-            Text("$presentCount", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color(0xFF16A34A))
+            Text("PRESENT", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFF4ADE80))
+            Text("$presentCount", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color(0xFF4ADE80))
           }
-          VerticalDivider(modifier = Modifier.height(28.dp), color = MaterialTheme.colorScheme.outlineVariant)
+          VerticalDivider(modifier = Modifier.height(28.dp), color = Color(0xFF1E2D42))
           Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1f)) {
-            Text("ABSENT", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFFDC2626))
-            Text("$absentCount", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color(0xFFDC2626))
+            Text("ABSENT", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFFF87171))
+            Text("$absentCount", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color(0xFFF87171))
           }
-          VerticalDivider(modifier = Modifier.height(28.dp), color = MaterialTheme.colorScheme.outlineVariant)
+          VerticalDivider(modifier = Modifier.height(28.dp), color = Color(0xFF1E2D42))
           Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1f)) {
-            Text("RATE", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-            Text("$attendanceRate%", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+            Text("RATE", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFF38BDF8))
+            Text("$attendanceRate%", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color(0xFF38BDF8))
           }
         }
       }
     }
 
-    // 4. SEARCH & SECONDARY FILTERS & EXPORT
+    // 3. STATUS & BATCH FILTERS & EXPORT (Search input removed)
     item {
       Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        // Search TextField
-        OutlinedTextField(
-          value = searchQuery,
-          onValueChange = { searchQuery = it },
-          placeholder = { Text("Search by student name, ID or batch...", fontSize = 12.sp) },
-          leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(18.dp)) },
-          trailingIcon = {
-            if (searchQuery.isNotEmpty()) {
-              IconButton(onClick = { searchQuery = "" }) {
-                Icon(Icons.Default.Clear, contentDescription = "Clear", modifier = Modifier.size(16.dp))
-              }
-            }
-          },
-          singleLine = true,
-          shape = RoundedCornerShape(12.dp),
-          modifier = Modifier.fillMaxWidth()
-        )
-
         // Filter Pills Row
         Row(
           modifier = Modifier
@@ -485,12 +499,23 @@ fun AttendanceHistoryView(
           horizontalArrangement = Arrangement.spacedBy(6.dp),
           verticalAlignment = Alignment.CenterVertically
         ) {
-          // Status Filters
-          listOf("All", "Present", "Absent", "Late").forEach { stat ->
+          // Status Filters (Present, Absent only - Late removed)
+          listOf("All", "Present", "Absent").forEach { stat ->
             val isSelected = selectedStatusFilter == stat
             FilterChip(
               selected = isSelected,
               onClick = { selectedStatusFilter = stat },
+              colors = FilterChipDefaults.filterChipColors(
+                containerColor = Color(0xFF111C2E),
+                labelColor = Color(0xFF94A3B8),
+                selectedContainerColor = Color(0xFF0284C7),
+                selectedLabelColor = Color.White
+              ),
+              border = FilterChipDefaults.filterChipBorder(
+                enabled = true,
+                selected = isSelected,
+                borderColor = if (isSelected) Color(0xFF38BDF8) else Color(0xFF1E2D42)
+              ),
               label = { Text(stat, fontSize = 11.sp) }
             )
           }
@@ -502,6 +527,17 @@ fun AttendanceHistoryView(
               FilterChip(
                 selected = isSelected,
                 onClick = { selectedBatchFilter = if (isSelected) "All" else b.name },
+                colors = FilterChipDefaults.filterChipColors(
+                  containerColor = Color(0xFF111C2E),
+                  labelColor = Color(0xFF94A3B8),
+                  selectedContainerColor = Color(0xFF0284C7),
+                  selectedLabelColor = Color.White
+                ),
+                border = FilterChipDefaults.filterChipBorder(
+                  enabled = true,
+                  selected = isSelected,
+                  borderColor = if (isSelected) Color(0xFF38BDF8) else Color(0xFF1E2D42)
+                ),
                 label = { Text(b.name, fontSize = 11.sp) }
               )
             }
@@ -518,18 +554,18 @@ fun AttendanceHistoryView(
             text = "Showing ${filteredRecords.size} records",
             fontSize = 12.sp,
             fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
+            color = Color(0xFF94A3B8)
           )
 
           Button(
             onClick = { ExportUtils.exportAttendanceToCsv(context, filteredRecords) },
             shape = RoundedCornerShape(10.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF15803D)),
+            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF065F46)),
             contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
           ) {
-            Icon(Icons.Default.Share, contentDescription = "Export", modifier = Modifier.size(14.dp))
+            Icon(Icons.Default.Share, contentDescription = "Export", modifier = Modifier.size(14.dp), tint = Color.White)
             Spacer(Modifier.width(4.dp))
-            Text("Export CSV", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            Text("Export CSV", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
           }
         }
       }
@@ -539,7 +575,8 @@ fun AttendanceHistoryView(
     if (systemFeedbackMsg != null) {
       item {
         Surface(
-          color = MaterialTheme.colorScheme.errorContainer,
+          color = Color(0xFF450A0A),
+          border = BorderStroke(1.dp, Color(0xFFEF4444).copy(alpha = 0.5f)),
           shape = RoundedCornerShape(12.dp),
           modifier = Modifier.fillMaxWidth()
         ) {
@@ -548,8 +585,8 @@ fun AttendanceHistoryView(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp)
           ) {
-            Icon(Icons.Default.ErrorOutline, contentDescription = null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(18.dp))
-            Text(systemFeedbackMsg!!, fontSize = 12.sp, color = MaterialTheme.colorScheme.onErrorContainer, fontWeight = FontWeight.Medium)
+            Icon(Icons.Default.ErrorOutline, contentDescription = null, tint = Color(0xFFF87171), modifier = Modifier.size(18.dp))
+            Text(systemFeedbackMsg!!, fontSize = 12.sp, color = Color(0xFFFCA5A5), fontWeight = FontWeight.Medium)
           }
         }
       }
@@ -562,7 +599,8 @@ fun AttendanceHistoryView(
           modifier = Modifier
             .fillMaxWidth()
             .padding(top = 16.dp),
-          colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
+          colors = CardDefaults.cardColors(containerColor = Color(0xFF0D1526)),
+          border = BorderStroke(1.dp, Color(0xFF1E2D42)),
           shape = RoundedCornerShape(16.dp)
         ) {
           Column(
@@ -576,13 +614,13 @@ fun AttendanceHistoryView(
               modifier = Modifier
                 .size(56.dp)
                 .clip(CircleShape)
-                .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)),
+                .background(Color(0xFF0284C7).copy(alpha = 0.2f)),
               contentAlignment = Alignment.Center
             ) {
               Icon(
                 imageVector = Icons.Outlined.EventBusy,
                 contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
+                tint = Color(0xFF38BDF8),
                 modifier = Modifier.size(28.dp)
               )
             }
@@ -590,7 +628,7 @@ fun AttendanceHistoryView(
               text = if (filterBySpecificDate) "No Attendance for $formattedSelectedDate" else "No Attendance Records Found",
               fontWeight = FontWeight.Bold,
               fontSize = 15.sp,
-              color = MaterialTheme.colorScheme.onSurface
+              color = Color.White
             )
             Text(
               text = if (filterBySpecificDate)
@@ -598,7 +636,7 @@ fun AttendanceHistoryView(
               else
                 "Attendance logs registered during class sessions will be stored in the database and displayed here.",
               fontSize = 12.sp,
-              color = MaterialTheme.colorScheme.onSurfaceVariant,
+              color = Color(0xFF94A3B8),
               textAlign = TextAlign.Center,
               lineHeight = 17.sp
             )
@@ -615,11 +653,11 @@ fun AttendanceHistoryView(
           modifier = Modifier.fillMaxWidth(),
           shape = RoundedCornerShape(16.dp),
           colors = CardDefaults.cardColors(
-            containerColor = if (isEditable) MaterialTheme.colorScheme.surface else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+            containerColor = Color(0xFF111C2E)
           ),
           border = BorderStroke(
             1.dp,
-            if (isEditable) MaterialTheme.colorScheme.primary.copy(alpha = 0.35f) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)
+            if (isEditable) Color(0xFF0284C7).copy(alpha = 0.4f) else Color(0xFF1E2D42)
           )
         ) {
           Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -634,18 +672,19 @@ fun AttendanceHistoryView(
                   text = log.studentName,
                   fontWeight = FontWeight.Bold,
                   fontSize = 15.sp,
-                  color = MaterialTheme.colorScheme.onSurface
+                  color = Color.White
                 )
                 Text(
                   text = "ID: ${log.studentId} • Batch: ${log.batchName}",
                   fontSize = 11.sp,
-                  color = MaterialTheme.colorScheme.onSurfaceVariant
+                  color = Color(0xFF94A3B8)
                 )
               }
 
               // 22-Hour Edit Window Badge (Rule 2)
               Surface(
-                color = if (isEditable) Color(0xFF0284C7).copy(alpha = 0.12f) else MaterialTheme.colorScheme.surfaceVariant,
+                color = if (isEditable) Color(0xFF0284C7).copy(alpha = 0.2f) else Color(0xFF1E293B),
+                border = BorderStroke(0.5.dp, if (isEditable) Color(0xFF38BDF8).copy(alpha = 0.5f) else Color(0xFF334155)),
                 shape = RoundedCornerShape(8.dp)
               ) {
                 Row(
@@ -656,14 +695,14 @@ fun AttendanceHistoryView(
                   Icon(
                     imageVector = if (isEditable) Icons.Default.Timelapse else Icons.Default.Lock,
                     contentDescription = null,
-                    tint = if (isEditable) Color(0xFF0284C7) else MaterialTheme.colorScheme.outline,
+                    tint = if (isEditable) Color(0xFF38BDF8) else Color(0xFF94A3B8),
                     modifier = Modifier.size(12.dp)
                   )
                   Text(
                     text = editStatusText,
                     fontSize = 10.sp,
                     fontWeight = FontWeight.Bold,
-                    color = if (isEditable) Color(0xFF0284C7) else MaterialTheme.colorScheme.outline
+                    color = if (isEditable) Color(0xFF38BDF8) else Color(0xFF94A3B8)
                   )
                 }
               }
@@ -679,40 +718,41 @@ fun AttendanceHistoryView(
                 Icon(
                   imageVector = Icons.Default.CalendarToday,
                   contentDescription = null,
-                  tint = MaterialTheme.colorScheme.outline,
+                  tint = Color(0xFF94A3B8),
                   modifier = Modifier.size(12.dp)
                 )
                 Text(
                   text = "${log.date} • ${if (log.time.isNotBlank()) log.time else "Recorded"}",
                   fontSize = 11.sp,
                   fontWeight = FontWeight.SemiBold,
-                  color = MaterialTheme.colorScheme.onSurfaceVariant
+                  color = Color(0xFFCBD5E1)
                 )
               }
 
               Text(
                 text = "By: ${log.recordedBy ?: "system_fsi"}",
                 fontSize = 11.sp,
-                color = MaterialTheme.colorScheme.outline
+                color = Color(0xFF94A3B8)
               )
             }
 
             if (!log.reason.isNullOrBlank()) {
               Surface(
-                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                color = Color(0xFF0D1526),
+                border = BorderStroke(1.dp, Color(0xFF1E2D42)),
                 shape = RoundedCornerShape(8.dp),
                 modifier = Modifier.fillMaxWidth()
               ) {
                 Text(
                   text = "Remark: ${log.reason}",
                   fontSize = 11.sp,
-                  color = MaterialTheme.colorScheme.onSurfaceVariant,
+                  color = Color(0xFFFCA5A5),
                   modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                 )
               }
             }
 
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+            HorizontalDivider(color = Color(0xFF1E2D42))
 
             // Status Control Row (Editable only within 22 hours - Rule 2)
             Row(
@@ -722,14 +762,21 @@ fun AttendanceHistoryView(
             ) {
               // Current Status Display
               Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("Status: ", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("Status: ", fontSize = 11.sp, color = Color(0xFF94A3B8))
                 Surface(
                   color = when (log.status.lowercase()) {
-                    "present" -> Color(0xFFDCFCE7)
-                    "absent" -> Color(0xFFFEE2E2)
-                    "late" -> Color(0xFFFEF9C3)
-                    else -> MaterialTheme.colorScheme.surfaceVariant
+                    "present" -> Color(0xFF064E3B)
+                    "absent" -> Color(0xFF450A0A)
+                    else -> Color(0xFF1E293B)
                   },
+                  border = BorderStroke(
+                    0.5.dp,
+                    when (log.status.lowercase()) {
+                      "present" -> Color(0xFF059669)
+                      "absent" -> Color(0xFFDC2626)
+                      else -> Color(0xFF334155)
+                    }
+                  ),
                   shape = RoundedCornerShape(6.dp)
                 ) {
                   Text(
@@ -737,10 +784,9 @@ fun AttendanceHistoryView(
                     fontSize = 10.sp,
                     fontWeight = FontWeight.Bold,
                     color = when (log.status.lowercase()) {
-                      "present" -> Color(0xFF15803D)
-                      "absent" -> Color(0xFFB91C1C)
-                      "late" -> Color(0xFFA16207)
-                      else -> MaterialTheme.colorScheme.onSurfaceVariant
+                      "present" -> Color(0xFF4ADE80)
+                      "absent" -> Color(0xFFF87171)
+                      else -> Color(0xFFCBD5E1)
                     },
                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                   )
@@ -749,20 +795,21 @@ fun AttendanceHistoryView(
 
               // Status Change Buttons (Enabled only if <= 22 hours)
               Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                listOf("Present", "Absent", "Late").forEach { stat ->
+                listOf("Present", "Absent").forEach { stat ->
                   val isActive = log.status.equals(stat, ignoreCase = true)
                   Surface(
                     color = if (isActive) {
                       when (stat) {
-                        "Present" -> Color(0xFF22C55E)
-                        "Absent" -> Color(0xFFEF4444)
-                        else -> Color(0xFFEAB308)
+                        "Present" -> Color(0xFF16A34A)
+                        "Absent" -> Color(0xFFDC2626)
+                        else -> Color(0xFF0284C7)
                       }
                     } else if (isEditable) {
-                      MaterialTheme.colorScheme.surfaceVariant
+                      Color(0xFF1E293B)
                     } else {
-                      MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+                      Color(0xFF1E293B).copy(alpha = 0.4f)
                     },
+                    border = BorderStroke(1.dp, if (isActive) Color.Transparent else Color(0xFF334155)),
                     shape = RoundedCornerShape(8.dp),
                     modifier = Modifier.clickable(enabled = isEditable) {
                       if (isEditable) {
@@ -777,7 +824,7 @@ fun AttendanceHistoryView(
                   ) {
                     Text(
                       text = stat,
-                      color = if (isActive) Color.White else if (isEditable) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.outline.copy(alpha = 0.6f),
+                      color = if (isActive) Color.White else if (isEditable) Color(0xFFCBD5E1) else Color(0xFF64748B),
                       fontSize = 10.sp,
                       fontWeight = FontWeight.Bold,
                       modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
@@ -797,7 +844,7 @@ fun AttendanceHistoryView(
                     Icon(
                       imageVector = Icons.Outlined.EditNote,
                       contentDescription = "Edit Remark",
-                      tint = MaterialTheme.colorScheme.primary,
+                      tint = Color(0xFF38BDF8),
                       modifier = Modifier.size(18.dp)
                     )
                   }
@@ -809,6 +856,14 @@ fun AttendanceHistoryView(
       }
     }
   }
+} else {
+  MonthlyAttendanceSummary(
+    modifier = Modifier.fillMaxSize(),
+    currentUserRole = currentUserRole,
+    currentUserId = currentUserId
+  )
+}
+}
 
   // --- REASON / REMARK EDIT DIALOG ---
   if (editingRecordForReason != null) {

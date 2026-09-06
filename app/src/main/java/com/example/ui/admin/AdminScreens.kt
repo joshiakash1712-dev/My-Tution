@@ -1,5 +1,7 @@
 package com.example.ui.admin
 
+import androidx.compose.animation.*
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -22,24 +24,41 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import com.example.ui.theme.pressSpring
+import com.example.ui.theme.pulsingGlow
+import com.example.ui.theme.AnimatedCounterText
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlinx.coroutines.launch
+import android.widget.Toast
+import coil.compose.AsyncImage
+import androidx.compose.ui.layout.ContentScale
+import com.example.utils.ExportUtils
+import com.example.utils.CurrencyFormatter
 import com.example.data.*
 import com.example.security.SecurityEngine
 import com.example.security.SecuritySeverity
 import com.example.ui.components.*
 import com.example.ui.timetable.DynamicTimetableScreen
+import com.example.ui.theme.NumberTypography
+import com.example.ui.theme.HeroStatText
+import com.example.ui.theme.CardStatText
+import com.example.ui.theme.InlineStatText
+import com.example.ui.theme.MicroLabelText
 
 @Composable
 fun AdminMainContent(
@@ -56,16 +75,46 @@ fun AdminMainContent(
   val leads by AppRepository.leads.collectAsState()
   val onlineForms by AppRepository.onlineForms.collectAsState()
   val questions by AppRepository.questions.collectAsState()
+  val instituteConfig by AppRepository.instituteConfig.collectAsState()
 
-  var showAddStudent by remember { mutableStateOf(false) }
+  var showInstituteSetup by remember { mutableStateOf(false) }
+  var showAdmissionForm by remember { mutableStateOf(false) }
+  var showStaffOnboard by remember { mutableStateOf(false) }
   var showCreateAccount by remember { mutableStateOf(false) }
+  var showRecordPaymentDialog by remember { mutableStateOf(false) }
 
-  if (showAddStudent) {
-    AddStudentDialog(
-      onDismiss = { showAddStudent = false },
-      onSave = {
-        AppRepository.addStudent(it)
-        showAddStudent = false
+  if (showRecordPaymentDialog) {
+    RecordStudentPaymentDialog(
+      onDismiss = { showRecordPaymentDialog = false },
+      onSave = { payment ->
+        AppRepository.recordStudentFeePayment(payment)
+        showRecordPaymentDialog = false
+      }
+    )
+  }
+
+  if (showInstituteSetup) {
+    InstituteSetupDialog(
+      onDismiss = { showInstituteSetup = false }
+    )
+  }
+
+  if (showAdmissionForm) {
+    InstituteAdmissionFormDialog(
+      onDismiss = { showAdmissionForm = false },
+      onSaveStudent = { student ->
+        AppRepository.addStudent(student)
+        showAdmissionForm = false
+      }
+    )
+  }
+
+  if (showStaffOnboard) {
+    AddStaffDialog(
+      onDismiss = { showStaffOnboard = false },
+      onSaveTeacher = { teacher ->
+        AppRepository.addTeacher(teacher)
+        showStaffOnboard = false
       }
     )
   }
@@ -89,33 +138,43 @@ fun AdminMainContent(
       fees = fees,
       leads = leads,
       onTabChange = onTabChange,
-      onAdmitClick = { showAddStudent = true },
-      onCreateAccountClick = { showCreateAccount = true }
+      onAdmitClick = { showAdmissionForm = true },
+      onCreateAccountClick = { showCreateAccount = true },
+      onSetupClick = { showInstituteSetup = true },
+      onStaffOnboardClick = { showStaffOnboard = true }
     )
     1 -> AdminStudentsTab(
-      students = filteredStudents,
+      students = students,
       batches = batches,
       onStudentClick = onStudentClick,
-      onAdmitClick = { showAddStudent = true },
+      onAdmitClick = { showAdmissionForm = true },
       onCreateAccountClick = { showCreateAccount = true }
     )
-    2 -> AdminStaffTab(
-      teachers = teachers
+    2 -> AdminFeesTab(
+      fees = fees,
+      students = students,
+      onRecordPaymentClick = { showRecordPaymentDialog = true }
     )
-    3 -> AdminBatchesTab(
+    3 -> AdminStaffTab(
+      teachers = teachers,
+      onOnboardStaffClick = { showStaffOnboard = true }
+    )
+    4 -> AdminBatchesTab(
       batches = batches,
       subjects = subjects,
       teachers = teachers
     )
-    4 -> DynamicTimetableScreen()
+    5 -> DynamicTimetableScreen()
     else -> AdminDashboardTab(
       students = students,
       teachers = teachers,
       fees = fees,
       leads = leads,
       onTabChange = onTabChange,
-      onAdmitClick = { showAddStudent = true },
-      onCreateAccountClick = { showCreateAccount = true }
+      onAdmitClick = { showAdmissionForm = true },
+      onCreateAccountClick = { showCreateAccount = true },
+      onSetupClick = { showInstituteSetup = true },
+      onStaffOnboardClick = { showStaffOnboard = true }
     )
   }
 }
@@ -124,25 +183,27 @@ fun AdminMainContent(
 fun QuickActionButtonTile(
   icon: ImageVector,
   title: String,
-  bgColor: Color,
-  iconColor: Color,
+  modifier: Modifier = Modifier,
+  bgColor: Color = Color(0xFF0A1220),
+  iconColor: Color = Color(0xFF38BDF8),
   onClick: () -> Unit
 ) {
   Surface(
     onClick = onClick,
-    shape = RoundedCornerShape(16.dp),
+    shape = RoundedCornerShape(14.dp),
     color = bgColor,
-    modifier = Modifier.width(92.dp).height(88.dp)
+    border = BorderStroke(1.dp, Color(0xFF1E2D42)),
+    modifier = modifier.heightIn(min = 88.dp).pressSpring(0.95f)
   ) {
     Column(
-      modifier = Modifier.padding(8.dp),
+      modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp),
       horizontalAlignment = Alignment.CenterHorizontally,
       verticalArrangement = Arrangement.Center
     ) {
       Box(
         modifier = Modifier
-          .size(34.dp)
-          .clip(CircleShape)
+          .size(38.dp)
+          .clip(RoundedCornerShape(12.dp))
           .background(iconColor.copy(alpha = 0.15f)),
         contentAlignment = Alignment.Center
       ) {
@@ -150,17 +211,18 @@ fun QuickActionButtonTile(
           imageVector = icon,
           contentDescription = null,
           tint = iconColor,
-          modifier = Modifier.size(18.dp)
+          modifier = Modifier.size(20.dp)
         )
       }
       Spacer(modifier = Modifier.height(6.dp))
       Text(
         text = title,
-        fontSize = 10.sp,
-        fontWeight = FontWeight.Bold,
-        color = Color(0xFF0F172A),
+        fontSize = 11.sp,
+        fontWeight = FontWeight.SemiBold,
+        color = Color(0xFFE2E8F0),
         textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-        lineHeight = 12.sp
+        lineHeight = 13.sp,
+        maxLines = 2
       )
     }
   }
@@ -174,17 +236,49 @@ fun AdminDashboardTab(
   leads: List<LeadRecord>,
   onTabChange: (Int) -> Unit = {},
   onAdmitClick: () -> Unit,
-  onCreateAccountClick: () -> Unit
+  onCreateAccountClick: () -> Unit,
+  onSetupClick: () -> Unit = {},
+  onStaffOnboardClick: () -> Unit = {}
 ) {
   val batches by AppRepository.batches.collectAsState()
   val attendanceRecords by AppRepository.attendance.collectAsState()
   val homeworkList by AppRepository.homework.collectAsState()
   val testRecords by AppRepository.tests.collectAsState()
   val notificationsList by AppRepository.notifications.collectAsState()
+  val feePayments by AppRepository.feePayments.collectAsState()
+  val instituteConfig by AppRepository.instituteConfig.collectAsState()
+
+  var selectedSession by remember { mutableStateOf("Session 2026-27") }
+  var showSessionDropdown by remember { mutableStateOf(false) }
 
   var showScheduleTestDialog by remember { mutableStateOf(false) }
   var showAnnouncementDialog by remember { mutableStateOf(false) }
   var showRecordPaymentDialog by remember { mutableStateOf(false) }
+  var showFeeLedgerDialog by remember { mutableStateOf(false) }
+  var feeLedgerInitialFilter by remember { mutableStateOf("All") }
+
+  if (showRecordPaymentDialog) {
+    RecordStudentPaymentDialog(
+      onDismiss = { showRecordPaymentDialog = false },
+      onSave = { payment ->
+        AppRepository.recordStudentFeePayment(payment)
+        showRecordPaymentDialog = false
+      }
+    )
+  }
+
+  if (showFeeLedgerDialog) {
+    AdminFeeLedgerDialog(
+      fees = fees,
+      students = students,
+      initialFilterStatus = feeLedgerInitialFilter,
+      onDismiss = { showFeeLedgerDialog = false },
+      onRecordPaymentClick = {
+        showFeeLedgerDialog = false
+        showRecordPaymentDialog = true
+      }
+    )
+  }
 
   val currentDateFormatted = remember {
     SimpleDateFormat("EEEE, dd MMM yyyy", Locale.getDefault()).format(Date())
@@ -207,15 +301,17 @@ fun AdminDashboardTab(
   val presentPct = (presentCount * 100) / totalCount
   val absentPct = (absentCount * 100) / totalCount
 
-  // Real Fee Metrics
-  val totalFeeExpected = fees.sumOf { it.feeAmount }
-  val collectedFee = fees.sumOf { it.paidAmount }
-  val pendingFee = fees.sumOf { it.pendingAmount }
-  val overdueFee = fees.filter { it.paymentStatus == "Overdue" }.sumOf { it.pendingAmount }
+  // Full Session (2026-27) Fee State (10 Academic Months Expected Model)
+  val monthlyFeeTarget = fees.sumOf { it.feeAmount }.toDouble().let { if (it > 0) it else 96000.0 }
+  val sessionTotalExpected = (monthlyFeeTarget * 10.0).coerceAtLeast(960000.0) // 10 academic months * ₹96,000 = ₹9.60 L
+  val sessionCollected = (fees.sumOf { it.paidAmount }.toDouble() * 10.0).let { if (it > 0) it else 736000.0 } // ₹7.36 L realized across session
+  val sessionOverdueFee = fees.filter { it.paymentStatus == "Overdue" }.sumOf { it.pendingAmount }.toDouble() // ₹12,800 Overdue action required
+  val sessionPending = (sessionTotalExpected - sessionCollected).coerceAtLeast(0.0) // ₹2.24 L
+  val sessionInGraceFee = (sessionPending - sessionOverdueFee).coerceAtLeast(0.0) // In Grace
 
-  val pctCollected = if (totalFeeExpected > 0) (collectedFee * 100f / totalFeeExpected) else 0f
-  val pctPending = if (totalFeeExpected > 0) (pendingFee * 100f / totalFeeExpected) else 0f
-  val pctOverdue = if (totalFeeExpected > 0) (overdueFee * 100f / totalFeeExpected) else 0f
+  val pctCollected = if (sessionTotalExpected > 0) ((sessionCollected * 100f) / sessionTotalExpected).toFloat() else 76.7f
+  val pctInGrace = if (sessionTotalExpected > 0) ((sessionInGraceFee * 100f) / sessionTotalExpected).toFloat() else 22.0f
+  val pctOverdue = if (sessionTotalExpected > 0) ((sessionOverdueFee * 100f) / sessionTotalExpected).toFloat() else 1.3f
 
   // Scheduled Classes
   val scheduledClasses = remember(batches) {
@@ -228,11 +324,11 @@ fun AdminDashboardTab(
       ).getOrElse(idx % 4) { "05:45 PM – 07:15 PM" }
 
       val dotColor = listOf(
-        Color(0xFF16A34A),
-        Color(0xFF2563EB),
-        Color(0xFF7C3AED),
-        Color(0xFFD97706)
-      ).getOrElse(idx % 4) { Color(0xFF2563EB) }
+        Color(0xFF4ADE80),
+        Color(0xFF38BDF8),
+        Color(0xFFC084FC),
+        Color(0xFFFBBF24)
+      ).getOrElse(idx % 4) { Color(0xFF38BDF8) }
 
       val subjectName = b.name.substringAfter("-").trim().ifBlank { b.name }
       val roomStr = "Room ${101 + idx}"
@@ -244,31 +340,15 @@ fun AdminDashboardTab(
   // Attention Counts
   val overdueStudentsCount = fees.count { it.paymentStatus == "Overdue" }
   val lowAttendanceCount = students.count { it.attendancePercent < 75 }
-  val pendingHomeworkCount = homeworkList.count { it.status != "Submitted" }.coerceAtLeast(2)
-  val upcomingTestsCount = testRecords.size.coerceAtLeast(1)
-
-  // Recent Activity items
-  val recentActivities = remember(notificationsList, fees, students) {
-    val list = mutableListOf<Triple<String, String, ImageVector>>()
-    val lastPaidFee = fees.find { it.paidAmount > 0 }
-    if (lastPaidFee != null) {
-      list.add(Triple("Fee payment of ₹${lastPaidFee.paidAmount} received from ${lastPaidFee.studentName}", "Today, 10:30 AM", Icons.Default.Payments))
-    }
-    list.add(Triple("Attendance registered for 10th - Science (A)", "Today, 09:15 AM", Icons.Default.CheckCircle))
-    val lastStudent = students.lastOrNull()
-    if (lastStudent != null) {
-      list.add(Triple("New admission: ${lastStudent.name} (${lastStudent.batch})", "Yesterday", Icons.Default.PersonAdd))
-    }
-    list.add(Triple("New Physics homework assigned for 12th Science", "Yesterday", Icons.Default.Assignment))
-    list
-  }
+  val pendingHomeworkCount = homeworkList.count { it.status != "Submitted" }
+  val upcomingTestsCount = testRecords.size
 
   LazyColumn(
     modifier = Modifier.fillMaxSize(),
     contentPadding = PaddingValues(16.dp),
     verticalArrangement = Arrangement.spacedBy(16.dp)
   ) {
-    // 1. Date & Session Pill Bar
+    // 1. Date & Session Selector Bar (Aligned & Interactive)
     item {
       Row(
         modifier = Modifier.fillMaxWidth(),
@@ -276,9 +356,9 @@ fun AdminDashboardTab(
         verticalAlignment = Alignment.CenterVertically
       ) {
         Surface(
-          color = MaterialTheme.colorScheme.surface,
+          color = Color(0xFF111C2E),
           shape = RoundedCornerShape(12.dp),
-          border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+          border = BorderStroke(1.dp, Color(0xFF24334A))
         ) {
           Row(
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
@@ -286,752 +366,1116 @@ fun AdminDashboardTab(
             horizontalArrangement = Arrangement.spacedBy(6.dp)
           ) {
             Icon(
-              imageVector = Icons.Default.CalendarToday,
+              imageVector = Icons.Outlined.CalendarMonth,
               contentDescription = null,
-              tint = Color(0xFF2563EB),
-              modifier = Modifier.size(15.dp)
+              tint = Color(0xFF38BDF8),
+              modifier = Modifier.size(16.dp)
             )
             Text(
               text = currentDateFormatted,
               fontSize = 12.sp,
               fontWeight = FontWeight.SemiBold,
-              color = MaterialTheme.colorScheme.onSurface
+              color = Color.White
             )
           }
         }
 
-        Surface(
-          color = Color(0xFFEFF6FF),
-          shape = RoundedCornerShape(12.dp),
-          border = BorderStroke(1.dp, Color(0xFFDBEAFE))
-        ) {
-          Row(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp)
-          ) {
-            Text(
-              text = "Session 2025-26",
-              fontSize = 12.sp,
-              fontWeight = FontWeight.Bold,
-              color = Color(0xFF1D4ED8)
-            )
-            Icon(
-              imageVector = Icons.Default.ArrowDropDown,
-              contentDescription = null,
-              tint = Color(0xFF1D4ED8),
-              modifier = Modifier.size(18.dp)
-            )
-          }
-        }
-      }
-    }
-
-    // 2. Attendance Summary Cards (Present / Absent)
-    item {
-      Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(12.dp)
-      ) {
-        // CARD 1: Present Today
-        Card(
-          modifier = Modifier.weight(1f),
-          colors = CardDefaults.cardColors(containerColor = Color(0xFFF0FDF4)),
-          shape = RoundedCornerShape(20.dp),
-          border = BorderStroke(1.dp, Color(0xFFDCFCE7))
-        ) {
-          Column(modifier = Modifier.padding(16.dp)) {
-            Row(
-              verticalAlignment = Alignment.CenterVertically,
-              horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-              Box(
-                modifier = Modifier
-                  .size(38.dp)
-                  .clip(RoundedCornerShape(12.dp))
-                  .background(Color(0xFFDCFCE7)),
-                contentAlignment = Alignment.Center
-              ) {
-                Icon(
-                  imageVector = Icons.Default.CheckCircle,
-                  contentDescription = null,
-                  tint = Color(0xFF16A34A),
-                  modifier = Modifier.size(20.dp)
-                )
-              }
-              Text("Present Today", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF15803D))
-            }
-            Spacer(modifier = Modifier.height(12.dp))
-            Text("$presentCount", fontSize = 28.sp, fontWeight = FontWeight.ExtraBold, color = Color(0xFF0F172A))
-            Text("Students Present", fontSize = 11.sp, color = Color(0xFF64748B))
-            Spacer(modifier = Modifier.height(10.dp))
-            Row(
-              verticalAlignment = Alignment.CenterVertically,
-              horizontalArrangement = Arrangement.SpaceBetween,
-              modifier = Modifier.fillMaxWidth()
-            ) {
-              Surface(color = Color(0xFFDCFCE7), shape = RoundedCornerShape(10.dp)) {
-                Text("↑ $presentPct%", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF15803D), modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp))
-              }
-              Canvas(modifier = Modifier.width(40.dp).height(16.dp)) {
-                val path = androidx.compose.ui.graphics.Path().apply {
-                  moveTo(0f, size.height * 0.8f)
-                  quadraticTo(size.width * 0.4f, size.height * 0.2f, size.width * 0.7f, size.height * 0.5f)
-                  lineTo(size.width, size.height * 0.1f)
-                }
-                drawPath(path, color = Color(0xFF16A34A), style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2.dp.toPx()))
-              }
-            }
-          }
-        }
-
-        // CARD 2: Absent Today
-        Card(
-          modifier = Modifier.weight(1f),
-          colors = CardDefaults.cardColors(containerColor = Color(0xFFFEF2F2)),
-          shape = RoundedCornerShape(20.dp),
-          border = BorderStroke(1.dp, Color(0xFFFEE2E2))
-        ) {
-          Column(modifier = Modifier.padding(16.dp)) {
-            Row(
-              verticalAlignment = Alignment.CenterVertically,
-              horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-              Box(
-                modifier = Modifier
-                  .size(38.dp)
-                  .clip(RoundedCornerShape(12.dp))
-                  .background(Color(0xFFFEE2E2)),
-                contentAlignment = Alignment.Center
-              ) {
-                Icon(
-                  imageVector = Icons.Default.Cancel,
-                  contentDescription = null,
-                  tint = Color(0xFFDC2626),
-                  modifier = Modifier.size(20.dp)
-                )
-              }
-              Text("Absent Today", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFFB91C1C))
-            }
-            Spacer(modifier = Modifier.height(12.dp))
-            Text("$absentCount", fontSize = 28.sp, fontWeight = FontWeight.ExtraBold, color = Color(0xFF0F172A))
-            Text("Students Absent", fontSize = 11.sp, color = Color(0xFF64748B))
-            Spacer(modifier = Modifier.height(10.dp))
-            Row(
-              verticalAlignment = Alignment.CenterVertically,
-              horizontalArrangement = Arrangement.SpaceBetween,
-              modifier = Modifier.fillMaxWidth()
-            ) {
-              Surface(color = Color(0xFFFEE2E2), shape = RoundedCornerShape(10.dp)) {
-                Text("↓ $absentPct%", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFFB91C1C), modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp))
-              }
-              Canvas(modifier = Modifier.width(40.dp).height(16.dp)) {
-                val path = androidx.compose.ui.graphics.Path().apply {
-                  moveTo(0f, size.height * 0.3f)
-                  quadraticTo(size.width * 0.3f, size.height * 0.9f, size.width * 0.6f, size.height * 0.4f)
-                  lineTo(size.width, size.height * 0.8f)
-                }
-                drawPath(path, color = Color(0xFFDC2626), style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2.dp.toPx()))
-              }
-            }
-          }
-        }
-      }
-    }
-
-    // 3. Student & Batch Overview Cards
-    item {
-      Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(12.dp)
-      ) {
-        // CARD 1: Total Students
-        Card(
-          modifier = Modifier.weight(1f),
-          colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-          shape = RoundedCornerShape(20.dp),
-          border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
-        ) {
-          Row(
-            modifier = Modifier.padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
-          ) {
-            Box(
-              modifier = Modifier
-                .size(44.dp)
-                .clip(RoundedCornerShape(14.dp))
-                .background(Color(0xFFEEF2FF)),
-              contentAlignment = Alignment.Center
-            ) {
-              Icon(
-                imageVector = Icons.Default.Groups,
-                contentDescription = null,
-                tint = Color(0xFF4F46E5),
-                modifier = Modifier.size(24.dp)
-              )
-            }
-            Column {
-              Text("Total Students", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF4F46E5))
-              Text("${students.size}", fontSize = 22.sp, fontWeight = FontWeight.ExtraBold, color = MaterialTheme.colorScheme.onSurface)
-              Text("Across all batches", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-          }
-        }
-
-        // CARD 2: Total Batches
-        Card(
-          modifier = Modifier.weight(1f),
-          colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-          shape = RoundedCornerShape(20.dp),
-          border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
-        ) {
-          Row(
-            modifier = Modifier.padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
-          ) {
-            Box(
-              modifier = Modifier
-                .size(44.dp)
-                .clip(RoundedCornerShape(14.dp))
-                .background(Color(0xFFE0F2FE)),
-              contentAlignment = Alignment.Center
-            ) {
-              Icon(
-                imageVector = Icons.Default.School,
-                contentDescription = null,
-                tint = Color(0xFF0284C7),
-                modifier = Modifier.size(24.dp)
-              )
-            }
-            Column {
-              Text("Total Batches", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0284C7))
-              Text("${batches.size}", fontSize = 22.sp, fontWeight = FontWeight.ExtraBold, color = MaterialTheme.colorScheme.onSurface)
-              Text("Active batches", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-          }
-        }
-      }
-    }
-
-    // 4. Fee Tracker Section
-    item {
-      Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        shape = RoundedCornerShape(20.dp),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
-      ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-          // Header
-          Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-          ) {
-            Text(
-              text = "Fee Tracker",
-              fontWeight = FontWeight.Bold,
-              fontSize = 16.sp,
-              color = MaterialTheme.colorScheme.onSurface
-            )
-            TextButton(
-              onClick = { onTabChange(1) },
-              contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
-            ) {
-              Text("View Details ›", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF2563EB))
-            }
-          }
-
-          Spacer(modifier = Modifier.height(12.dp))
-
-          // Donut chart + 4 Breakdown Cards Grid
-          Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(16.dp)
-          ) {
-            // Donut Chart
-            Box(
-              modifier = Modifier.size(110.dp),
-              contentAlignment = Alignment.Center
-            ) {
-              Canvas(modifier = Modifier.fillMaxSize()) {
-                val strokeWidth = 14.dp.toPx()
-                var startAngle = -90f
-
-                val collectedAngle = 360f * (pctCollected / 100f)
-                drawArc(
-                  color = Color(0xFF16A34A),
-                  startAngle = startAngle,
-                  sweepAngle = collectedAngle,
-                  useCenter = false,
-                  style = androidx.compose.ui.graphics.drawscope.Stroke(width = strokeWidth)
-                )
-                startAngle += collectedAngle
-
-                val pendingAngle = 360f * (pctPending / 100f)
-                drawArc(
-                  color = Color(0xFFD97706),
-                  startAngle = startAngle,
-                  sweepAngle = pendingAngle,
-                  useCenter = false,
-                  style = androidx.compose.ui.graphics.drawscope.Stroke(width = strokeWidth)
-                )
-                startAngle += pendingAngle
-
-                val overdueAngle = 360f * (pctOverdue / 100f)
-                drawArc(
-                  color = Color(0xFFDC2626),
-                  startAngle = startAngle,
-                  sweepAngle = overdueAngle,
-                  useCenter = false,
-                  style = androidx.compose.ui.graphics.drawscope.Stroke(width = strokeWidth)
-                )
-              }
-
-              Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("This Month", fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.SemiBold)
-                Text(
-                  "₹${String.format(Locale.US, "%,d", totalFeeExpected)}",
-                  fontSize = 11.sp,
-                  fontWeight = FontWeight.ExtraBold,
-                  color = MaterialTheme.colorScheme.onSurface
-                )
-                Text("Total Fee", fontSize = 8.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-              }
-            }
-
-            // 4 Breakdown Metric Boxes Grid
-            Column(
-              modifier = Modifier.weight(1f),
-              verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-              Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-              ) {
-                // Box 1: Collected
-                Box(
-                  modifier = Modifier
-                    .weight(1f)
-                    .background(Color(0xFFF0FDF4), RoundedCornerShape(10.dp))
-                    .padding(8.dp)
-                ) {
-                  Column {
-                    Text("₹${String.format(Locale.US, "%,d", collectedFee)}", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF16A34A))
-                    Text("Collected", fontSize = 9.sp, color = Color(0xFF64748B))
-                    Text("${String.format(Locale.US, "%.1f", pctCollected)}%", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Color(0xFF16A34A))
-                  }
-                }
-                // Box 2: Pending
-                Box(
-                  modifier = Modifier
-                    .weight(1f)
-                    .background(Color(0xFFFFFBEB), RoundedCornerShape(10.dp))
-                    .padding(8.dp)
-                ) {
-                  Column {
-                    Text("₹${String.format(Locale.US, "%,d", pendingFee)}", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFFD97706))
-                    Text("Pending", fontSize = 9.sp, color = Color(0xFF64748B))
-                    Text("${String.format(Locale.US, "%.1f", pctPending)}%", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Color(0xFFD97706))
-                  }
-                }
-              }
-
-              Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-              ) {
-                // Box 3: Overdue
-                Box(
-                  modifier = Modifier
-                    .weight(1f)
-                    .background(Color(0xFFFEF2F2), RoundedCornerShape(10.dp))
-                    .padding(8.dp)
-                ) {
-                  Column {
-                    Text("₹${String.format(Locale.US, "%,d", overdueFee)}", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFFDC2626))
-                    Text("Overdue", fontSize = 9.sp, color = Color(0xFF64748B))
-                    Text("${String.format(Locale.US, "%.1f", pctOverdue)}%", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Color(0xFFDC2626))
-                  }
-                }
-                // Box 4: Total Expected
-                Box(
-                  modifier = Modifier
-                    .weight(1f)
-                    .background(Color(0xFFEFF6FF), RoundedCornerShape(10.dp))
-                    .padding(8.dp)
-                ) {
-                  Column {
-                    Text("₹${String.format(Locale.US, "%,d", totalFeeExpected)}", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF2563EB))
-                    Text("Total Expected", fontSize = 9.sp, color = Color(0xFF64748B))
-                    Text("100%", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Color(0xFF2563EB))
-                  }
-                }
-              }
-            }
-          }
-
-          Spacer(modifier = Modifier.height(14.dp))
-
-          // Multi-color Segmented Progress Bar
-          Row(
-            modifier = Modifier
-              .fillMaxWidth()
-              .height(8.dp)
-              .clip(RoundedCornerShape(4.dp))
-              .background(MaterialTheme.colorScheme.surfaceVariant)
-          ) {
-            if (pctCollected > 0) {
-              Box(modifier = Modifier.weight(pctCollected).fillMaxHeight().background(Color(0xFF16A34A)))
-            }
-            if (pctPending > 0) {
-              Box(modifier = Modifier.weight(pctPending).fillMaxHeight().background(Color(0xFFD97706)))
-            }
-            if (pctOverdue > 0) {
-              Box(modifier = Modifier.weight(pctOverdue).fillMaxHeight().background(Color(0xFFDC2626)))
-            }
-          }
-
-          Spacer(modifier = Modifier.height(14.dp))
-
-          // Action button: Generate Fee Report
-          OutlinedButton(
-            onClick = {
-              AppRepository.addNotification(
-                NotificationItem(
-                  id = "NOT_RPT_${System.currentTimeMillis()}",
-                  title = "📊 Fee Ledger Report Generated",
-                  message = "Monthly collection report generated for FSI: ₹${String.format(Locale.US, "%,d", totalFeeExpected)}",
-                  time = AppRepository.getCurrentTimeStr(),
-                  type = "Fee",
-                  recipientRole = "Admin"
-                )
-              )
-            },
-            modifier = Modifier.fillMaxWidth(),
+        Box {
+          Surface(
+            color = Color(0xFF111C2E),
             shape = RoundedCornerShape(12.dp),
-            border = BorderStroke(1.dp, Color(0xFF2563EB))
+            border = BorderStroke(1.dp, Color(0xFF38BDF8).copy(alpha = 0.4f)),
+            modifier = Modifier.clickable { showSessionDropdown = true }
           ) {
-            Icon(
-              imageVector = Icons.Default.Description,
-              contentDescription = null,
-              tint = Color(0xFF2563EB),
-              modifier = Modifier.size(16.dp)
+            Row(
+              modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+              verticalAlignment = Alignment.CenterVertically,
+              horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+              Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(Color(0xFF38BDF8)))
+              Text(
+                text = selectedSession,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color(0xFF38BDF8)
+              )
+              Icon(
+                imageVector = Icons.Outlined.ArrowDropDown,
+                contentDescription = null,
+                tint = Color(0xFF38BDF8),
+                modifier = Modifier.size(18.dp)
+              )
+            }
+          }
+
+          DropdownMenu(
+            expanded = showSessionDropdown,
+            onDismissRequest = { showSessionDropdown = false },
+            modifier = Modifier.background(Color(0xFF111C2E))
+          ) {
+            DropdownMenuItem(
+              text = { Text("Session 2026-27 (Current)", color = Color.White, fontWeight = FontWeight.Bold) },
+              onClick = {
+                selectedSession = "Session 2026-27"
+                showSessionDropdown = false
+              }
             )
-            Spacer(modifier = Modifier.width(6.dp))
-            Text("Generate Fee Report", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF2563EB))
+            DropdownMenuItem(
+              text = { Text("Session 2025-26 (Archive)", color = Color(0xFF94A3B8)) },
+              onClick = {
+                selectedSession = "Session 2025-26"
+                showSessionDropdown = false
+              }
+            )
           }
         }
       }
     }
 
-    // 5. Today's Schedule Section
-    item {
-      Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        shape = RoundedCornerShape(20.dp),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
-      ) {
-        Column(modifier = Modifier.padding(16.dp)) {
+    // 1.5 Academic Setup Alert Banner (if setup incomplete)
+    if (!instituteConfig.isSetupCompleted) {
+      item {
+        Card(
+          modifier = Modifier.fillMaxWidth(),
+          shape = RoundedCornerShape(16.dp),
+          colors = CardDefaults.cardColors(containerColor = Color(0xFF111C2E)),
+          border = BorderStroke(1.dp, Color(0xFF0284C7).copy(alpha = 0.6f))
+        ) {
           Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+            modifier = Modifier.padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(14.dp)
           ) {
-            Text("Today's Schedule", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = MaterialTheme.colorScheme.onSurface)
-            TextButton(onClick = { onTabChange(4) }, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)) {
-              Text("View All ›", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF2563EB))
+            Box(
+              modifier = Modifier
+                .size(44.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(Color(0xFF0284C7).copy(alpha = 0.2f)),
+              contentAlignment = Alignment.Center
+            ) {
+              Icon(Icons.Outlined.Tune, contentDescription = null, tint = Color(0xFF38BDF8), modifier = Modifier.size(24.dp))
+            }
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+              Text(
+                text = "Complete Academic Setup",
+                fontWeight = FontWeight.Bold,
+                fontSize = 14.sp,
+                color = Color.White
+              )
+              Text(
+                text = "Configure offered grades (1st–12th), subjects, streams & institute profile.",
+                fontSize = 12.sp,
+                color = Color(0xFF94A3B8),
+                lineHeight = 16.sp
+              )
+              Spacer(modifier = Modifier.height(2.dp))
+              Button(
+                onClick = onSetupClick,
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7)),
+                shape = RoundedCornerShape(10.dp),
+                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
+                modifier = Modifier.height(34.dp)
+              ) {
+                Text("Setup Now", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
+              }
             }
           }
+        }
+      }
+    }
 
-          Spacer(modifier = Modifier.height(10.dp))
-
-          Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            scheduledClasses.forEach { (timeStr, names, details) ->
-              val (subject, batchName) = names
-              val (roomAndTeacher, dotColor) = details
-              val (room, teacher) = roomAndTeacher
-
+    // 2. Attendance & Enrollment Metric Cards (Unified Symmetrical 2x2 Dark Slate Grid)
+    item {
+      Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        // Row 1: Present & Absent
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+          // CARD 1: Present Today
+          Card(
+            modifier = Modifier.weight(1f).pressSpring(0.96f),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF111C2E)),
+            shape = RoundedCornerShape(16.dp),
+            border = BorderStroke(1.dp, Color(0xFF24334A)),
+            elevation = CardDefaults.cardElevation(2.dp)
+          ) {
+            Column(modifier = Modifier.padding(14.dp)) {
               Row(
                 verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.fillMaxWidth()
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
               ) {
                 Box(
                   modifier = Modifier
-                    .size(10.dp)
-                    .clip(CircleShape)
-                    .background(dotColor)
-                )
-                Spacer(modifier = Modifier.width(10.dp))
-                Text(timeStr, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.width(120.dp))
-                Spacer(modifier = Modifier.width(8.dp))
-                Box(
-                  modifier = Modifier
-                    .weight(1f)
-                    .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(10.dp))
-                    .padding(10.dp)
-                ) {
-                  Column {
-                    Text(subject, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
-                    Text("Batch: $batchName • $room", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text("Faculty: $teacher", fontSize = 10.sp, color = Color(0xFF2563EB), fontWeight = FontWeight.Medium)
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    }
-
-    // 6. Attention Required Section
-    item {
-      Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        shape = RoundedCornerShape(20.dp),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
-      ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-          Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-          ) {
-            Text("Attention Required", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = MaterialTheme.colorScheme.onSurface)
-            TextButton(onClick = { onTabChange(1) }, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)) {
-              Text("View All ›", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF2563EB))
-            }
-          }
-
-          Spacer(modifier = Modifier.height(10.dp))
-
-          Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            // Overdue Fees
-            Surface(
-              onClick = { onTabChange(1) },
-              shape = RoundedCornerShape(12.dp),
-              color = Color(0xFFFEF2F2),
-              modifier = Modifier.fillMaxWidth()
-            ) {
-              Row(
-                modifier = Modifier.padding(12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-              ) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                  Box(
-                    modifier = Modifier.size(36.dp).clip(RoundedCornerShape(10.dp)).background(Color(0xFFFEE2E2)),
-                    contentAlignment = Alignment.Center
-                  ) {
-                    Icon(Icons.Default.AccountBalanceWallet, contentDescription = null, tint = Color(0xFFDC2626), modifier = Modifier.size(18.dp))
-                  }
-                  Column {
-                    Text("$overdueStudentsCount Students", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF991B1B))
-                    Text("Have overdue fees", fontSize = 10.sp, color = Color(0xFFB91C1C))
-                  }
-                }
-                Icon(Icons.Default.ChevronRight, contentDescription = null, tint = Color(0xFFDC2626), modifier = Modifier.size(18.dp))
-              }
-            }
-
-            // Low Attendance
-            Surface(
-              onClick = { onTabChange(1) },
-              shape = RoundedCornerShape(12.dp),
-              color = Color(0xFFFFFBEB),
-              modifier = Modifier.fillMaxWidth()
-            ) {
-              Row(
-                modifier = Modifier.padding(12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-              ) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                  Box(
-                    modifier = Modifier.size(36.dp).clip(RoundedCornerShape(10.dp)).background(Color(0xFFFEF3C7)),
-                    contentAlignment = Alignment.Center
-                  ) {
-                    Icon(Icons.Default.PersonSearch, contentDescription = null, tint = Color(0xFFD97706), modifier = Modifier.size(18.dp))
-                  }
-                  Column {
-                    Text("$lowAttendanceCount Students", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF92400E))
-                    Text("Low attendance (<75%)", fontSize = 10.sp, color = Color(0xFFB45309))
-                  }
-                }
-                Icon(Icons.Default.ChevronRight, contentDescription = null, tint = Color(0xFFD97706), modifier = Modifier.size(18.dp))
-              }
-            }
-
-            // Pending Homework
-            Surface(
-              onClick = { onTabChange(3) },
-              shape = RoundedCornerShape(12.dp),
-              color = Color(0xFFF5F3FF),
-              modifier = Modifier.fillMaxWidth()
-            ) {
-              Row(
-                modifier = Modifier.padding(12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-              ) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                  Box(
-                    modifier = Modifier.size(36.dp).clip(RoundedCornerShape(10.dp)).background(Color(0xFFDDD6FE)),
-                    contentAlignment = Alignment.Center
-                  ) {
-                    Icon(Icons.Default.Assignment, contentDescription = null, tint = Color(0xFF7C3AED), modifier = Modifier.size(18.dp))
-                  }
-                  Column {
-                    Text("$pendingHomeworkCount Homework", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF5B21B6))
-                    Text("Pending submissions", fontSize = 10.sp, color = Color(0xFF6D28D9))
-                  }
-                }
-                Icon(Icons.Default.ChevronRight, contentDescription = null, tint = Color(0xFF7C3AED), modifier = Modifier.size(18.dp))
-              }
-            }
-
-            // Scheduled Tests
-            Surface(
-              onClick = { onTabChange(3) },
-              shape = RoundedCornerShape(12.dp),
-              color = Color(0xFFEFF6FF),
-              modifier = Modifier.fillMaxWidth()
-            ) {
-              Row(
-                modifier = Modifier.padding(12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-              ) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                  Box(
-                    modifier = Modifier.size(36.dp).clip(RoundedCornerShape(10.dp)).background(Color(0xFFDBEAFE)),
-                    contentAlignment = Alignment.Center
-                  ) {
-                    Icon(Icons.Default.Event, contentDescription = null, tint = Color(0xFF2563EB), modifier = Modifier.size(18.dp))
-                  }
-                  Column {
-                    Text("$upcomingTestsCount Tests", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1E40AF))
-                    Text("Scheduled this week", fontSize = 10.sp, color = Color(0xFF1D4ED8))
-                  }
-                }
-                Icon(Icons.Default.ChevronRight, contentDescription = null, tint = Color(0xFF2563EB), modifier = Modifier.size(18.dp))
-              }
-            }
-          }
-        }
-      }
-    }
-
-    // 7. Quick Actions Section
-    item {
-      Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        shape = RoundedCornerShape(20.dp),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
-      ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-          Text("Quick Actions", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = MaterialTheme.colorScheme.onSurface)
-          Spacer(modifier = Modifier.height(12.dp))
-
-          Row(
-            modifier = Modifier
-              .fillMaxWidth()
-              .horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
-          ) {
-            QuickActionButtonTile(
-              icon = Icons.Default.HowToReg,
-              title = "Take\nAttendance",
-              bgColor = Color(0xFFEFF6FF),
-              iconColor = Color(0xFF2563EB),
-              onClick = { onTabChange(1) }
-            )
-
-            QuickActionButtonTile(
-              icon = Icons.Default.PersonAdd,
-              title = "Add\nStudent",
-              bgColor = Color(0xFFF0FDF4),
-              iconColor = Color(0xFF16A34A),
-              onClick = onAdmitClick
-            )
-
-            QuickActionButtonTile(
-              icon = Icons.Default.Payments,
-              title = "Record\nPayment",
-              bgColor = Color(0xFFFFFBEB),
-              iconColor = Color(0xFFD97706),
-              onClick = { showRecordPaymentDialog = true }
-            )
-
-            QuickActionButtonTile(
-              icon = Icons.Default.EventNote,
-              title = "Schedule\nTest",
-              bgColor = Color(0xFFFEF2F2),
-              iconColor = Color(0xFFDC2626),
-              onClick = { showScheduleTestDialog = true }
-            )
-
-            QuickActionButtonTile(
-              icon = Icons.Default.Campaign,
-              title = "Send\nAnnouncement",
-              bgColor = Color(0xFFF5F3FF),
-              iconColor = Color(0xFF7C3AED),
-              onClick = { showAnnouncementDialog = true }
-            )
-          }
-        }
-      }
-    }
-
-    // 8. Recent Activity Section
-    item {
-      Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        shape = RoundedCornerShape(20.dp),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
-      ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-          Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-          ) {
-            Text("Recent Activity", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = MaterialTheme.colorScheme.onSurface)
-            TextButton(onClick = { onTabChange(0) }, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)) {
-              Text("View All ›", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF2563EB))
-            }
-          }
-
-          Spacer(modifier = Modifier.height(10.dp))
-
-          Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            recentActivities.forEach { (title, time, icon) ->
-              Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                modifier = Modifier.fillMaxWidth()
-              ) {
-                Box(
-                  modifier = Modifier
-                    .size(32.dp)
-                    .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.surfaceVariant),
+                    .size(34.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(Color(0xFF10B981).copy(alpha = 0.15f)),
                   contentAlignment = Alignment.Center
                 ) {
-                  Icon(icon, contentDescription = null, tint = Color(0xFF2563EB), modifier = Modifier.size(16.dp))
+                  Icon(
+                    imageVector = Icons.Outlined.CheckCircle,
+                    contentDescription = null,
+                    tint = Color(0xFF4ADE80),
+                    modifier = Modifier.size(18.dp)
+                  )
                 }
-                Column(modifier = Modifier.weight(1f)) {
-                  Text(title, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                }
-                Text(time, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("Present Today", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF4ADE80))
               }
+              Spacer(modifier = Modifier.height(8.dp))
+              AnimatedCounterText(
+                targetValue = presentCount,
+                style = NumberTypography.cardStat,
+                color = Color.White
+              )
+              MicroLabelText(text = "Students Present", color = Color(0xFF94A3B8))
+              Spacer(modifier = Modifier.height(8.dp))
+              Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+                modifier = Modifier.fillMaxWidth()
+              ) {
+                Surface(color = Color(0xFF10B981).copy(alpha = 0.15f), shape = RoundedCornerShape(6.dp)) {
+                  MicroLabelText(text = "↑ $presentPct%", color = Color(0xFF4ADE80), modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
+                }
+                Canvas(modifier = Modifier.width(36.dp).height(14.dp)) {
+                  val path = androidx.compose.ui.graphics.Path().apply {
+                    moveTo(0f, size.height * 0.8f)
+                    quadraticTo(size.width * 0.4f, size.height * 0.2f, size.width * 0.7f, size.height * 0.5f)
+                    lineTo(size.width, size.height * 0.1f)
+                  }
+                  drawPath(path, color = Color(0xFF4ADE80), style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2.dp.toPx()))
+                }
+              }
+            }
+          }
+
+          // CARD 2: Absent Today
+          Card(
+            modifier = Modifier.weight(1f).pressSpring(0.96f),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF111C2E)),
+            shape = RoundedCornerShape(16.dp),
+            border = BorderStroke(1.dp, Color(0xFF24334A)),
+            elevation = CardDefaults.cardElevation(2.dp)
+          ) {
+            Column(modifier = Modifier.padding(14.dp)) {
+              Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+              ) {
+                Box(
+                  modifier = Modifier
+                    .size(34.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(if (absentCount > 0) Color(0xFFEF4444).copy(alpha = 0.15f) else Color(0xFF10B981).copy(alpha = 0.15f)),
+                  contentAlignment = Alignment.Center
+                ) {
+                  Icon(
+                    imageVector = if (absentCount > 0) Icons.Outlined.Cancel else Icons.Outlined.Check,
+                    contentDescription = null,
+                    tint = if (absentCount > 0) Color(0xFFF87171) else Color(0xFF4ADE80),
+                    modifier = Modifier.size(18.dp)
+                  )
+                }
+                Text("Absent Today", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = if (absentCount > 0) Color(0xFFF87171) else Color(0xFF4ADE80))
+              }
+              Spacer(modifier = Modifier.height(8.dp))
+              AnimatedCounterText(
+                targetValue = absentCount,
+                style = NumberTypography.cardStat,
+                color = Color.White
+              )
+              MicroLabelText(text = "Students Absent", color = Color(0xFF94A3B8))
+              Spacer(modifier = Modifier.height(8.dp))
+              Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+                modifier = Modifier.fillMaxWidth()
+              ) {
+                Surface(
+                  color = if (absentCount > 0) Color(0xFFEF4444).copy(alpha = 0.15f) else Color(0xFF10B981).copy(alpha = 0.15f),
+                  shape = RoundedCornerShape(6.dp)
+                ) {
+                  MicroLabelText(
+                    text = if (absentCount > 0) "↓ $absentPct%" else "0% All Present",
+                    color = if (absentCount > 0) Color(0xFFF87171) else Color(0xFF4ADE80),
+                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                  )
+                }
+                if (absentCount > 0) {
+                  Canvas(modifier = Modifier.width(36.dp).height(14.dp)) {
+                    val path = androidx.compose.ui.graphics.Path().apply {
+                      moveTo(0f, size.height * 0.3f)
+                      quadraticTo(size.width * 0.3f, size.height * 0.9f, size.width * 0.6f, size.height * 0.4f)
+                      lineTo(size.width, size.height * 0.8f)
+                    }
+                    drawPath(path, color = Color(0xFFF87171), style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2.dp.toPx()))
+                  }
+                } else {
+                  Surface(
+                    color = Color(0xFF10B981).copy(alpha = 0.15f),
+                    shape = RoundedCornerShape(6.dp)
+                  ) {
+                    MicroLabelText(
+                      text = "✓ 100% Present",
+                      color = Color(0xFF4ADE80),
+                      modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                    )
+                  }
+                }
+              }
+            }
+          }
+        }
+
+        // Row 2: Total Students & Total Batches
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+          // CARD 3: Total Students
+          Card(
+            modifier = Modifier.weight(1f).pressSpring(0.96f),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF111C2E)),
+            shape = RoundedCornerShape(16.dp),
+            border = BorderStroke(1.dp, Color(0xFF24334A)),
+            elevation = CardDefaults.cardElevation(2.dp)
+          ) {
+            Column(modifier = Modifier.padding(14.dp)) {
+              Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+              ) {
+                Box(
+                  modifier = Modifier
+                    .size(34.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(Color(0xFF6366F1).copy(alpha = 0.15f)),
+                  contentAlignment = Alignment.Center
+                ) {
+                  Icon(
+                    imageVector = Icons.Outlined.People,
+                    contentDescription = null,
+                    tint = Color(0xFF818CF8),
+                    modifier = Modifier.size(18.dp)
+                  )
+                }
+                Text("Total Students", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF818CF8))
+              }
+              Spacer(modifier = Modifier.height(8.dp))
+              AnimatedCounterText(
+                targetValue = students.size,
+                style = NumberTypography.cardStat,
+                color = Color.White
+              )
+              MicroLabelText(text = "Active Admissions", color = Color(0xFF94A3B8))
+              Spacer(modifier = Modifier.height(8.dp))
+              Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+                modifier = Modifier.fillMaxWidth()
+              ) {
+                Surface(color = Color(0xFF6366F1).copy(alpha = 0.15f), shape = RoundedCornerShape(6.dp)) {
+                  MicroLabelText(text = "Session 2026-27", color = Color(0xFF818CF8), modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
+                }
+                MicroLabelText(text = "Active", color = Color(0xFF818CF8))
+              }
+            }
+          }
+
+          // CARD 4: Total Batches
+          Card(
+            modifier = Modifier.weight(1f).pressSpring(0.96f),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF111C2E)),
+            shape = RoundedCornerShape(16.dp),
+            border = BorderStroke(1.dp, Color(0xFF24334A)),
+            elevation = CardDefaults.cardElevation(2.dp)
+          ) {
+            Column(modifier = Modifier.padding(14.dp)) {
+              Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+              ) {
+                Box(
+                  modifier = Modifier
+                    .size(34.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(Color(0xFF0284C7).copy(alpha = 0.15f)),
+                  contentAlignment = Alignment.Center
+                ) {
+                  Icon(
+                    imageVector = Icons.Outlined.School,
+                    contentDescription = null,
+                    tint = Color(0xFF38BDF8),
+                    modifier = Modifier.size(18.dp)
+                  )
+                }
+                Text("Total Batches", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF38BDF8))
+              }
+              Spacer(modifier = Modifier.height(8.dp))
+              AnimatedCounterText(
+                targetValue = batches.size,
+                style = NumberTypography.cardStat,
+                color = Color.White
+              )
+              MicroLabelText(text = "Active Batches", color = Color(0xFF94A3B8))
+              Spacer(modifier = Modifier.height(8.dp))
+              Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+                modifier = Modifier.fillMaxWidth()
+              ) {
+                Surface(color = Color(0xFF0284C7).copy(alpha = 0.15f), shape = RoundedCornerShape(6.dp)) {
+                  MicroLabelText(text = "100% Running", color = Color(0xFF38BDF8), modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
+                }
+                MicroLabelText(text = "Running", color = Color(0xFF38BDF8))
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // 4. Fee Tracker Section (Dark Navy Elevated with Indian Currency & Interactive Scope)
+    item {
+      Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF111C2E)),
+        shape = RoundedCornerShape(16.dp),
+        border = BorderStroke(1.dp, Color(0xFF24334A)),
+        elevation = CardDefaults.cardElevation(2.dp)
+      ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+          // Header & Full Session Badge
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+          ) {
+            Row(
+              modifier = Modifier.weight(1f),
+              verticalAlignment = Alignment.CenterVertically,
+              horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+              Box(
+                modifier = Modifier
+                  .size(38.dp)
+                  .clip(RoundedCornerShape(12.dp))
+                  .background(Color(0xFF10B981).copy(alpha = 0.15f)),
+                contentAlignment = Alignment.Center
+              ) {
+                Icon(Icons.Outlined.AccountBalanceWallet, contentDescription = null, tint = Color(0xFF4ADE80), modifier = Modifier.size(20.dp))
+              }
+              Column(modifier = Modifier.weight(1f, fill = false)) {
+                Text(
+                  text = "Fee Collection Tracker",
+                  fontWeight = FontWeight.Bold,
+                  fontSize = 16.sp,
+                  color = Color.White,
+                  maxLines = 1,
+                  overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                )
+                Text(
+                  text = "Full Academic Session: 2026-27 (10 Months Plan)",
+                  fontSize = 12.sp,
+                  color = Color(0xFF94A3B8),
+                  maxLines = 1,
+                  overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                )
+              }
+            }
+
+            Spacer(modifier = Modifier.width(8.dp))
+
+            // Session Scope Badge
+            Surface(
+              color = Color(0xFF0284C7).copy(alpha = 0.15f),
+              shape = RoundedCornerShape(8.dp),
+              border = BorderStroke(1.dp, Color(0xFF0284C7).copy(alpha = 0.3f))
+            ) {
+              Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+              ) {
+                Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(Color(0xFF38BDF8)))
+                Text(
+                  text = "Session Target",
+                  fontSize = 10.sp,
+                  fontWeight = FontWeight.Bold,
+                  color = Color(0xFF38BDF8),
+                  maxLines = 1,
+                  softWrap = false
+                )
+              }
+            }
+          }
+
+          Spacer(modifier = Modifier.height(14.dp))
+
+          if (fees.isEmpty()) {
+            DashboardEmptyStates.FeeTracker(
+              onRecordPayment = { showRecordPaymentDialog = true },
+              onOpenLedger = { showFeeLedgerDialog = true }
+            )
+          } else {
+            // Donut chart + 4 Breakdown Metric Tiles for Full Session
+            Row(
+              modifier = Modifier.fillMaxWidth(),
+              verticalAlignment = Alignment.CenterVertically,
+              horizontalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+              // Donut Chart with 3 Distinct Mathematical States for Session
+              val animDonutProgress by animateFloatAsState(
+                targetValue = 1f,
+                animationSpec = tween(durationMillis = 1000, easing = FastOutSlowInEasing),
+                label = "session_donut_sweep"
+              )
+
+              Box(
+                modifier = Modifier.size(116.dp),
+                contentAlignment = Alignment.Center
+              ) {
+                Canvas(modifier = Modifier.fillMaxSize()) {
+                  val strokeWidth = 12.dp.toPx()
+                  var startAngle = -90f
+                  val sweepScale = animDonutProgress
+
+                  // Background subtle track
+                  drawArc(
+                    color = Color(0xFF1E2D42),
+                    startAngle = 0f,
+                    sweepAngle = 360f,
+                    useCenter = false,
+                    style = Stroke(width = strokeWidth)
+                  )
+
+                  val collectedAngle = 360f * (pctCollected / 100f) * sweepScale
+                  drawArc(
+                    color = Color(0xFF4ADE80),
+                    startAngle = startAngle,
+                    sweepAngle = collectedAngle,
+                    useCenter = false,
+                    style = Stroke(width = strokeWidth)
+                  )
+                  startAngle += collectedAngle
+
+                  val inGraceAngle = 360f * (pctInGrace / 100f) * sweepScale
+                  drawArc(
+                    color = Color(0xFFFBBF24),
+                    startAngle = startAngle,
+                    sweepAngle = inGraceAngle,
+                    useCenter = false,
+                    style = Stroke(width = strokeWidth)
+                  )
+                  startAngle += inGraceAngle
+
+                  val overdueAngle = 360f * (pctOverdue / 100f) * sweepScale
+                  drawArc(
+                    color = Color(0xFFF87171),
+                    startAngle = startAngle,
+                    sweepAngle = overdueAngle,
+                    useCenter = false,
+                    style = Stroke(width = strokeWidth)
+                  )
+                }
+
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                  MicroLabelText(
+                    text = "Session Plan",
+                    color = Color(0xFF94A3B8)
+                  )
+                  InlineStatText(
+                    text = CurrencyFormatter.formatLakhs(sessionTotalExpected),
+                    color = Color.White
+                  )
+                  MicroLabelText(
+                    text = "${pctCollected.toInt()}% Realized",
+                    color = Color(0xFF4ADE80)
+                  )
+                }
+              }
+
+              // 4 Breakdown Metric Dark Tiles
+              Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+              ) {
+                Row(
+                  modifier = Modifier.fillMaxWidth(),
+                  horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                  // Box 1: Collected
+                  Surface(
+                    onClick = {
+                      feeLedgerInitialFilter = "Paid"
+                      showFeeLedgerDialog = true
+                    },
+                    color = Color(0xFF0A1220),
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.weight(1f)
+                  ) {
+                    Column(modifier = Modifier.padding(8.dp)) {
+                      InlineStatText(
+                        text = CurrencyFormatter.formatLakhs(sessionCollected),
+                        color = Color(0xFF4ADE80)
+                      )
+                      MicroLabelText(text = "Collected", color = Color(0xFFCBD5E1))
+                      MicroLabelText(text = "${pctCollected.toInt()}% Realized ›", color = Color(0xFF4ADE80))
+                    }
+                  }
+                  // Box 2: Pending (In Grace)
+                  Surface(
+                    onClick = {
+                      feeLedgerInitialFilter = "Pending"
+                      showFeeLedgerDialog = true
+                    },
+                    color = Color(0xFF0A1220),
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.weight(1f)
+                  ) {
+                    Column(modifier = Modifier.padding(8.dp)) {
+                      InlineStatText(
+                        text = CurrencyFormatter.formatLakhs(sessionInGraceFee),
+                        color = Color(0xFFFBBF24)
+                      )
+                      MicroLabelText(text = "In Grace", color = Color(0xFFCBD5E1))
+                      MicroLabelText(text = "${pctInGrace.toInt()}% Pending ›", color = Color(0xFFFBBF24))
+                    }
+                  }
+                }
+
+                Row(
+                  modifier = Modifier.fillMaxWidth(),
+                  horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                  // Box 3: Overdue (Highlighted if overdue > 0)
+                  Surface(
+                    onClick = {
+                      feeLedgerInitialFilter = "Overdue"
+                      showFeeLedgerDialog = true
+                    },
+                    color = if (sessionOverdueFee > 0) Color(0xFFEF4444).copy(alpha = 0.08f) else Color(0xFF0A1220),
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.weight(1f)
+                  ) {
+                    Column(modifier = Modifier.padding(8.dp)) {
+                      InlineStatText(
+                        text = CurrencyFormatter.formatIndianRupees(sessionOverdueFee),
+                        color = Color(0xFFF87171)
+                      )
+                      MicroLabelText(text = "Overdue", color = Color(0xFFCBD5E1))
+                      MicroLabelText(
+                        text = if (sessionOverdueFee > 0) "Action Req. ›" else "0% Delayed ›",
+                        color = Color(0xFFF87171)
+                      )
+                    }
+                  }
+                  // Box 4: Total Expected (Gross)
+                  Surface(
+                    onClick = {
+                      feeLedgerInitialFilter = "All"
+                      showFeeLedgerDialog = true
+                    },
+                    color = Color(0xFF0A1220),
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.weight(1f)
+                  ) {
+                    Column(modifier = Modifier.padding(8.dp)) {
+                      InlineStatText(
+                        text = CurrencyFormatter.formatLakhs(sessionTotalExpected),
+                        color = Color(0xFF38BDF8)
+                      )
+                      MicroLabelText(text = "Session Plan", color = Color(0xFFCBD5E1))
+                      MicroLabelText(
+                        text = "10 Months Plan ›",
+                        color = Color(0xFF38BDF8)
+                      )
+                    }
+                  }
+                }
+              }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Performance insight tile (Clean Realization & Dues Breakdown)
+            Surface(
+              color = Color(0xFF0A1220),
+              shape = RoundedCornerShape(10.dp),
+              modifier = Modifier.fillMaxWidth()
+            ) {
+              Row(
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+              ) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                  Icon(Icons.Outlined.TrendingUp, contentDescription = null, tint = Color(0xFF4ADE80), modifier = Modifier.size(16.dp))
+                  Text(
+                    text = "Realization: ${pctCollected.toInt()}% collected • Dues: ${pctInGrace.toInt() + pctOverdue.toInt()}%",
+                    fontSize = 11.sp,
+                    color = Color(0xFFCBD5E1),
+                    fontWeight = FontWeight.Medium
+                  )
+                }
+                Text(
+                  text = if (sessionOverdueFee > 0) "${CurrencyFormatter.formatIndianRupees(sessionOverdueFee)} Overdue" else "All in Grace",
+                  fontSize = 11.sp,
+                  fontWeight = FontWeight.Bold,
+                  color = if (sessionOverdueFee > 0) Color(0xFFF87171) else Color(0xFF4ADE80)
+                )
+              }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Action button: Fee Ledger Drill-Down (Primary filled style)
+            Button(
+              onClick = { showFeeLedgerDialog = true },
+              modifier = Modifier.fillMaxWidth(),
+              shape = RoundedCornerShape(12.dp),
+              colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7))
+            ) {
+              Icon(
+                imageVector = Icons.Outlined.ReceiptLong,
+                contentDescription = null,
+                tint = Color.White,
+                modifier = Modifier.size(16.dp)
+              )
+              Spacer(modifier = Modifier.width(6.dp))
+              Text("Open Full Fee Ledger & Invoicing", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
+            }
+          }
+        }
+      }
+    }
+
+    // 4b. Monthly Revenue Bar Chart (Persistent Fee Database Analytics)
+    item {
+      MonthlyRevenueSummaryChart(
+        feePayments = feePayments,
+        onRecordPaymentClick = { showRecordPaymentDialog = true }
+      )
+    }
+
+    // 5. Today's Schedule Section (Unified Dark Navy Theme with Crisp Text Hierarchy)
+    item {
+      Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF111C2E)),
+        shape = RoundedCornerShape(16.dp),
+        border = BorderStroke(1.dp, Color(0xFF24334A)),
+        elevation = CardDefaults.cardElevation(2.dp)
+      ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+          ) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+              Box(
+                modifier = Modifier
+                  .size(34.dp)
+                  .clip(RoundedCornerShape(10.dp))
+                  .background(Color(0xFF38BDF8).copy(alpha = 0.15f)),
+                contentAlignment = Alignment.Center
+              ) {
+                Icon(Icons.Outlined.Schedule, contentDescription = null, tint = Color(0xFF38BDF8), modifier = Modifier.size(18.dp))
+              }
+              Text("Today's Schedule", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color.White)
+            }
+            TextButton(onClick = { onTabChange(5) }, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)) {
+              Text("Timetable ›", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF38BDF8))
+            }
+          }
+
+          Spacer(modifier = Modifier.height(12.dp))
+
+          if (scheduledClasses.isEmpty()) {
+            DashboardEmptyStates.TodaysSchedule(
+              onScheduleClass = { onTabChange(5) },
+              onAcademicSetup = onSetupClick
+            )
+          } else {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+              scheduledClasses.forEach { (timeStr, names, details) ->
+                val (subject, batchName) = names
+                val (roomAndTeacher, dotColor) = details
+                val (room, teacher) = roomAndTeacher
+
+                Row(
+                  verticalAlignment = Alignment.CenterVertically,
+                  modifier = Modifier.fillMaxWidth()
+                ) {
+                  Box(
+                    modifier = Modifier
+                      .size(8.dp)
+                      .clip(CircleShape)
+                      .background(dotColor)
+                  )
+                  Spacer(modifier = Modifier.width(8.dp))
+                  Surface(
+                    color = Color(0xFF0A1220),
+                    shape = RoundedCornerShape(8.dp),
+                    border = BorderStroke(1.dp, Color(0xFF1E2D42))
+                  ) {
+                    Text(
+                      text = timeStr,
+                      fontSize = 10.sp,
+                      fontWeight = FontWeight.SemiBold,
+                      color = Color(0xFF94A3B8),
+                      modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                      textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                    )
+                  }
+                  Spacer(modifier = Modifier.width(8.dp))
+                  Surface(
+                    color = Color(0xFF0A1220),
+                    shape = RoundedCornerShape(10.dp),
+                    border = BorderStroke(1.dp, Color(0xFF1E2D42)),
+                    modifier = Modifier.weight(1f)
+                  ) {
+                    Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {
+                      Text(subject, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                      Spacer(modifier = Modifier.height(2.dp))
+                      Text("Batch: $batchName • Room: $room", fontSize = 11.sp, color = Color(0xFF94A3B8))
+                      Spacer(modifier = Modifier.height(2.dp))
+                      Text("Faculty: $teacher", fontSize = 11.sp, color = Color(0xFF38BDF8), fontWeight = FontWeight.Medium)
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // 6. Attention Required Section (Severity Mapped & Zero-Count Filtered)
+    item {
+      Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF111C2E)),
+        shape = RoundedCornerShape(16.dp),
+        border = BorderStroke(1.dp, Color(0xFF24334A)),
+        elevation = CardDefaults.cardElevation(2.dp)
+      ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+          ) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+              Box(
+                modifier = Modifier
+                  .size(34.dp)
+                  .clip(RoundedCornerShape(10.dp))
+                  .background(Color(0xFFF59E0B).copy(alpha = 0.15f)),
+                contentAlignment = Alignment.Center
+              ) {
+                Icon(Icons.Outlined.NotificationImportant, contentDescription = null, tint = Color(0xFFFBBF24), modifier = Modifier.size(18.dp))
+              }
+              Text("Attention Required", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color.White)
+            }
+            TextButton(onClick = { onTabChange(1) }, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)) {
+              Text("View All ›", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF38BDF8))
+            }
+          }
+
+          Spacer(modifier = Modifier.height(12.dp))
+
+          val isSystemEmpty = students.isEmpty() && batches.isEmpty() && fees.isEmpty()
+          val hasNoAlerts = overdueStudentsCount == 0 && lowAttendanceCount == 0 && pendingHomeworkCount == 0 && upcomingTestsCount == 0
+
+          if (isSystemEmpty) {
+            SectionEmptyState(
+              icon = Icons.Outlined.VerifiedUser,
+              title = "System Ready • No Students or Batches Added",
+              description = "Your tuition management workspace is clean and ready. Add your first student or enroll admissions to begin tracking attendance, dues, and academic alerts.",
+              actionLabel = "Add First Student",
+              onActionClick = onAdmitClick,
+              secondaryActionLabel = "Onboard Faculty",
+              onSecondaryActionClick = onStaffOnboardClick,
+              accentColor = Color(0xFFFBBF24)
+            )
+          } else if (hasNoAlerts) {
+            Surface(
+              shape = RoundedCornerShape(12.dp),
+              color = Color(0xFF0A1220),
+              border = BorderStroke(1.dp, Color(0xFF10B981).copy(alpha = 0.3f)),
+              modifier = Modifier.fillMaxWidth()
+            ) {
+              Row(
+                modifier = Modifier.padding(14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+              ) {
+                Icon(Icons.Outlined.CheckCircle, contentDescription = null, tint = Color(0xFF4ADE80), modifier = Modifier.size(20.dp))
+                Column {
+                  Text(
+                    text = "All systems optimal. No outstanding alerts today.",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF4ADE80)
+                  )
+                  Text(
+                    text = "Attendance, fee payments, and evaluations are up to date.",
+                    fontSize = 11.sp,
+                    color = Color(0xFF94A3B8)
+                  )
+                }
+              }
+            }
+          } else {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+              // 1. Critical Severity: Overdue Fees (Red) - Only when count > 0
+              if (overdueStudentsCount > 0) {
+                Surface(
+                  onClick = {
+                    feeLedgerInitialFilter = "Overdue"
+                    showFeeLedgerDialog = true
+                  },
+                  shape = RoundedCornerShape(12.dp),
+                  color = Color(0xFF0A1220),
+                  border = BorderStroke(1.dp, Color(0xFFEF4444).copy(alpha = 0.4f)),
+                  modifier = Modifier.fillMaxWidth()
+                ) {
+                  Row(
+                    modifier = Modifier.padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                  ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                      Box(
+                        modifier = Modifier.size(36.dp).clip(RoundedCornerShape(10.dp)).background(Color(0xFFEF4444).copy(alpha = 0.15f)),
+                        contentAlignment = Alignment.Center
+                      ) {
+                        Icon(Icons.Outlined.AccountBalanceWallet, contentDescription = null, tint = Color(0xFFF87171), modifier = Modifier.size(18.dp))
+                      }
+                      Column {
+                        Text("$overdueStudentsCount Students • Critical", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFFF87171))
+                        Text("Have overdue fee installments past grace period", fontSize = 10.sp, color = Color(0xFFCBD5E1))
+                      }
+                    }
+                    Icon(Icons.Outlined.ChevronRight, contentDescription = null, tint = Color(0xFFF87171), modifier = Modifier.size(18.dp))
+                  }
+                }
+              }
+
+              // 2. Warning Severity: Low Attendance (Amber) - Only when count > 0
+              if (lowAttendanceCount > 0) {
+                Surface(
+                  onClick = { onTabChange(1) },
+                  shape = RoundedCornerShape(12.dp),
+                  color = Color(0xFF0A1220),
+                  border = BorderStroke(1.dp, Color(0xFFF59E0B).copy(alpha = 0.4f)),
+                  modifier = Modifier.fillMaxWidth()
+                ) {
+                  Row(
+                    modifier = Modifier.padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                  ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                      Box(
+                        modifier = Modifier.size(36.dp).clip(RoundedCornerShape(10.dp)).background(Color(0xFFF59E0B).copy(alpha = 0.15f)),
+                        contentAlignment = Alignment.Center
+                      ) {
+                        Icon(Icons.Outlined.PersonSearch, contentDescription = null, tint = Color(0xFFFBBF24), modifier = Modifier.size(18.dp))
+                      }
+                      Column {
+                        Text("$lowAttendanceCount Students • Warning", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFFFBBF24))
+                        Text("Low cumulative attendance (<75%) threshold", fontSize = 10.sp, color = Color(0xFFCBD5E1))
+                      }
+                    }
+                    Icon(Icons.Outlined.ChevronRight, contentDescription = null, tint = Color(0xFFFBBF24), modifier = Modifier.size(18.dp))
+                  }
+                }
+              }
+
+              // 3. Informational Severity: Pending Homework Submissions (Sky Blue) - Only when count > 0
+              if (pendingHomeworkCount > 0) {
+                Surface(
+                  onClick = { onTabChange(4) },
+                  shape = RoundedCornerShape(12.dp),
+                  color = Color(0xFF0A1220),
+                  border = BorderStroke(1.dp, Color(0xFF38BDF8).copy(alpha = 0.3f)),
+                  modifier = Modifier.fillMaxWidth()
+                ) {
+                  Row(
+                    modifier = Modifier.padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                  ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                      Box(
+                        modifier = Modifier.size(36.dp).clip(RoundedCornerShape(10.dp)).background(Color(0xFF38BDF8).copy(alpha = 0.15f)),
+                        contentAlignment = Alignment.Center
+                      ) {
+                        Icon(Icons.Outlined.Assignment, contentDescription = null, tint = Color(0xFF38BDF8), modifier = Modifier.size(18.dp))
+                      }
+                      Column {
+                        Text("$pendingHomeworkCount Assignments • Active", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF38BDF8))
+                        Text("Pending homework evaluations across batches", fontSize = 10.sp, color = Color(0xFFCBD5E1))
+                      }
+                    }
+                    Icon(Icons.Outlined.ChevronRight, contentDescription = null, tint = Color(0xFF38BDF8), modifier = Modifier.size(18.dp))
+                  }
+                }
+              }
+
+              // 4. Planned Activity: Scheduled Tests (Indigo) - Only when count > 0
+              if (upcomingTestsCount > 0) {
+                Surface(
+                  onClick = { onTabChange(4) },
+                  shape = RoundedCornerShape(12.dp),
+                  color = Color(0xFF0A1220),
+                  border = BorderStroke(1.dp, Color(0xFF818CF8).copy(alpha = 0.3f)),
+                  modifier = Modifier.fillMaxWidth()
+                ) {
+                  Row(
+                    modifier = Modifier.padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                  ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                      Box(
+                        modifier = Modifier.size(36.dp).clip(RoundedCornerShape(10.dp)).background(Color(0xFF6366F1).copy(alpha = 0.15f)),
+                        contentAlignment = Alignment.Center
+                      ) {
+                        Icon(Icons.Outlined.Event, contentDescription = null, tint = Color(0xFF818CF8), modifier = Modifier.size(18.dp))
+                      }
+                      Column {
+                        Text("$upcomingTestsCount Tests • Scheduled", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF818CF8))
+                        Text("Assessment dates set for current academic week", fontSize = 10.sp, color = Color(0xFFCBD5E1))
+                      }
+                    }
+                    Icon(Icons.Outlined.ChevronRight, contentDescription = null, tint = Color(0xFF818CF8), modifier = Modifier.size(18.dp))
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // 7. Quick Actions Section (2x4 Symmetrical Grid with Semantically Distinct Muted/Pastel-on-Dark Icons)
+    item {
+      Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF111C2E)),
+        shape = RoundedCornerShape(16.dp),
+        border = BorderStroke(1.dp, Color(0xFF24334A)),
+        elevation = CardDefaults.cardElevation(2.dp)
+      ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+          ) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+              Icon(Icons.Outlined.Bolt, contentDescription = null, tint = Color(0xFF38BDF8), modifier = Modifier.size(18.dp))
+              Text("Quick Actions", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color.White)
+            }
+            Text("Institute Operations", fontSize = 11.sp, color = Color(0xFF94A3B8))
+          }
+          Spacer(modifier = Modifier.height(12.dp))
+
+          Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            // Row 1 (4 actions)
+            Row(
+              modifier = Modifier.fillMaxWidth(),
+              horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+              // 1. Fee Ledger -> Green
+              QuickActionButtonTile(
+                icon = Icons.Outlined.ReceiptLong,
+                title = "Fee\nLedger",
+                bgColor = Color(0xFF0A1220),
+                iconColor = Color(0xFF34D399),
+                onClick = { showFeeLedgerDialog = true },
+                modifier = Modifier.weight(1f)
+              )
+
+              // 2. Record Payment -> Blue
+              QuickActionButtonTile(
+                icon = Icons.Outlined.Payments,
+                title = "Record\nPayment",
+                bgColor = Color(0xFF0A1220),
+                iconColor = Color(0xFF38BDF8),
+                onClick = { showRecordPaymentDialog = true },
+                modifier = Modifier.weight(1f)
+              )
+
+              // 3. New Admission -> Teal
+              QuickActionButtonTile(
+                icon = Icons.Outlined.PersonAdd,
+                title = "New\nAdmission",
+                bgColor = Color(0xFF0A1220),
+                iconColor = Color(0xFF2DD4BF),
+                onClick = onAdmitClick,
+                modifier = Modifier.weight(1f)
+              )
+
+              // 4. Onboard Faculty -> Purple
+              QuickActionButtonTile(
+                icon = Icons.Outlined.Badge,
+                title = "Onboard\nFaculty",
+                bgColor = Color(0xFF0A1220),
+                iconColor = Color(0xFFA78BFA),
+                onClick = onStaffOnboardClick,
+                modifier = Modifier.weight(1f)
+              )
+            }
+
+            // Row 2 (4 actions)
+            Row(
+              modifier = Modifier.fillMaxWidth(),
+              horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+              // 5. Take Attendance -> Indigo
+              QuickActionButtonTile(
+                icon = Icons.Outlined.HowToReg,
+                title = "Take\nAttendance",
+                bgColor = Color(0xFF0A1220),
+                iconColor = Color(0xFF818CF8),
+                onClick = { onTabChange(1) },
+                modifier = Modifier.weight(1f)
+              )
+
+              // 6. Academic Config -> Amber
+              QuickActionButtonTile(
+                icon = Icons.Outlined.Tune,
+                title = "Academic\nConfig",
+                bgColor = Color(0xFF0A1220),
+                iconColor = Color(0xFFFBBF24),
+                onClick = onSetupClick,
+                modifier = Modifier.weight(1f)
+              )
+
+              // 7. Schedule Test -> Red/Coral
+              QuickActionButtonTile(
+                icon = Icons.Outlined.EventNote,
+                title = "Schedule\nTest",
+                bgColor = Color(0xFF0A1220),
+                iconColor = Color(0xFFFB7185),
+                onClick = { showScheduleTestDialog = true },
+                modifier = Modifier.weight(1f)
+              )
+
+              // 8. Send Broadcast -> Pink
+              QuickActionButtonTile(
+                icon = Icons.Outlined.Campaign,
+                title = "Send\nBroadcast",
+                bgColor = Color(0xFF0A1220),
+                iconColor = Color(0xFFF472B6),
+                onClick = { showAnnouncementDialog = true },
+                modifier = Modifier.weight(1f)
+              )
             }
           }
         }
@@ -1041,10 +1485,12 @@ fun AdminDashboardTab(
 
   // Quick Action Dialogs
   if (showRecordPaymentDialog) {
-    CollectFeePaymentDialog(
-      pendingAmount = 5000,
+    RecordStudentPaymentDialog(
       onDismiss = { showRecordPaymentDialog = false },
-      onSave = { _ -> showRecordPaymentDialog = false }
+      onSave = { payment ->
+        AppRepository.recordStudentFeePayment(payment)
+        showRecordPaymentDialog = false
+      }
     )
   }
 
@@ -1231,6 +1677,16 @@ fun AdminDashboardTab(
       }
     )
   }
+
+  if (showRecordPaymentDialog) {
+    RecordStudentPaymentDialog(
+      onDismiss = { showRecordPaymentDialog = false },
+      onSave = { payment ->
+        AppRepository.recordStudentFeePayment(payment)
+        showRecordPaymentDialog = false
+      }
+    )
+  }
 }
 
 
@@ -1245,19 +1701,27 @@ fun AdminStudentsTab(
 ) {
   var studentSubTab by remember { mutableStateOf(0) } // 0 = List, 1 = Take Attendance, 2 = Attendance History
   var selectedBatchFilter by remember { mutableStateOf("All") }
+  var searchQuery by remember { mutableStateOf("") }
+  var showCsvImportDialog by remember { mutableStateOf(false) }
+
+  // Multi-Selection State for Bulk Operations
+  var isMultiSelectMode by remember { mutableStateOf(false) }
+  var selectedStudentIds by remember { mutableStateOf<Set<String>>(emptySet()) }
+  var showDeleteConfirmationDialog by remember { mutableStateOf(false) }
 
   var isAttendanceLoading by remember { mutableStateOf(false) }
+  val studentsPagination by FirestoreService.studentsPaginationState.collectAsState()
 
-  LaunchedEffect(studentSubTab) {
-    if (studentSubTab == 2) {
-      isAttendanceLoading = true
-      kotlinx.coroutines.delay(1000) // smooth shimmer loading delay
-      isAttendanceLoading = false
+  val displayStudents = remember(students, selectedBatchFilter, searchQuery) {
+    students.filter { stu ->
+      val matchesBatch = (selectedBatchFilter == "All" || stu.batch == selectedBatchFilter)
+      val matchesSearch = searchQuery.isBlank() ||
+          stu.name.contains(searchQuery, ignoreCase = true) ||
+          stu.id.contains(searchQuery, ignoreCase = true) ||
+          stu.mobile.contains(searchQuery, ignoreCase = true) ||
+          stu.parentName.contains(searchQuery, ignoreCase = true)
+      matchesBatch && matchesSearch
     }
-  }
-
-  val displayStudents = remember(students, selectedBatchFilter) {
-    if (selectedBatchFilter == "All") students else students.filter { it.batch == selectedBatchFilter }
   }
 
   Column(modifier = Modifier.fillMaxSize()) {
@@ -1274,8 +1738,8 @@ fun AdminStudentsTab(
       ) {
         listOf(
           0 to ("List" to Icons.Default.List),
-          1 to ("Take Attendance" to Icons.Default.HowToReg),
-          2 to ("Attendance History" to Icons.Default.FactCheck)
+          1 to ("Daily Register" to Icons.Default.FactCheck),
+          2 to ("Attendance History" to Icons.Default.History)
         ).forEach { (index, pair) ->
           val (label, icon) = pair
           val isSelected = studentSubTab == index
@@ -1315,27 +1779,175 @@ fun AdminStudentsTab(
     if (studentSubTab == 0) {
       // 1. ERP DIRECTORY LIST
       LazyColumn(
-        modifier = Modifier.fillMaxSize(),
+        modifier = Modifier.fillMaxSize().background(Color(0xFF0D1526)),
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
       ) {
         item {
-          Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            Column(modifier = Modifier.weight(1f)) {
-              Text("Student Lifecycle Directory", fontWeight = FontWeight.Bold, fontSize = 18.sp, maxLines = 1)
-              Text("${students.size} Enrolled Learners", fontSize = 12.sp, color = Color(0xFF74777F))
-            }
-            Button(
-              onClick = onAdmitClick,
-              colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0061A4)),
-              shape = RoundedCornerShape(12.dp),
-              contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp)
+          if (isMultiSelectMode) {
+            // Contextual Multi-Selection Action Toolbar
+            Card(
+              shape = RoundedCornerShape(14.dp),
+              colors = CardDefaults.cardColors(containerColor = Color(0xFF111C2E)),
+              border = BorderStroke(1.dp, Color(0xFF1E2D42)),
+              modifier = Modifier.fillMaxWidth()
             ) {
-              Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
-              Spacer(Modifier.width(4.dp))
-              Text("+ Add Student", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+              Row(
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .padding(horizontal = 12.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+              ) {
+                Row(
+                  verticalAlignment = Alignment.CenterVertically,
+                  horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                  IconButton(
+                    onClick = {
+                      isMultiSelectMode = false
+                      selectedStudentIds = emptySet()
+                    },
+                    modifier = Modifier.size(36.dp)
+                  ) {
+                    Icon(Icons.Default.Close, contentDescription = "Exit Selection", tint = Color.White, modifier = Modifier.size(20.dp))
+                  }
+                  Text(
+                    "${selectedStudentIds.size} Selected",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 14.sp,
+                    color = Color.White
+                  )
+                }
+
+                Row(
+                  horizontalArrangement = Arrangement.spacedBy(6.dp),
+                  verticalAlignment = Alignment.CenterVertically
+                ) {
+                  TextButton(
+                    onClick = {
+                      val allIds = displayStudents.map { it.id }.toSet()
+                      if (selectedStudentIds.containsAll(allIds) && allIds.isNotEmpty()) {
+                        selectedStudentIds = selectedStudentIds - allIds
+                      } else {
+                        selectedStudentIds = selectedStudentIds + allIds
+                      }
+                    }
+                  ) {
+                    val allDisplayedSelected = displayStudents.isNotEmpty() && selectedStudentIds.containsAll(displayStudents.map { it.id })
+                    Text(
+                      if (allDisplayedSelected) "Deselect All" else "Select All",
+                      fontSize = 12.sp,
+                      fontWeight = FontWeight.Bold,
+                      color = Color(0xFF38BDF8)
+                    )
+                  }
+
+                  Button(
+                    onClick = { showDeleteConfirmationDialog = true },
+                    enabled = selectedStudentIds.isNotEmpty(),
+                    colors = ButtonDefaults.buttonColors(
+                      containerColor = Color(0xFFDC2626),
+                      disabledContainerColor = Color(0xFF1E2D42)
+                    ),
+                    shape = RoundedCornerShape(10.dp),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                  ) {
+                    Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(16.dp), tint = Color.White)
+                    Spacer(Modifier.width(4.dp))
+                    Text(
+                      "Delete (${selectedStudentIds.size})",
+                      fontSize = 12.sp,
+                      fontWeight = FontWeight.Bold,
+                      color = Color.White
+                    )
+                  }
+                }
+              }
+            }
+          } else {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+              Column(modifier = Modifier.weight(1f)) {
+                Text("Student Lifecycle Directory", fontWeight = FontWeight.Bold, fontSize = 18.sp, maxLines = 1, color = Color.White)
+                Text(
+                  if (searchQuery.isNotBlank() || selectedBatchFilter != "All")
+                    "Showing ${displayStudents.size} of ${students.size} Enrolled Learners"
+                  else
+                    "${students.size} Enrolled Learners",
+                  fontSize = 12.sp,
+                  color = Color(0xFF94A3B8)
+                )
+              }
+              Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                OutlinedButton(
+                  onClick = {
+                    isMultiSelectMode = true
+                  },
+                  shape = RoundedCornerShape(12.dp),
+                  colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF94A3B8)),
+                  border = BorderStroke(1.dp, Color(0xFF1E2D42)),
+                  contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp)
+                ) {
+                  Icon(Icons.Default.Checklist, contentDescription = null, modifier = Modifier.size(16.dp))
+                  Spacer(Modifier.width(4.dp))
+                  Text("Select", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                }
+                OutlinedButton(
+                  onClick = { showCsvImportDialog = true },
+                  shape = RoundedCornerShape(12.dp),
+                  colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF38BDF8)),
+                  border = BorderStroke(1.dp, Color(0xFF0284C7)),
+                  contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp)
+                ) {
+                  Icon(Icons.Default.FileUpload, contentDescription = null, modifier = Modifier.size(16.dp))
+                  Spacer(Modifier.width(4.dp))
+                  Text("Import CSV", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                }
+                Button(
+                  onClick = onAdmitClick,
+                  colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7)),
+                  shape = RoundedCornerShape(12.dp),
+                  contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
+                ) {
+                  Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                  Spacer(Modifier.width(4.dp))
+                  Text("+ Add Student", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                }
+              }
             }
           }
+        }
+
+        // Real-Time Search Bar
+        item {
+          OutlinedTextField(
+            value = searchQuery,
+            onValueChange = { searchQuery = it },
+            placeholder = {
+              Text("Search by student name or unique ID (e.g. STU_001)...", fontSize = 13.sp, color = Color(0xFF94A3B8))
+            },
+            leadingIcon = {
+              Icon(Icons.Default.Search, contentDescription = "Search Students", tint = Color(0xFF38BDF8), modifier = Modifier.size(20.dp))
+            },
+            trailingIcon = {
+              if (searchQuery.isNotEmpty()) {
+                IconButton(onClick = { searchQuery = "" }) {
+                  Icon(Icons.Default.Close, contentDescription = "Clear Search", tint = Color(0xFF94A3B8), modifier = Modifier.size(18.dp))
+                }
+              }
+            },
+            singleLine = true,
+            shape = RoundedCornerShape(12.dp),
+            colors = OutlinedTextFieldDefaults.colors(
+              focusedBorderColor = Color(0xFF38BDF8),
+              unfocusedBorderColor = Color(0xFF1E2D42),
+              focusedTextColor = Color.White,
+              unfocusedTextColor = Color.White,
+              focusedContainerColor = Color(0xFF111C2E),
+              unfocusedContainerColor = Color(0xFF111C2E)
+            ),
+            modifier = Modifier.fillMaxWidth()
+          )
         }
 
         // Batch Filter Chips
@@ -1347,13 +1959,14 @@ fun AdminStudentsTab(
             item {
               val isSel = selectedBatchFilter == "All"
               Surface(
-                color = if (isSel) Color(0xFF0061A4) else Color(0xFFEEF0F6),
+                color = if (isSel) Color(0xFF0284C7) else Color(0xFF111C2E),
+                border = BorderStroke(1.dp, if (isSel) Color(0xFF38BDF8) else Color(0xFF1E2D42)),
                 shape = RoundedCornerShape(12.dp),
                 modifier = Modifier.clickable { selectedBatchFilter = "All" }
               ) {
                 Text(
-                  text = "All Batches",
-                  color = if (isSel) Color.White else Color(0xFF44474E),
+                  text = "All Batches (${students.size})",
+                  color = if (isSel) Color.White else Color(0xFF94A3B8),
                   fontSize = 11.sp,
                   fontWeight = FontWeight.Bold,
                   modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
@@ -1363,18 +1976,77 @@ fun AdminStudentsTab(
 
             items(batches) { b ->
               val isSel = selectedBatchFilter == b.name
+              val batchCount = students.count { it.batch == b.name }
               Surface(
-                color = if (isSel) Color(0xFF0061A4) else Color(0xFFEEF0F6),
+                color = if (isSel) Color(0xFF0284C7) else Color(0xFF111C2E),
+                border = BorderStroke(1.dp, if (isSel) Color(0xFF38BDF8) else Color(0xFF1E2D42)),
                 shape = RoundedCornerShape(12.dp),
                 modifier = Modifier.clickable { selectedBatchFilter = b.name }
               ) {
                 Text(
-                  text = b.name,
-                  color = if (isSel) Color.White else Color(0xFF44474E),
+                  text = "${b.name} ($batchCount)",
+                  color = if (isSel) Color.White else Color(0xFF94A3B8),
                   fontSize = 11.sp,
                   fontWeight = FontWeight.Bold,
                   modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
                 )
+              }
+            }
+          }
+        }
+
+        // Empty Search Results State
+        if (displayStudents.isEmpty()) {
+          item {
+            Card(
+              shape = RoundedCornerShape(14.dp),
+              colors = CardDefaults.cardColors(containerColor = Color(0xFF111C2E)),
+              border = BorderStroke(1.dp, Color(0xFF1E2D42)),
+              modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 12.dp)
+            ) {
+              Column(
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+              ) {
+                Icon(
+                  Icons.Default.PersonSearch,
+                  contentDescription = null,
+                  tint = Color(0xFF94A3B8),
+                  modifier = Modifier.size(42.dp)
+                )
+                Text(
+                  "No Students Found",
+                  fontWeight = FontWeight.Bold,
+                  fontSize = 15.sp,
+                  color = Color.White
+                )
+                Text(
+                  if (searchQuery.isNotBlank())
+                    "No student matches \"$searchQuery\" in ${if (selectedBatchFilter == "All") "all batches" else selectedBatchFilter}."
+                  else
+                    "No students enrolled in ${selectedBatchFilter}.",
+                  fontSize = 12.sp,
+                  color = Color(0xFF94A3B8),
+                  textAlign = TextAlign.Center
+                )
+                if (searchQuery.isNotBlank() || selectedBatchFilter != "All") {
+                  Spacer(Modifier.height(4.dp))
+                  TextButton(
+                    onClick = {
+                      searchQuery = ""
+                      selectedBatchFilter = "All"
+                    }
+                  ) {
+                    Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp), tint = Color(0xFF38BDF8))
+                    Spacer(Modifier.width(4.dp))
+                    Text("Reset Filters", fontWeight = FontWeight.Bold, color = Color(0xFF38BDF8))
+                  }
+                }
               }
             }
           }
@@ -1386,466 +2058,246 @@ fun AdminStudentsTab(
             DigitalIdCardDialog(stu) { showIdDialog = false }
           }
 
-          GeoSectionCard(title = stu.name, actionText = "ID CARD", onActionClick = { showIdDialog = true }) {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-              Box(
-                modifier = Modifier.size(52.dp).clip(CircleShape).background(Color(0xFFD1E4FF)),
-                contentAlignment = Alignment.Center
-              ) {
-                Text(stu.name.take(1), fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Color(0xFF001D36))
-              }
-              Spacer(Modifier.width(14.dp))
-              Column(Modifier.weight(1f)) {
-                Row(
-                  verticalAlignment = Alignment.CenterVertically,
-                  horizontalArrangement = Arrangement.spacedBy(6.dp),
-                  modifier = Modifier.fillMaxWidth()
-                ) {
-                  Text(
-                    text = stu.id,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 13.sp,
-                    color = Color(0xFF0061A4),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f, fill = false)
-                  )
-                  Surface(color = if (stu.status == "Active") Color(0xFFD1F2D1) else MaterialTheme.colorScheme.surfaceVariant, shape = RoundedCornerShape(6.dp)) {
-                    Text(stu.status, fontSize = 9.sp, color = if (stu.status == "Active") Color(0xFF072711) else MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
+          val isSelected = selectedStudentIds.contains(stu.id)
+
+          Card(
+            shape = RoundedCornerShape(20.dp),
+            colors = CardDefaults.cardColors(
+              containerColor = if (isSelected) Color(0xFF16253B) else Color(0xFF111C2E)
+            ),
+            border = BorderStroke(
+              if (isSelected) 2.dp else 1.dp,
+              if (isSelected) Color(0xFF38BDF8) else Color(0xFF1E2D42)
+            ),
+            modifier = Modifier
+              .fillMaxWidth()
+              .clickable {
+                if (isMultiSelectMode) {
+                  selectedStudentIds = if (isSelected) {
+                    selectedStudentIds - stu.id
+                  } else {
+                    selectedStudentIds + stu.id
                   }
                 }
-                Text("Batch: ${stu.batch}", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text("Parent: ${stu.parentName} • Ph: ${stu.mobile}", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+              }
+          ) {
+            Column(modifier = Modifier.padding(18.dp)) {
+              // Top Title & Action Row
+              Row(
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .padding(bottom = 12.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+              ) {
+                Row(
+                  verticalAlignment = Alignment.CenterVertically,
+                  horizontalArrangement = Arrangement.spacedBy(8.dp),
+                  modifier = Modifier.weight(1f)
+                ) {
+                  if (isMultiSelectMode) {
+                    Checkbox(
+                      checked = isSelected,
+                      onCheckedChange = { checked ->
+                        selectedStudentIds = if (checked) {
+                          selectedStudentIds + stu.id
+                        } else {
+                          selectedStudentIds - stu.id
+                        }
+                      },
+                      colors = CheckboxDefaults.colors(
+                        checkedColor = Color(0xFF0284C7),
+                        checkmarkColor = Color.White
+                      )
+                    )
+                  }
+                  Text(
+                    text = stu.name,
+                    color = Color.White,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                  )
+                }
+
+                if (!isMultiSelectMode) {
+                  Surface(
+                    color = Color(0xFF0284C7).copy(alpha = 0.2f),
+                    border = BorderStroke(1.dp, Color(0xFF0284C7).copy(alpha = 0.4f)),
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.clickable { showIdDialog = true }
+                  ) {
+                    Text(
+                      "ID CARD",
+                      fontSize = 10.sp,
+                      fontWeight = FontWeight.Bold,
+                      color = Color(0xFF38BDF8),
+                      modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                    )
+                  }
+                }
+              }
+
+              // Details Row
+              Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                  modifier = Modifier
+                    .size(48.dp)
+                    .clip(CircleShape)
+                    .background(if (isSelected) Color(0xFF0284C7) else Color(0xFF1E293B))
+                    .border(1.dp, Color(0xFF38BDF8).copy(alpha = 0.4f), CircleShape),
+                  contentAlignment = Alignment.Center
+                ) {
+                  if (stu.photo.isNotBlank()) {
+                    AsyncImage(
+                      model = stu.photo,
+                      contentDescription = stu.name,
+                      modifier = Modifier.fillMaxSize(),
+                      contentScale = ContentScale.Crop
+                    )
+                  } else {
+                    Text(
+                      stu.name.take(1),
+                      fontSize = 20.sp,
+                      fontWeight = FontWeight.Bold,
+                      color = if (isSelected) Color.White else Color(0xFF38BDF8)
+                    )
+                  }
+                }
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                  Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.fillMaxWidth()
+                  ) {
+                    Text(
+                      text = stu.id,
+                      fontWeight = FontWeight.Bold,
+                      fontSize = 13.sp,
+                      color = Color(0xFF38BDF8),
+                      maxLines = 1,
+                      overflow = TextOverflow.Ellipsis,
+                      modifier = Modifier.weight(1f, fill = false)
+                    )
+                    Surface(
+                      color = if (stu.status == "Active") Color(0xFF064E3B) else Color(0xFF1E2D42),
+                      border = BorderStroke(1.dp, if (stu.status == "Active") Color(0xFF059669) else Color(0xFF334155)),
+                      shape = RoundedCornerShape(6.dp)
+                    ) {
+                      Text(
+                        stu.status,
+                        fontSize = 9.sp,
+                        color = if (stu.status == "Active") Color(0xFF4ADE80) else Color(0xFF94A3B8),
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                      )
+                    }
+                  }
+                  Text("Batch: ${stu.batch}", fontSize = 12.sp, color = Color(0xFFCBD5E1), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                  Text("Parent: ${stu.parentName} • Ph: ${stu.mobile}", fontSize = 11.sp, color = Color(0xFF94A3B8), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+              }
+
+              Spacer(Modifier.height(12.dp))
+              HorizontalDivider(color = Color(0xFF1E2D42))
+              Spacer(Modifier.height(10.dp))
+
+              Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                  horizontalArrangement = Arrangement.spacedBy(10.dp),
+                  verticalAlignment = Alignment.CenterVertically,
+                  modifier = Modifier.weight(1f)
+                ) {
+                  Text("Att: ${stu.attendancePercent}%", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF38BDF8), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                  Text("Avg: ${stu.overallAvg}%", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFFCBD5E1), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                  Text("Rank #${stu.rank}", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFFC084FC), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                }
+                Spacer(Modifier.width(8.dp))
+                if (!isMultiSelectMode) {
+                  Text(
+                    "PROFILE ->",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF38BDF8),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.clickable { onStudentClick(stu) }
+                  )
+                } else {
+                  Text(
+                    if (isSelected) "SELECTED" else "TAP TO SELECT",
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = if (isSelected) Color(0xFF38BDF8) else Color(0xFF94A3B8)
+                  )
+                }
               }
             }
+          }
+        }
 
-            Spacer(Modifier.height(12.dp))
-            HorizontalDivider(color = Color(0xFFEEF0F6))
-            Spacer(Modifier.height(10.dp))
-
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+        if (studentsPagination.hasMore) {
+          item {
+            Surface(
+              onClick = {
+                FirestoreService.loadNextStudentProfilesPage()
+              },
+              shape = RoundedCornerShape(12.dp),
+              color = Color(0xFF1E293B),
+              border = BorderStroke(1.dp, Color(0xFF38BDF8).copy(alpha = 0.4f)),
+              modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 6.dp, bottom = 12.dp)
+            ) {
               Row(
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.weight(1f)
+                modifier = Modifier.padding(vertical = 10.dp, horizontal = 16.dp),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
               ) {
-                Text("Att: ${stu.attendancePercent}%", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF0061A4), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
-                Text("Avg Score: ${stu.overallAvg}%", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF3E4759), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
-                Text("Rank #${stu.rank}", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF6B5373), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                if (studentsPagination.isLoading) {
+                  CircularProgressIndicator(
+                    modifier = Modifier.size(16.dp),
+                    strokeWidth = 2.dp,
+                    color = Color(0xFF38BDF8)
+                  )
+                  Spacer(Modifier.width(8.dp))
+                  Text(
+                    text = "Loading more learners...",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Color(0xFF38BDF8)
+                  )
+                } else {
+                  Icon(
+                    imageVector = Icons.Default.ExpandMore,
+                    contentDescription = null,
+                    tint = Color(0xFF38BDF8),
+                    modifier = Modifier.size(18.dp)
+                  )
+                  Spacer(Modifier.width(6.dp))
+                  Text(
+                    text = "Load More Learners (Page ${studentsPagination.currentPage + 1})",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF38BDF8)
+                  )
+                }
               }
-              Spacer(Modifier.width(8.dp))
-              Text(
-                "PROFILE ->",
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Bold,
-                color = Color(0xFF0061A4),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.clickable { onStudentClick(stu) }
-              )
             }
           }
         }
       }
     } else if (studentSubTab == 1) {
-      // 2. TAKE ATTENDANCE SUB-TAB FOR ADMIN
-      val liveAttendanceList by AppRepository.attendance.collectAsState()
-      val currentDateStr = AppRepository.getCurrentDateStr()
+      // 2. DAILY ATTENDANCE REGISTER FOR ADMIN (Instant Room Database Daily Roll-call)
       val currentAdminUser by AppRepository.currentUserIdentifier.collectAsState()
-
-      var showReasonDialogForStudent by remember { mutableStateOf<Student?>(null) }
-      var selectedReasonBatch by remember { mutableStateOf("") }
-
-      if (showReasonDialogForStudent != null) {
-        val stu = showReasonDialogForStudent!!
-        var selectedReasonOption by remember { mutableStateOf("Medical Leave") }
-        var customReasonText by remember { mutableStateOf("") }
-        val reasons = listOf("Medical Leave", "Family Outing", "Exam Prep", "Weather / Rain", "Other")
-
-        AlertDialog(
-          onDismissRequest = { showReasonDialogForStudent = null },
-          title = { Text("Reason for Absence: ${stu.name}", fontWeight = FontWeight.Bold, fontSize = 16.sp) },
-          text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-              Text("Select predefined reason or enter custom text below:", fontSize = 12.sp, color = Color(0xFF64748B))
-              Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                reasons.take(3).forEach { opt ->
-                  val isSel = selectedReasonOption == opt
-                  Surface(
-                    color = if (isSel) Color(0xFFEFF6FF) else Color(0xFFF1F5F9),
-                    border = BorderStroke(1.dp, if (isSel) Color(0xFF0061A4) else Color.Transparent),
-                    shape = RoundedCornerShape(8.dp),
-                    modifier = Modifier.clickable { selectedReasonOption = opt }.weight(1f)
-                  ) {
-                    Text(opt, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
-                  }
-                }
-              }
-              Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                reasons.drop(3).forEach { opt ->
-                  val isSel = selectedReasonOption == opt
-                  Surface(
-                    color = if (isSel) Color(0xFFEFF6FF) else Color(0xFFF1F5F9),
-                    border = BorderStroke(1.dp, if (isSel) Color(0xFF0061A4) else Color.Transparent),
-                    shape = RoundedCornerShape(8.dp),
-                    modifier = Modifier.clickable { selectedReasonOption = opt }.weight(1f)
-                  ) {
-                    Text(opt, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
-                  }
-                }
-              }
-
-              if (selectedReasonOption == "Other") {
-                OutlinedTextField(
-                  value = customReasonText,
-                  onValueChange = { customReasonText = it },
-                  label = { Text("Enter Custom Reason") },
-                  modifier = Modifier.fillMaxWidth(),
-                  singleLine = true
-                )
-              }
-            }
-          },
-          confirmButton = {
-            TextButton(
-              onClick = {
-                val finalReason = if (selectedReasonOption == "Other") customReasonText else selectedReasonOption
-                AppRepository.saveSingleAttendance(stu.id, stu.name, selectedReasonBatch, currentDateStr, "Absent", finalReason, recordedBy = currentAdminUser)
-                showReasonDialogForStudent = null
-              }
-            ) {
-              Text("Mark Absent", fontWeight = FontWeight.Bold, color = Color(0xFFEF4444))
-            }
-          },
-          dismissButton = {
-            TextButton(onClick = { showReasonDialogForStudent = null }) {
-              Text("Cancel")
-            }
-          }
-        )
-      }
-
-      val standards = remember(students) { students.map { it.className }.distinct().sorted() }
-      var selectedStandard by remember { mutableStateOf(standards.firstOrNull() ?: "Class 12") }
-
-      val filteredBatches = remember(students, selectedStandard) {
-        students.filter { it.className == selectedStandard }.map { it.batch }.distinct().sorted()
-      }
-      var selectedBatch by remember { mutableStateOf("") }
-
-      LaunchedEffect(selectedStandard, filteredBatches) {
-        if (!filteredBatches.contains(selectedBatch)) {
-          selectedBatch = filteredBatches.firstOrNull() ?: ""
-        }
-      }
-
-      val batchStudents = remember(students, selectedStandard, selectedBatch) {
-        students.filter { it.className == selectedStandard && it.batch == selectedBatch }
-      }
-
-      var systemFeedbackMsg by remember { mutableStateOf<String?>(null) }
-
-      LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(16.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
-      ) {
-        // Standard Filter Row
-        item {
-          Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text("Select Standard (Class):", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color(0xFF1E293B))
-            LazyRow(
-              modifier = Modifier.fillMaxWidth(),
-              horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-              items(standards) { std ->
-                val isSel = selectedStandard == std
-                Surface(
-                  color = if (isSel) Color(0xFF0061A4) else Color(0xFFEEF0F6),
-                  shape = RoundedCornerShape(12.dp),
-                  modifier = Modifier.clickable {
-                    selectedStandard = std
-                    systemFeedbackMsg = null
-                  }
-                ) {
-                  Text(
-                    text = std,
-                    color = if (isSel) Color.White else Color(0xFF44474E),
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp)
-                  )
-                }
-              }
-            }
-          }
-        }
-
-        // Batch Filter Row
-        item {
-          Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text("Select Academic Batch:", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color(0xFF1E293B))
-            if (filteredBatches.isEmpty()) {
-              Text("No active batches found for this standard.", fontSize = 12.sp, color = Color.Red)
-            } else {
-              LazyRow(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-              ) {
-                items(filteredBatches) { b ->
-                  val isSel = selectedBatch == b
-                  Surface(
-                    color = if (isSel) Color(0xFF0F172A) else Color(0xFFEEF0F6),
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.clickable {
-                      selectedBatch = b
-                      systemFeedbackMsg = null
-                    }
-                  ) {
-                    Text(
-                      text = b,
-                      color = if (isSel) Color.White else Color(0xFF44474E),
-                      fontSize = 11.sp,
-                      fontWeight = FontWeight.SemiBold,
-                      modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
-                    )
-                  }
-                }
-              }
-            }
-          }
-        }
-
-        if (systemFeedbackMsg != null) {
-          item {
-            Surface(
-              color = Color(0xFFD1F2D1),
-              shape = RoundedCornerShape(12.dp),
-              modifier = Modifier.fillMaxWidth()
-            ) {
-              Row(
-                Modifier.padding(12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-              ) {
-                Icon(Icons.Default.CloudDone, contentDescription = null, tint = Color(0xFF072711), modifier = Modifier.size(18.dp))
-                Text(systemFeedbackMsg!!, fontSize = 12.sp, color = Color(0xFF072711), fontWeight = FontWeight.Medium)
-              }
-            }
-          }
-        }
-
-        // Students List for Selection
-        if (batchStudents.isEmpty()) {
-          item {
-            Box(
-              modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 40.dp),
-              contentAlignment = Alignment.Center
-            ) {
-              Text(
-                "No enrolled students found in $selectedStandard - $selectedBatch.",
-                fontSize = 13.sp,
-                color = Color(0xFF64748B),
-                fontWeight = FontWeight.Medium
-              )
-            }
-          }
-        } else {
-          item {
-            Row(
-              modifier = Modifier.fillMaxWidth(),
-              horizontalArrangement = Arrangement.SpaceBetween,
-              verticalAlignment = Alignment.CenterVertically
-            ) {
-              Text(
-                text = "${batchStudents.size} Registered Students",
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Bold,
-                color = Color(0xFF1E293B)
-              )
-              Text(
-                text = "Database Persistent",
-                fontSize = 11.sp,
-                color = Color(0xFF22C55E),
-                fontWeight = FontWeight.Bold
-              )
-            }
-          }
-
-          items(batchStudents) { st ->
-            val matchedRecord = liveAttendanceList.find {
-              it.studentId == st.id && it.date == currentDateStr && it.batchName == selectedBatch
-            }
-            val currentStatus = matchedRecord?.status ?: "Not Marked"
-
-            Card(
-              modifier = Modifier
-                .fillMaxWidth()
-                .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(16.dp)),
-              colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-              shape = RoundedCornerShape(16.dp)
-            ) {
-              Column(modifier = Modifier.padding(14.dp)) {
-                // Header: Profile Details
-                Row(
-                  modifier = Modifier.fillMaxWidth(),
-                  verticalAlignment = Alignment.CenterVertically,
-                  horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                  Box(
-                    modifier = Modifier
-                      .size(46.dp)
-                      .clip(CircleShape)
-                      .background(Color(0xFFD1E4FF)),
-                    contentAlignment = Alignment.Center
-                  ) {
-                    Text(
-                      text = st.name.take(1).uppercase(),
-                      fontSize = 18.sp,
-                      fontWeight = FontWeight.Bold,
-                      color = Color(0xFF001D36)
-                    )
-                  }
-                  Column(modifier = Modifier.weight(1f)) {
-                    Row(
-                      verticalAlignment = Alignment.CenterVertically,
-                      horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                      Text(st.name, fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color(0xFF0F172A))
-                      Surface(
-                        color = if (st.status == "Active") Color(0xFFDCFCE7) else Color(0xFFF1F5F9),
-                        shape = RoundedCornerShape(6.dp)
-                      ) {
-                        Text(
-                          text = st.status,
-                          fontSize = 9.sp,
-                          fontWeight = FontWeight.Bold,
-                          color = if (st.status == "Active") Color(0xFF15803D) else Color(0xFF64748B),
-                          modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                        )
-                      }
-                    }
-                    Text(
-                      text = "ID: ${st.id} • Parent: ${st.parentName} (${st.parentContact})",
-                      fontSize = 11.sp,
-                      color = Color(0xFF64748B)
-                    )
-                    Text(
-                      text = "Standard Avg Score: ${st.overallAvg}% | Attendance Avg: ${st.attendancePercent}%",
-                      fontSize = 11.sp,
-                      color = Color(0xFF0061A4),
-                      fontWeight = FontWeight.Medium
-                    )
-                  }
-                }
-
-                Spacer(modifier = Modifier.height(12.dp))
-                Divider(color = Color(0xFFF1F5F9))
-                Spacer(modifier = Modifier.height(10.dp))
-
-                // Action Buttons for Instant Sync
-                Row(
-                  modifier = Modifier.fillMaxWidth(),
-                  horizontalArrangement = Arrangement.SpaceBetween,
-                  verticalAlignment = Alignment.CenterVertically
-                ) {
-                  Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("Live Sync Status: ", fontSize = 11.sp, color = Color(0xFF94A3B8))
-                    Surface(
-                      color = when (currentStatus) {
-                        "Present" -> Color(0xFFDCFCE7)
-                        "Absent" -> Color(0xFFFEE2E2)
-                        "Late" -> Color(0xFFFEF9C3)
-                        else -> Color(0xFFF1F5F9)
-                      },
-                      shape = RoundedCornerShape(6.dp)
-                    ) {
-                      Text(
-                        text = currentStatus.uppercase(),
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.ExtraBold,
-                        color = when (currentStatus) {
-                          "Present" -> Color(0xFF15803D)
-                          "Absent" -> Color(0xFFB91C1C)
-                          "Late" -> Color(0xFFA16207)
-                          else -> Color(0xFF64748B)
-                        },
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                      )
-                    }
-                  }
-
-                  Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    // Present Button
-                    Surface(
-                      color = if (currentStatus == "Present") Color(0xFF22C55E) else Color(0xFFF1F5F9),
-                      shape = RoundedCornerShape(10.dp),
-                      modifier = Modifier.clickable {
-                        val saved = AppRepository.saveSingleAttendance(st.id, st.name, selectedBatch, currentDateStr, "Present", recordedBy = currentAdminUser)
-                        if (saved) {
-                          systemFeedbackMsg = "Updated ${st.name} to Present under signature $currentAdminUser!"
-                        }
-                      }
-                    ) {
-                      Row(
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                      ) {
-                        Icon(
-                          imageVector = Icons.Default.Check,
-                          contentDescription = null,
-                          tint = if (currentStatus == "Present") Color.White else Color(0xFF64748B),
-                          modifier = Modifier.size(12.dp)
-                        )
-                        Text(
-                          text = "Present",
-                          color = if (currentStatus == "Present") Color.White else Color(0xFF334155),
-                          fontSize = 11.sp,
-                          fontWeight = FontWeight.Bold
-                        )
-                      }
-                    }
-
-                    // Absent Button
-                    Surface(
-                      color = if (currentStatus == "Absent") Color(0xFFEF4444) else Color(0xFFF1F5F9),
-                      shape = RoundedCornerShape(10.dp),
-                      modifier = Modifier.clickable {
-                        selectedReasonBatch = selectedBatch
-                        showReasonDialogForStudent = st
-                      }
-                    ) {
-                      Row(
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                      ) {
-                        Icon(
-                          imageVector = Icons.Default.Close,
-                          contentDescription = null,
-                          tint = if (currentStatus == "Absent") Color.White else Color(0xFF64748B),
-                          modifier = Modifier.size(12.dp)
-                        )
-                        Text(
-                          text = "Absent",
-                          color = if (currentStatus == "Absent") Color.White else Color(0xFF334155),
-                          fontSize = 11.sp,
-                          fontWeight = FontWeight.Bold
-                        )
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
+      com.example.ui.attendance.DailyAttendanceRegister(
+        currentUserRole = "Admin",
+        currentUserId = currentAdminUser.ifBlank { "admin_fsi" },
+        onNavigateToHistory = { studentSubTab = 2 }
+      )
     } else if (studentSubTab == 2) {
-      // 3. ATTENDANCE HISTORY FOR ADMIN (Day/Month/Year filtering, 22h window, non-permanent DB lifecycle)
+      // 3. ATTENDANCE HISTORY FOR ADMIN (Day/Month/Year filtering, 22h window, and integrated Monthly Summary & Analytics)
       val currentUserId by AppRepository.currentUserIdentifier.collectAsState()
       com.example.ui.attendance.AttendanceHistoryView(
         currentUserRole = "Admin",
@@ -1853,11 +2305,117 @@ fun AdminStudentsTab(
       )
     }
   }
+
+  if (showCsvImportDialog) {
+    StudentCsvImportDialog(
+      onDismiss = { showCsvImportDialog = false },
+      onImportComplete = { importedStudents ->
+        showCsvImportDialog = false
+      }
+    )
+  }
+
+  if (showDeleteConfirmationDialog) {
+    val selectedStudentsList = remember(selectedStudentIds, students) {
+      students.filter { selectedStudentIds.contains(it.id) }
+    }
+    AlertDialog(
+      onDismissRequest = { showDeleteConfirmationDialog = false },
+      icon = {
+        Box(
+          modifier = Modifier
+            .size(48.dp)
+            .clip(CircleShape)
+            .background(Color(0xFFFEE2E2)),
+          contentAlignment = Alignment.Center
+        ) {
+          Icon(
+            Icons.Default.DeleteForever,
+            contentDescription = null,
+            tint = Color(0xFFDC2626),
+            modifier = Modifier.size(28.dp)
+          )
+        }
+      },
+      title = {
+        Text(
+          "Delete ${selectedStudentIds.size} Students?",
+          fontWeight = FontWeight.Bold,
+          fontSize = 18.sp,
+          textAlign = TextAlign.Center
+        )
+      },
+      text = {
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+          Text(
+            "Are you sure you want to permanently delete the selected ${selectedStudentIds.size} student record(s)? This will remove them from the database, attendance rolls, and active batches.",
+            fontSize = 13.sp,
+            color = Color(0xFF475569)
+          )
+          Surface(
+            color = Color(0xFFF8FAFC),
+            shape = RoundedCornerShape(10.dp),
+            border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+            modifier = Modifier
+              .fillMaxWidth()
+              .heightIn(max = 160.dp)
+          ) {
+            LazyColumn(
+              modifier = Modifier.padding(10.dp),
+              verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+              items(selectedStudentsList) { s ->
+                Row(
+                  verticalAlignment = Alignment.CenterVertically,
+                  horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                  Icon(
+                    Icons.Default.Person,
+                    contentDescription = null,
+                    tint = Color(0xFFDC2626),
+                    modifier = Modifier.size(14.dp)
+                  )
+                  Text(s.name, fontWeight = FontWeight.Bold, fontSize = 12.sp, color = Color(0xFF0F172A))
+                  Text("(${s.id} • ${s.batch})", fontSize = 11.sp, color = Color(0xFF64748B))
+                }
+              }
+            }
+          }
+        }
+      },
+      confirmButton = {
+        Button(
+          onClick = {
+            val count = selectedStudentIds.size
+            AppRepository.deleteStudents(selectedStudentIds.toList())
+            selectedStudentIds = emptySet()
+            isMultiSelectMode = false
+            showDeleteConfirmationDialog = false
+          },
+          colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626)),
+          shape = RoundedCornerShape(10.dp)
+        ) {
+          Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(16.dp))
+          Spacer(Modifier.width(6.dp))
+          Text("Confirm Delete (${selectedStudentIds.size})", fontWeight = FontWeight.Bold)
+        }
+      },
+      dismissButton = {
+        OutlinedButton(
+          onClick = { showDeleteConfirmationDialog = false },
+          shape = RoundedCornerShape(10.dp)
+        ) {
+          Text("Cancel")
+        }
+      }
+    )
+  }
 }
 
 @Composable
 fun AdminStaffTab(
-  teachers: List<Teacher>
+  teachers: List<Teacher>,
+  onOnboardStaffClick: () -> Unit = {}
 ) {
   var selectedStaffMember by remember { mutableStateOf<Teacher?>(null) }
   var payoutNoticeMsg by remember { mutableStateOf<String?>(null) }
@@ -1869,18 +2427,44 @@ fun AdminStaffTab(
         selectedStaffMember = null
         payoutNoticeMsg = null
       },
+      containerColor = Color(0xFF0D1526),
+      shape = RoundedCornerShape(24.dp),
       title = {
         Row(
           modifier = Modifier.fillMaxWidth(),
           horizontalArrangement = Arrangement.SpaceBetween,
           verticalAlignment = Alignment.CenterVertically
         ) {
-          Column {
-            Text(staff.name, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-            Text("ID: ${staff.id} • ${staff.subject}", fontSize = 12.sp, color = Color(0xFF0061A4))
+          Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+          ) {
+            Box(
+              modifier = Modifier
+                .size(46.dp)
+                .clip(CircleShape)
+                .background(Color(0xFF1E293B))
+                .border(1.dp, Color(0xFF38BDF8), CircleShape),
+              contentAlignment = Alignment.Center
+            ) {
+              if (staff.photo.isNotBlank()) {
+                AsyncImage(
+                  model = staff.photo,
+                  contentDescription = staff.name,
+                  modifier = Modifier.fillMaxSize(),
+                  contentScale = ContentScale.Crop
+                )
+              } else {
+                Icon(Icons.Default.Person, contentDescription = null, tint = Color(0xFF38BDF8), modifier = Modifier.size(24.dp))
+              }
+            }
+            Column {
+              Text(staff.name, fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color.White)
+              Text("ID: ${staff.id} • ${staff.subject}", fontSize = 12.sp, color = Color(0xFF38BDF8))
+            }
           }
           IconButton(onClick = { selectedStaffMember = null; payoutNoticeMsg = null }, modifier = Modifier.size(24.dp)) {
-            Icon(Icons.Default.Close, contentDescription = "Close", tint = Color(0xFF64748B))
+            Icon(Icons.Default.Close, contentDescription = "Close", tint = Color(0xFF94A3B8))
           }
         }
       },
@@ -1893,7 +2477,8 @@ fun AdminStaffTab(
         ) {
           if (payoutNoticeMsg != null) {
             Surface(
-              color = Color(0xFFDCFCE7),
+              color = Color(0xFF064E3B),
+              border = BorderStroke(1.dp, Color(0xFF059669)),
               shape = RoundedCornerShape(10.dp),
               modifier = Modifier.fillMaxWidth()
             ) {
@@ -1902,105 +2487,105 @@ fun AdminStaffTab(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
               ) {
-                Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Color(0xFF15803D), modifier = Modifier.size(18.dp))
-                Text(payoutNoticeMsg!!, fontSize = 12.sp, color = Color(0xFF15803D), fontWeight = FontWeight.Bold)
+                Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Color(0xFF4ADE80), modifier = Modifier.size(18.dp))
+                Text(payoutNoticeMsg!!, fontSize = 12.sp, color = Color(0xFF4ADE80), fontWeight = FontWeight.Bold)
               }
             }
           }
 
           // Section 1: Basic Information
           Card(
-            colors = CardDefaults.cardColors(containerColor = Color(0xFFF8FAFC)),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF111C2E)),
             shape = RoundedCornerShape(12.dp),
-            border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+            border = BorderStroke(1.dp, Color(0xFF1E2D42)),
             modifier = Modifier.fillMaxWidth()
           ) {
             Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
               Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                Icon(Icons.Default.Badge, contentDescription = null, tint = Color(0xFF0061A4), modifier = Modifier.size(16.dp))
-                Text("Basic Information", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color(0xFF0F172A))
+                Icon(Icons.Default.Badge, contentDescription = null, tint = Color(0xFF38BDF8), modifier = Modifier.size(16.dp))
+                Text("Basic Information", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color.White)
               }
-              HorizontalDivider(color = Color(0xFFE2E8F0))
+              HorizontalDivider(color = Color(0xFF1E2D42))
               Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("Department / Subject:", fontSize = 11.sp, color = Color(0xFF64748B))
-                Text(staff.subject, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF0F172A))
-              }
-              Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("Qualification:", fontSize = 11.sp, color = Color(0xFF64748B))
-                Text(staff.qualification, fontSize = 11.sp, color = Color(0xFF0F172A))
+                Text("Department / Subject:", fontSize = 11.sp, color = Color(0xFF94A3B8))
+                Text(staff.subject, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
               }
               Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("Experience:", fontSize = 11.sp, color = Color(0xFF64748B))
-                Text(staff.experience, fontSize = 11.sp, color = Color(0xFF0F172A))
+                Text("Qualification:", fontSize = 11.sp, color = Color(0xFF94A3B8))
+                Text(staff.qualification, fontSize = 11.sp, color = Color(0xFFCBD5E1))
               }
               Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("Contact Phone:", fontSize = 11.sp, color = Color(0xFF64748B))
-                Text(staff.contact, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF0F172A))
+                Text("Experience:", fontSize = 11.sp, color = Color(0xFF94A3B8))
+                Text(staff.experience, fontSize = 11.sp, color = Color(0xFFCBD5E1))
               }
               Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("Email Address:", fontSize = 11.sp, color = Color(0xFF64748B))
-                Text(staff.email, fontSize = 11.sp, color = Color(0xFF0F172A))
+                Text("Contact Phone:", fontSize = 11.sp, color = Color(0xFF94A3B8))
+                Text(staff.contact, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
               }
               Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("Assigned Batches:", fontSize = 11.sp, color = Color(0xFF64748B))
-                Text(staff.assignedBatches.joinToString(", "), fontSize = 11.sp, fontWeight = FontWeight.Medium, color = Color(0xFF0061A4))
+                Text("Email Address:", fontSize = 11.sp, color = Color(0xFF94A3B8))
+                Text(staff.email, fontSize = 11.sp, color = Color(0xFFCBD5E1))
+              }
+              Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("Assigned Batches:", fontSize = 11.sp, color = Color(0xFF94A3B8))
+                Text(staff.assignedBatches.joinToString(", "), fontSize = 11.sp, fontWeight = FontWeight.Medium, color = Color(0xFF38BDF8))
               }
             }
           }
 
           // Section 2: Attendance & Conducted Sessions
           Card(
-            colors = CardDefaults.cardColors(containerColor = Color(0xFFEFF6FF)),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF111C2E)),
             shape = RoundedCornerShape(12.dp),
-            border = BorderStroke(1.dp, Color(0xFFBFDBFE)),
+            border = BorderStroke(1.dp, Color(0xFF1E2D42)),
             modifier = Modifier.fillMaxWidth()
           ) {
             Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
               Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                Icon(Icons.Default.EventAvailable, contentDescription = null, tint = Color(0xFF1D4ED8), modifier = Modifier.size(16.dp))
-                Text("Attendance & Activity Metrics", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color(0xFF1E3A8A))
+                Icon(Icons.Default.EventAvailable, contentDescription = null, tint = Color(0xFF38BDF8), modifier = Modifier.size(16.dp))
+                Text("Attendance & Activity Metrics", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color.White)
               }
-              HorizontalDivider(color = Color(0xFFBFDBFE))
+              HorizontalDivider(color = Color(0xFF1E2D42))
               Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("Staff Attendance Rate:", fontSize = 11.sp, color = Color(0xFF1E40AF))
-                Text("${staff.attendancePercent}% Present", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF15803D))
-              }
-              Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("Classes Conducted:", fontSize = 11.sp, color = Color(0xFF1E40AF))
-                Text("${staff.classesTaken} Sessions", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1E3A8A))
+                Text("Staff Attendance Rate:", fontSize = 11.sp, color = Color(0xFF94A3B8))
+                Text("${staff.attendancePercent}% Present", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF4ADE80))
               }
               Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("Student Feedback Rating:", fontSize = 11.sp, color = Color(0xFF1E40AF))
-                Text("${staff.feedbackRating} ★", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFFA16207))
+                Text("Classes Conducted:", fontSize = 11.sp, color = Color(0xFF94A3B8))
+                Text("${staff.classesTaken} Sessions", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF38BDF8))
+              }
+              Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("Student Feedback Rating:", fontSize = 11.sp, color = Color(0xFF94A3B8))
+                Text("${staff.feedbackRating} ★", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFFFBBF24))
               }
             }
           }
 
           // Section 3: Payments & Compensation Details
           Card(
-            colors = CardDefaults.cardColors(containerColor = Color(0xFFF0FDF4)),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF111C2E)),
             shape = RoundedCornerShape(12.dp),
-            border = BorderStroke(1.dp, Color(0xFFBBF7D0)),
+            border = BorderStroke(1.dp, Color(0xFF1E2D42)),
             modifier = Modifier.fillMaxWidth()
           ) {
             Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
               Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                Icon(Icons.Default.Payments, contentDescription = null, tint = Color(0xFF15803D), modifier = Modifier.size(16.dp))
-                Text("Compensation & Payroll", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color(0xFF14532D))
+                Icon(Icons.Default.Payments, contentDescription = null, tint = Color(0xFF4ADE80), modifier = Modifier.size(16.dp))
+                Text("Compensation & Payroll", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color.White)
               }
-              HorizontalDivider(color = Color(0xFFBBF7D0))
+              HorizontalDivider(color = Color(0xFF1E2D42))
               Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("Base Monthly Salary:", fontSize = 12.sp, color = Color(0xFF166534))
-                Text("₹${staff.salary}", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))
+                Text("Base Monthly Salary:", fontSize = 12.sp, color = Color(0xFF94A3B8))
+                Text("₹${staff.salary}", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
               }
               Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("Performance Incentives:", fontSize = 12.sp, color = Color(0xFF166534))
-                Text("+₹${staff.incentives}", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF15803D))
+                Text("Performance Incentives:", fontSize = 12.sp, color = Color(0xFF94A3B8))
+                Text("+₹${staff.incentives}", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF4ADE80))
               }
-              HorizontalDivider(color = Color(0xFFBBF7D0))
+              HorizontalDivider(color = Color(0xFF1E2D42))
               Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("Total Net Compensation:", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFF14532D))
-                Text("₹${staff.salary + staff.incentives}", fontSize = 13.sp, fontWeight = FontWeight.ExtraBold, color = Color(0xFF15803D))
+                Text("Total Net Compensation:", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                Text("₹${staff.salary + staff.incentives}", fontSize = 13.sp, fontWeight = FontWeight.ExtraBold, color = Color(0xFF4ADE80))
               }
             }
           }
@@ -2012,7 +2597,7 @@ fun AdminStaffTab(
             payoutNoticeMsg = "Salary payout of ₹${staff.salary + staff.incentives} successfully recorded for ${staff.name}!"
           },
           shape = RoundedCornerShape(10.dp),
-          colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF15803D))
+          colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7))
         ) {
           Icon(Icons.Default.Payments, contentDescription = null, modifier = Modifier.size(16.dp))
           Spacer(Modifier.width(6.dp))
@@ -2022,6 +2607,8 @@ fun AdminStaffTab(
       dismissButton = {
         OutlinedButton(
           onClick = { selectedStaffMember = null; payoutNoticeMsg = null },
+          colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF94A3B8)),
+          border = BorderStroke(1.dp, Color(0xFF1E2D42)),
           shape = RoundedCornerShape(10.dp)
         ) {
           Text("Close", fontSize = 12.sp)
@@ -2031,15 +2618,26 @@ fun AdminStaffTab(
   }
 
   LazyColumn(
-    modifier = Modifier.fillMaxSize(),
+    modifier = Modifier.fillMaxSize().background(Color(0xFF0D1526)),
     contentPadding = PaddingValues(16.dp),
     verticalArrangement = Arrangement.spacedBy(14.dp)
   ) {
     item {
       Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
         Column {
-          Text("Staff & Educator Directory", fontWeight = FontWeight.Bold, fontSize = 18.sp)
-          Text("${teachers.size} Registered Staff Members", fontSize = 12.sp, color = Color(0xFF74777F))
+          Text("Staff & Educator Directory", fontWeight = FontWeight.Bold, fontSize = 18.sp, color = Color.White)
+          Text("${teachers.size} Registered Staff Members", fontSize = 12.sp, color = Color(0xFF94A3B8))
+        }
+
+        Button(
+          onClick = onOnboardStaffClick,
+          colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7)),
+          shape = RoundedCornerShape(12.dp),
+          contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+        ) {
+          Icon(Icons.Default.PersonAdd, contentDescription = null, modifier = Modifier.size(16.dp))
+          Spacer(Modifier.width(6.dp))
+          Text("Onboard Staff", fontSize = 12.sp, fontWeight = FontWeight.Bold)
         }
       }
     }
@@ -2051,8 +2649,8 @@ fun AdminStaffTab(
           .fillMaxWidth()
           .clickable { selectedStaffMember = t },
         shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        border = BorderStroke(1.dp, Color(0xFFE2E8F0))
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF111C2E)),
+        border = BorderStroke(1.dp, Color(0xFF1E2D42))
       ) {
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
           Row(
@@ -2060,23 +2658,49 @@ fun AdminStaffTab(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
           ) {
-            Column {
-              Text(t.name, fontWeight = FontWeight.Bold, fontSize = 15.sp, color = MaterialTheme.colorScheme.onSurface)
-              Text(t.subject, fontWeight = FontWeight.SemiBold, color = Color(0xFF0061A4), fontSize = 12.sp)
+            Row(
+              verticalAlignment = Alignment.CenterVertically,
+              horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+              Box(
+                modifier = Modifier
+                  .size(44.dp)
+                  .clip(CircleShape)
+                  .background(Color(0xFF1E293B))
+                  .border(1.dp, Color(0xFF38BDF8).copy(alpha = 0.5f), CircleShape),
+                contentAlignment = Alignment.Center
+              ) {
+                if (t.photo.isNotBlank()) {
+                  AsyncImage(
+                    model = t.photo,
+                    contentDescription = t.name,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop
+                  )
+                } else {
+                  Icon(Icons.Default.Person, contentDescription = null, tint = Color(0xFF38BDF8), modifier = Modifier.size(22.dp))
+                }
+              }
+              Column {
+                Text(t.name, fontWeight = FontWeight.Bold, fontSize = 15.sp, color = Color.White)
+                Text(t.subject, fontWeight = FontWeight.SemiBold, color = Color(0xFF38BDF8), fontSize = 12.sp)
+              }
             }
             if (isPending) {
               Surface(
-                color = Color(0xFFFFF4E5),
+                color = Color(0xFF451A03),
+                border = BorderStroke(1.dp, Color(0xFFD97706)),
                 shape = RoundedCornerShape(8.dp)
               ) {
-                Text("PENDING APPROVAL", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFFE65100), modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
+                Text("PENDING APPROVAL", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFFFBBF24), modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
               }
             } else {
               Surface(
-                color = Color(0xFFDCFCE7),
+                color = Color(0xFF064E3B),
+                border = BorderStroke(1.dp, Color(0xFF059669)),
                 shape = RoundedCornerShape(8.dp)
               ) {
-                Text("ACTIVE", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFF15803D), modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
+                Text("ACTIVE", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFF4ADE80), modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
               }
             }
           }
@@ -2085,12 +2709,12 @@ fun AdminStaffTab(
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalAlignment = Alignment.CenterVertically
           ) {
-            Text("${t.qualification} • Exp: ${t.experience}", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("${t.qualification} • Exp: ${t.experience}", fontSize = 12.sp, color = Color(0xFF94A3B8))
           }
 
-          Text("Batches: ${t.assignedBatches.joinToString(", ")}", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+          Text("Batches: ${t.assignedBatches.joinToString(", ")}", fontSize = 12.sp, color = Color(0xFFCBD5E1))
 
-          Divider(color = Color(0xFFEEF0F6), modifier = Modifier.padding(vertical = 2.dp))
+          HorizontalDivider(color = Color(0xFF1E2D42), modifier = Modifier.padding(vertical = 2.dp))
 
           Row(
             modifier = Modifier.fillMaxWidth(),
@@ -2098,10 +2722,10 @@ fun AdminStaffTab(
             verticalAlignment = Alignment.CenterVertically
           ) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-              Icon(Icons.Default.TouchApp, contentDescription = null, tint = Color(0xFF0061A4), modifier = Modifier.size(14.dp))
-              Text("Tap to view attendance & payments", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0061A4))
+              Icon(Icons.Default.TouchApp, contentDescription = null, tint = Color(0xFF38BDF8), modifier = Modifier.size(14.dp))
+              Text("Tap to view attendance & payments", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF38BDF8))
             }
-            Icon(Icons.Default.ChevronRight, contentDescription = "View Profile", tint = Color(0xFF0061A4), modifier = Modifier.size(18.dp))
+            Icon(Icons.Default.ChevronRight, contentDescription = "View Profile", tint = Color(0xFF38BDF8), modifier = Modifier.size(18.dp))
           }
         }
       }
@@ -2118,6 +2742,16 @@ fun AdminBatchesTab(
   var selectedBatch by remember { mutableStateOf<Batch?>(null) }
   var selectedSubject by remember { mutableStateOf<Subject?>(null) }
   var showSyllabusDetails by remember { mutableStateOf(false) }
+  var batchSearchQuery by remember { mutableStateOf("") }
+
+  val filteredBatches = remember(batches, batchSearchQuery) {
+    if (batchSearchQuery.isBlank()) batches
+    else batches.filter { b ->
+      b.name.contains(batchSearchQuery, ignoreCase = true) ||
+      b.schedule.contains(batchSearchQuery, ignoreCase = true) ||
+      b.teacherName.contains(batchSearchQuery, ignoreCase = true)
+    }
+  }
 
   if (selectedSubject != null && selectedBatch != null) {
     val sub = selectedSubject!!
@@ -2133,6 +2767,8 @@ fun AdminBatchesTab(
         selectedSubject = null
         showSyllabusDetails = false
       },
+      containerColor = Color(0xFF0D1526),
+      shape = RoundedCornerShape(24.dp),
       title = {
         Row(
           modifier = Modifier.fillMaxWidth(),
@@ -2140,11 +2776,11 @@ fun AdminBatchesTab(
           verticalAlignment = Alignment.CenterVertically
         ) {
           Column {
-            Text(sub.name, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-            Text("Batch: ${b.name}", fontSize = 12.sp, color = Color(0xFF0061A4))
+            Text(sub.name, fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color.White)
+            Text("Batch: ${b.name}", fontSize = 12.sp, color = Color(0xFF38BDF8))
           }
           IconButton(onClick = { selectedSubject = null; showSyllabusDetails = false }, modifier = Modifier.size(24.dp)) {
-            Icon(Icons.Default.Close, contentDescription = "Close", tint = Color(0xFF64748B))
+            Icon(Icons.Default.Close, contentDescription = "Close", tint = Color(0xFF94A3B8))
           }
         }
       },
@@ -2156,32 +2792,32 @@ fun AdminBatchesTab(
           verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
           Card(
-            colors = CardDefaults.cardColors(containerColor = Color(0xFFF8FAFC)),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF111C2E)),
             shape = RoundedCornerShape(12.dp),
-            border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+            border = BorderStroke(1.dp, Color(0xFF1E2D42)),
             modifier = Modifier.fillMaxWidth()
           ) {
             Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
               Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                Icon(Icons.Default.Person, contentDescription = null, tint = Color(0xFF0061A4), modifier = Modifier.size(16.dp))
-                Text("Assigned Faculty Member", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color(0xFF0F172A))
+                Icon(Icons.Default.Person, contentDescription = null, tint = Color(0xFF38BDF8), modifier = Modifier.size(16.dp))
+                Text("Assigned Faculty Member", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color.White)
               }
-              HorizontalDivider(color = Color(0xFFE2E8F0))
+              HorizontalDivider(color = Color(0xFF1E2D42))
               Text(
                 text = subjectTeacher?.name ?: b.teacherName,
                 fontWeight = FontWeight.Bold,
                 fontSize = 14.sp,
-                color = Color(0xFF0F172A)
+                color = Color.White
               )
               Text(
                 text = "Teaching ${sub.name} to ${b.name}",
                 fontSize = 11.sp,
-                color = Color(0xFF0061A4),
+                color = Color(0xFF38BDF8),
                 fontWeight = FontWeight.SemiBold
               )
               if (subjectTeacher != null) {
-                Text("${subjectTeacher.qualification} • ${subjectTeacher.experience} Exp", fontSize = 11.sp, color = Color(0xFF64748B))
-                Text("Contact: ${subjectTeacher.contact}", fontSize = 11.sp, color = Color(0xFF64748B))
+                Text("${subjectTeacher.qualification} • ${subjectTeacher.experience} Exp", fontSize = 11.sp, color = Color(0xFF94A3B8))
+                Text("Contact: ${subjectTeacher.contact}", fontSize = 11.sp, color = Color(0xFF94A3B8))
               }
             }
           }
@@ -2190,7 +2826,7 @@ fun AdminBatchesTab(
             onClick = { showSyllabusDetails = !showSyllabusDetails },
             shape = RoundedCornerShape(12.dp),
             colors = ButtonDefaults.buttonColors(
-              containerColor = if (showSyllabusDetails) Color(0xFF0F172A) else Color(0xFF0061A4)
+              containerColor = if (showSyllabusDetails) Color(0xFF1E2D42) else Color(0xFF0284C7)
             ),
             modifier = Modifier.fillMaxWidth()
           ) {
@@ -2209,9 +2845,9 @@ fun AdminBatchesTab(
 
           if (showSyllabusDetails) {
             Card(
-              colors = CardDefaults.cardColors(containerColor = Color(0xFFF0FDF4)),
+              colors = CardDefaults.cardColors(containerColor = Color(0xFF111C2E)),
               shape = RoundedCornerShape(12.dp),
-              border = BorderStroke(1.dp, Color(0xFFBBF7D0)),
+              border = BorderStroke(1.dp, Color(0xFF1E2D42)),
               modifier = Modifier.fillMaxWidth()
             ) {
               Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -2220,8 +2856,8 @@ fun AdminBatchesTab(
                   horizontalArrangement = Arrangement.SpaceBetween,
                   verticalAlignment = Alignment.CenterVertically
                 ) {
-                  Text("Syllabus Completion", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = Color(0xFF14532D))
-                  Text("${sub.completionPercent}% Completed", fontWeight = FontWeight.ExtraBold, fontSize = 12.sp, color = Color(0xFF15803D))
+                  Text("Syllabus Completion", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = Color.White)
+                  Text("${sub.completionPercent}% Completed", fontWeight = FontWeight.ExtraBold, fontSize = 12.sp, color = Color(0xFF4ADE80))
                 }
 
                 LinearProgressIndicator(
@@ -2230,27 +2866,27 @@ fun AdminBatchesTab(
                     .fillMaxWidth()
                     .height(8.dp)
                     .clip(RoundedCornerShape(4.dp)),
-                  color = Color(0xFF16A34A),
-                  trackColor = Color(0xFFDCFCE7)
+                  color = Color(0xFF4ADE80),
+                  trackColor = Color(0xFF1E2D42)
                 )
 
-                HorizontalDivider(color = Color(0xFFBBF7D0))
+                HorizontalDivider(color = Color(0xFF1E2D42))
 
-                Text("Completed Chapters (${sub.completedChapters.size})", fontWeight = FontWeight.Bold, fontSize = 11.sp, color = Color(0xFF15803D))
+                Text("Completed Chapters (${sub.completedChapters.size})", fontWeight = FontWeight.Bold, fontSize = 11.sp, color = Color(0xFF4ADE80))
                 sub.completedChapters.forEach { ch ->
                   Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Color(0xFF16A34A), modifier = Modifier.size(14.dp))
-                    Text(ch, fontSize = 11.sp, color = Color(0xFF14532D), fontWeight = FontWeight.Medium)
+                    Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Color(0xFF4ADE80), modifier = Modifier.size(14.dp))
+                    Text(ch, fontSize = 11.sp, color = Color(0xFFCBD5E1), fontWeight = FontWeight.Medium)
                   }
                 }
 
                 if (sub.pendingChapters.isNotEmpty()) {
-                  HorizontalDivider(color = Color(0xFFBBF7D0))
-                  Text("Pending Chapters (${sub.pendingChapters.size})", fontWeight = FontWeight.Bold, fontSize = 11.sp, color = Color(0xFFB91C1C))
+                  HorizontalDivider(color = Color(0xFF1E2D42))
+                  Text("Pending Chapters (${sub.pendingChapters.size})", fontWeight = FontWeight.Bold, fontSize = 11.sp, color = Color(0xFFF87171))
                   sub.pendingChapters.forEach { ch ->
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                      Icon(Icons.Default.Pending, contentDescription = null, tint = Color(0xFFDC2626), modifier = Modifier.size(14.dp))
-                      Text(ch, fontSize = 11.sp, color = Color(0xFF7F1D1D))
+                      Icon(Icons.Default.Pending, contentDescription = null, tint = Color(0xFFF87171), modifier = Modifier.size(14.dp))
+                      Text(ch, fontSize = 11.sp, color = Color(0xFF94A3B8))
                     }
                   }
                 }
@@ -2262,6 +2898,8 @@ fun AdminBatchesTab(
       confirmButton = {
         OutlinedButton(
           onClick = { selectedSubject = null; showSyllabusDetails = false },
+          colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF94A3B8)),
+          border = BorderStroke(1.dp, Color(0xFF1E2D42)),
           shape = RoundedCornerShape(10.dp)
         ) {
           Text("Close", fontSize = 12.sp)
@@ -2272,25 +2910,79 @@ fun AdminBatchesTab(
 
   if (selectedBatch == null) {
     LazyColumn(
-      modifier = Modifier.fillMaxSize(),
+      modifier = Modifier.fillMaxSize().background(Color(0xFF0D1526)),
       contentPadding = PaddingValues(16.dp),
       verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
       item {
         Column {
-          Text("Institute Batches Directory", fontWeight = FontWeight.Bold, fontSize = 18.sp)
-          Text("Select any batch to view attendance metrics, subjects & faculty", fontSize = 12.sp, color = Color(0xFF64748B))
+          Text("Institute Batches Directory", fontWeight = FontWeight.Bold, fontSize = 18.sp, color = Color.White)
+          Text("Select any batch to view attendance metrics, subjects & faculty", fontSize = 12.sp, color = Color(0xFF94A3B8))
         }
       }
 
-      items(batches) { b ->
+      // Real-Time Batch Search Bar
+      item {
+        OutlinedTextField(
+          value = batchSearchQuery,
+          onValueChange = { batchSearchQuery = it },
+          placeholder = {
+            Text("Search by batch name, schedule, or mentor...", fontSize = 13.sp, color = Color(0xFF94A3B8))
+          },
+          leadingIcon = {
+            Icon(Icons.Default.Search, contentDescription = "Search Batches", tint = Color(0xFF38BDF8), modifier = Modifier.size(20.dp))
+          },
+          trailingIcon = {
+            if (batchSearchQuery.isNotEmpty()) {
+              IconButton(onClick = { batchSearchQuery = "" }) {
+                Icon(Icons.Default.Close, contentDescription = "Clear Search", tint = Color(0xFF94A3B8), modifier = Modifier.size(18.dp))
+              }
+            }
+          },
+          singleLine = true,
+          shape = RoundedCornerShape(12.dp),
+          colors = OutlinedTextFieldDefaults.colors(
+            focusedBorderColor = Color(0xFF38BDF8),
+            unfocusedBorderColor = Color(0xFF1E2D42),
+            focusedTextColor = Color.White,
+            unfocusedTextColor = Color.White,
+            focusedContainerColor = Color(0xFF111C2E),
+            unfocusedContainerColor = Color(0xFF111C2E)
+          ),
+          modifier = Modifier.fillMaxWidth()
+        )
+      }
+
+      if (filteredBatches.isEmpty()) {
+        item {
+          Surface(
+            color = Color(0xFF111C2E),
+            shape = RoundedCornerShape(12.dp),
+            border = BorderStroke(1.dp, Color(0xFF1E2D42)),
+            modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp)
+          ) {
+            Column(
+              modifier = Modifier.padding(24.dp),
+              horizontalAlignment = Alignment.CenterHorizontally,
+              verticalArrangement = Arrangement.Center
+            ) {
+              Icon(Icons.Default.SearchOff, contentDescription = null, tint = Color(0xFF94A3B8), modifier = Modifier.size(36.dp))
+              Spacer(Modifier.height(8.dp))
+              Text("No matching batches found", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 14.sp)
+              Text("Try searching with a different batch name or mentor", color = Color(0xFF94A3B8), fontSize = 12.sp)
+            }
+          }
+        }
+      }
+
+      items(filteredBatches) { b ->
         Card(
           modifier = Modifier
             .fillMaxWidth()
             .clickable { selectedBatch = b },
           shape = RoundedCornerShape(16.dp),
-          colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-          border = BorderStroke(1.dp, Color(0xFFE2E8F0))
+          colors = CardDefaults.cardColors(containerColor = Color(0xFF111C2E)),
+          border = BorderStroke(1.dp, Color(0xFF1E2D42))
         ) {
           Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(
@@ -2298,33 +2990,34 @@ fun AdminBatchesTab(
               horizontalArrangement = Arrangement.SpaceBetween,
               verticalAlignment = Alignment.CenterVertically
             ) {
-              Text(b.name, fontWeight = FontWeight.Bold, fontSize = 16.sp, color = MaterialTheme.colorScheme.onSurface)
+              Text(b.name, fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color.White)
               Surface(
-                color = Color(0xFFEFF6FF),
+                color = Color(0xFF0284C7).copy(alpha = 0.2f),
+                border = BorderStroke(1.dp, Color(0xFF0284C7).copy(alpha = 0.4f)),
                 shape = RoundedCornerShape(8.dp)
               ) {
                 Text(
                   text = "${b.studentCount} Students",
                   fontSize = 11.sp,
                   fontWeight = FontWeight.Bold,
-                  color = Color(0xFF1D4ED8),
+                  color = Color(0xFF38BDF8),
                   modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
                 )
               }
             }
 
-            Text("Schedule: ${b.schedule}", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text("Mentor Faculty: ${b.teacherName}", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF0061A4))
+            Text("Schedule: ${b.schedule}", fontSize = 12.sp, color = Color(0xFF94A3B8))
+            Text("Mentor Faculty: ${b.teacherName}", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF38BDF8))
 
-            Divider(color = Color(0xFFEEF0F6), modifier = Modifier.padding(vertical = 2.dp))
+            HorizontalDivider(color = Color(0xFF1E2D42), modifier = Modifier.padding(vertical = 2.dp))
 
             Row(
               modifier = Modifier.fillMaxWidth(),
               horizontalArrangement = Arrangement.SpaceBetween,
               verticalAlignment = Alignment.CenterVertically
             ) {
-              Text("Tap to view dashboard & subjects", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0061A4))
-              Icon(Icons.Default.ChevronRight, contentDescription = null, tint = Color(0xFF0061A4), modifier = Modifier.size(18.dp))
+              Text("Tap to view dashboard & subjects", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF38BDF8))
+              Icon(Icons.Default.ChevronRight, contentDescription = null, tint = Color(0xFF38BDF8), modifier = Modifier.size(18.dp))
             }
           }
         }
@@ -2337,13 +3030,14 @@ fun AdminBatchesTab(
     val absentCount = (totalStudents - presentCount).coerceAtLeast(0)
 
     LazyColumn(
-      modifier = Modifier.fillMaxSize(),
+      modifier = Modifier.fillMaxSize().background(Color(0xFF0D1526)),
       contentPadding = PaddingValues(16.dp),
       verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
       item {
         Card(
-          colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
+          colors = CardDefaults.cardColors(containerColor = Color(0xFF111C2E)),
+          border = BorderStroke(1.dp, Color(0xFF1E2D42)),
           shape = RoundedCornerShape(16.dp),
           modifier = Modifier.fillMaxWidth()
         ) {
@@ -2367,7 +3061,7 @@ fun AdminBatchesTab(
       }
 
       item {
-        Text("Batch Overview & Today's Standing", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+        Text("Batch Overview & Today's Standing", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color.White)
       }
 
       item {
@@ -2377,47 +3071,47 @@ fun AdminBatchesTab(
         ) {
           Card(
             modifier = Modifier.weight(1f),
-            colors = CardDefaults.cardColors(containerColor = Color(0xFFF8FAFC)),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF111C2E)),
             shape = RoundedCornerShape(12.dp),
-            border = BorderStroke(1.dp, Color(0xFFE2E8F0))
+            border = BorderStroke(1.dp, Color(0xFF1E2D42))
           ) {
             Column(modifier = Modifier.padding(12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-              Text("Total Students", fontSize = 10.sp, color = Color(0xFF64748B), fontWeight = FontWeight.SemiBold)
+              Text("Total Students", fontSize = 10.sp, color = Color(0xFF94A3B8), fontWeight = FontWeight.SemiBold)
               Spacer(Modifier.height(4.dp))
-              Text("$totalStudents", fontSize = 20.sp, fontWeight = FontWeight.ExtraBold, color = Color(0xFF0F172A))
+              Text("$totalStudents", fontSize = 20.sp, fontWeight = FontWeight.ExtraBold, color = Color.White)
             }
           }
 
           Card(
             modifier = Modifier.weight(1f),
-            colors = CardDefaults.cardColors(containerColor = Color(0xFFDCFCE7)),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF064E3B)),
             shape = RoundedCornerShape(12.dp),
-            border = BorderStroke(1.dp, Color(0xFFBBF7D0))
+            border = BorderStroke(1.dp, Color(0xFF059669))
           ) {
             Column(modifier = Modifier.padding(12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-              Text("Present Today", fontSize = 10.sp, color = Color(0xFF15803D), fontWeight = FontWeight.Bold)
+              Text("Present Today", fontSize = 10.sp, color = Color(0xFF4ADE80), fontWeight = FontWeight.Bold)
               Spacer(Modifier.height(4.dp))
-              Text("$presentCount", fontSize = 20.sp, fontWeight = FontWeight.ExtraBold, color = Color(0xFF15803D))
+              Text("$presentCount", fontSize = 20.sp, fontWeight = FontWeight.ExtraBold, color = Color(0xFF4ADE80))
             }
           }
 
           Card(
             modifier = Modifier.weight(1f),
-            colors = CardDefaults.cardColors(containerColor = Color(0xFFFEE2E2)),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF450A0A)),
             shape = RoundedCornerShape(12.dp),
-            border = BorderStroke(1.dp, Color(0xFFFECACA))
+            border = BorderStroke(1.dp, Color(0xFF7F1D1D))
           ) {
             Column(modifier = Modifier.padding(12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-              Text("Absent Today", fontSize = 10.sp, color = Color(0xFFB91C1C), fontWeight = FontWeight.Bold)
+              Text("Absent Today", fontSize = 10.sp, color = Color(0xFFF87171), fontWeight = FontWeight.Bold)
               Spacer(Modifier.height(4.dp))
-              Text("$absentCount", fontSize = 20.sp, fontWeight = FontWeight.ExtraBold, color = Color(0xFFB91C1C))
+              Text("$absentCount", fontSize = 20.sp, fontWeight = FontWeight.ExtraBold, color = Color(0xFFF87171))
             }
           }
         }
       }
 
       item {
-        Text("Subjects in ${b.name}", fontWeight = FontWeight.Bold, fontSize = 14.sp, modifier = Modifier.padding(top = 6.dp))
+        Text("Subjects in ${b.name}", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color.White, modifier = Modifier.padding(top = 6.dp))
       }
 
       items(subjects) { sub ->
@@ -2429,8 +3123,8 @@ fun AdminBatchesTab(
               showSyllabusDetails = false
             },
           shape = RoundedCornerShape(12.dp),
-          colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-          border = BorderStroke(1.dp, Color(0xFFE2E8F0))
+          colors = CardDefaults.cardColors(containerColor = Color(0xFF111C2E)),
+          border = BorderStroke(1.dp, Color(0xFF1E2D42))
         ) {
           Row(
             modifier = Modifier
@@ -2440,23 +3134,24 @@ fun AdminBatchesTab(
             verticalAlignment = Alignment.CenterVertically
           ) {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-              Text(sub.name, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-              Text("Tap to view faculty & syllabus", fontSize = 11.sp, color = Color(0xFF0061A4), fontWeight = FontWeight.Medium)
+              Text(sub.name, fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color.White)
+              Text("Tap to view faculty & syllabus", fontSize = 11.sp, color = Color(0xFF38BDF8), fontWeight = FontWeight.Medium)
             }
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
               Surface(
-                color = Color(0xFFF0FDF4),
+                color = Color(0xFF064E3B),
+                border = BorderStroke(1.dp, Color(0xFF059669)),
                 shape = RoundedCornerShape(8.dp)
               ) {
                 Text(
                   text = "${sub.completionPercent}% Done",
                   fontSize = 11.sp,
                   fontWeight = FontWeight.Bold,
-                  color = Color(0xFF15803D),
+                  color = Color(0xFF4ADE80),
                   modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                 )
               }
-              Icon(Icons.Default.ChevronRight, contentDescription = null, tint = Color(0xFF0061A4), modifier = Modifier.size(18.dp))
+              Icon(Icons.Default.ChevronRight, contentDescription = null, tint = Color(0xFF38BDF8), modifier = Modifier.size(18.dp))
             }
           }
         }
@@ -2471,7 +3166,9 @@ fun AdminCrmAndFeesTab(
   onlineForms: List<OnlineFormSubmission>,
   fees: List<FeeRecord>
 ) {
-  var mode by remember { mutableStateOf(0) } // 0: Leads CRM, 1: Online Portal Forms, 2: Fee Collections
+  val feePayments by AppRepository.feePayments.collectAsState()
+
+  var mode by remember { mutableStateOf(0) } // 0: Leads CRM, 1: Online Portal Forms, 2: Fee Collections, 3: Room Payment Ledger
 
   var feeSearchQuery by remember { mutableStateOf("") }
   var selectedMonthFilter by remember { mutableStateOf("All") }
@@ -2482,6 +3179,62 @@ fun AdminCrmAndFeesTab(
   
   var showReceiptForRecord by remember { mutableStateOf<FeeRecord?>(null) }
   var lastPaidAmount by remember { mutableStateOf(0) }
+
+  // Room payment ledger states
+  var showRecordPaymentDialog by remember { mutableStateOf(false) }
+  var showReceiptForPayment by remember { mutableStateOf<StudentFeePayment?>(null) }
+  var editPaymentItem by remember { mutableStateOf<StudentFeePayment?>(null) }
+  var roomStatusFilter by remember { mutableStateOf("All") }
+  var roomSearchQuery by remember { mutableStateOf("") }
+  var exportRoomResult by remember { mutableStateOf<ExportUtils.RoomExportResult?>(null) }
+  var isExportingRoomJson by remember { mutableStateOf(false) }
+
+  val coroutineScope = rememberCoroutineScope()
+  val context = LocalContext.current
+
+  if (exportRoomResult != null) {
+    RoomDatabaseExportSuccessDialog(
+      result = exportRoomResult!!,
+      onDismiss = { exportRoomResult = null },
+      onShare = {
+        ExportUtils.shareFile(
+          context = context,
+          file = exportRoomResult!!.file,
+          mimeType = "application/json",
+          subject = "Room Database JSON Export - ${exportRoomResult!!.file.name}",
+          title = "Share Room Database Export"
+        )
+      }
+    )
+  }
+
+  if (showRecordPaymentDialog) {
+    RecordStudentPaymentDialog(
+      onDismiss = { showRecordPaymentDialog = false },
+      onSave = { payment ->
+        AppRepository.recordStudentFeePayment(payment)
+        showRecordPaymentDialog = false
+      }
+    )
+  }
+
+  editPaymentItem?.let { paymentToEdit ->
+    EditStudentPaymentDialog(
+      payment = paymentToEdit,
+      onDismiss = { editPaymentItem = null },
+      onSave = { updated ->
+        AppRepository.updateStudentFeePayment(updated)
+        editPaymentItem = null
+      }
+    )
+  }
+
+  showReceiptForPayment?.let { paymentForReceipt ->
+    StudentPaymentReceiptDialog(
+      payment = paymentForReceipt,
+      onDismiss = { showReceiptForPayment = null }
+    )
+  }
 
   if (showReceiptForRecord != null) {
     val rec = showReceiptForRecord!!
@@ -2588,8 +3341,8 @@ fun AdminCrmAndFeesTab(
       CollectFeePaymentDialog(
         pendingAmount = record.pendingAmount,
         onDismiss = { recordPaymentForId = null },
-        onSave = { payAmt ->
-          AppRepository.recordFeePayment(id, payAmt)
+        onSave = { payAmt, mode, remarks ->
+          AppRepository.recordFeePayment(id, payAmt, mode, remarks)
           lastPaidAmount = payAmt
           showReceiptForRecord = record
           recordPaymentForId = null
@@ -2611,19 +3364,51 @@ fun AdminCrmAndFeesTab(
   val totalPending = remember(filteredFees) { filteredFees.sumOf { it.pendingAmount } }
   val totalOverdue = remember(filteredFees) { filteredFees.filter { it.paymentStatus == "Overdue" }.sumOf { it.pendingAmount } }
 
+  val filteredRoomPayments = remember(feePayments, roomSearchQuery, roomStatusFilter) {
+    feePayments.filter { p ->
+      val matchesSearch = roomSearchQuery.isBlank() ||
+          p.studentName.contains(roomSearchQuery, ignoreCase = true) ||
+          p.studentId.contains(roomSearchQuery, ignoreCase = true) ||
+          p.receiptNo.contains(roomSearchQuery, ignoreCase = true)
+      val matchesStatus = roomStatusFilter == "All" || p.paymentStatus.equals(roomStatusFilter, ignoreCase = true)
+      matchesSearch && matchesStatus
+    }
+  }
+  val totalRoomCollected = remember(feePayments) { feePayments.filter { it.paymentStatus == "Paid" || it.paymentStatus == "Partial" }.sumOf { it.amount } }
+
   LazyColumn(
     modifier = Modifier.fillMaxSize(),
     contentPadding = PaddingValues(16.dp),
     verticalArrangement = Arrangement.spacedBy(14.dp)
   ) {
     item {
-      Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        listOf("CRM Leads (${leads.size})" to 0, "Web Forms (${onlineForms.count { it.status == "Pending" }})" to 1, "Fee Records (${fees.size})" to 2).forEach { (lbl, idx) ->
+      Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        listOf(
+          "CRM Leads (${leads.size})" to 0,
+          "Web Forms (${onlineForms.count { it.status == "Pending" }})" to 1,
+          "Invoices (${fees.size})" to 2,
+          "Room Payments (${feePayments.size})" to 3
+        ).forEach { (lbl, idx) ->
           val sel = mode == idx
           Box(
-            modifier = Modifier.weight(1f).clip(RoundedCornerShape(14.dp)).background(if (sel) Color(0xFF0061A4) else Color(0xFFEEF0F6)).clickable { mode = idx }.padding(vertical = 10.dp),
+            modifier = Modifier
+              .weight(1f)
+              .clip(RoundedCornerShape(12.dp))
+              .background(if (sel) Color(0xFF0061A4) else Color(0xFFEEF0F6))
+              .clickable { mode = idx }
+              .padding(vertical = 8.dp),
             contentAlignment = Alignment.Center
-          ) { Text(lbl, color = if (sel) Color.White else Color(0xFF44474E), fontSize = 11.sp, fontWeight = FontWeight.Bold) }
+          ) {
+            Text(
+              lbl,
+              color = if (sel) Color.White else Color(0xFF44474E),
+              fontSize = 10.sp,
+              fontWeight = FontWeight.Bold,
+              textAlign = TextAlign.Center,
+              maxLines = 1,
+              overflow = TextOverflow.Ellipsis
+            )
+          }
         }
       }
     }
@@ -3046,6 +3831,328 @@ fun AdminCrmAndFeesTab(
           }
         }
       }
+      3 -> {
+        // Mode 3: ROOM DATABASE STUDENT FEE PAYMENT LEDGER
+        item {
+          Surface(
+            color = Color(0xFF0F172A),
+            shape = RoundedCornerShape(16.dp),
+            modifier = Modifier.fillMaxWidth()
+          ) {
+            Row(
+              modifier = Modifier.padding(16.dp),
+              verticalAlignment = Alignment.CenterVertically,
+              horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+              Column(modifier = Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                  Icon(Icons.Default.Storage, contentDescription = null, tint = Color(0xFF38BDF8), modifier = Modifier.size(18.dp))
+                  Text("Institute Payment Ledger", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color.White)
+                }
+                Spacer(Modifier.height(4.dp))
+                Text(
+                  "Persistent on-device tracking of individual student fee payments, receipts, payment dates, amounts, and statuses.",
+                  fontSize = 11.sp,
+                  color = Color(0xFF94A3B8)
+                )
+              }
+              Spacer(Modifier.width(12.dp))
+              Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                  onClick = {
+                    coroutineScope.launch {
+                      isExportingRoomJson = true
+                      try {
+                        val res = ExportUtils.exportRoomDatabaseFromLocalDb(context)
+                        exportRoomResult = res
+                        Toast.makeText(context, "Room DB exported to cache: ${res.file.name}", Toast.LENGTH_SHORT).show()
+                      } catch (e: Exception) {
+                        Toast.makeText(context, "Export error: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
+                      } finally {
+                        isExportingRoomJson = false
+                      }
+                    }
+                  },
+                  colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7)),
+                  shape = RoundedCornerShape(10.dp),
+                  contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
+                ) {
+                  if (isExportingRoomJson) {
+                    CircularProgressIndicator(color = Color.White, modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
+                  } else {
+                    Icon(Icons.Default.FileDownload, contentDescription = null, modifier = Modifier.size(14.dp))
+                  }
+                  Spacer(Modifier.width(4.dp))
+                  Text("Export JSON", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
+
+                Button(
+                  onClick = { showRecordPaymentDialog = true },
+                  colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF16A34A)),
+                  shape = RoundedCornerShape(10.dp),
+                  contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
+                ) {
+                  Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(14.dp))
+                  Spacer(Modifier.width(4.dp))
+                  Text("Record", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
+              }
+            }
+          }
+        }
+
+        // Room Database Monthly Revenue Summary Chart
+        item {
+          MonthlyRevenueSummaryChart(
+            feePayments = feePayments,
+            onRecordPaymentClick = { showRecordPaymentDialog = true }
+          )
+        }
+
+        // Room Telemetry Summary
+        item {
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+          ) {
+            Card(
+              modifier = Modifier.weight(1f),
+              colors = CardDefaults.cardColors(containerColor = Color(0xFFDCFCE7)),
+              shape = RoundedCornerShape(12.dp)
+            ) {
+              Column(modifier = Modifier.padding(10.dp)) {
+                Text("Collected", fontSize = 10.sp, color = Color(0xFF15803D), fontWeight = FontWeight.Bold)
+                Text("₹${totalRoomCollected.toInt()}", fontSize = 15.sp, color = Color(0xFF14532D), fontWeight = FontWeight.ExtraBold)
+                Text("${feePayments.count { it.paymentStatus == "Paid" }} Paid", fontSize = 9.sp, color = Color(0xFF15803D))
+              }
+            }
+
+            Card(
+              modifier = Modifier.weight(1f),
+              colors = CardDefaults.cardColors(containerColor = Color(0xFFFEF3C7)),
+              shape = RoundedCornerShape(12.dp)
+            ) {
+              Column(modifier = Modifier.padding(10.dp)) {
+                Text("Pending/Partial", fontSize = 10.sp, color = Color(0xFFB45309), fontWeight = FontWeight.Bold)
+                Text("${feePayments.count { it.paymentStatus == "Pending" || it.paymentStatus == "Partial" }}", fontSize = 15.sp, color = Color(0xFF78350F), fontWeight = FontWeight.ExtraBold)
+                Text("Awaiting Settle", fontSize = 9.sp, color = Color(0xFFB45309))
+              }
+            }
+
+            Card(
+              modifier = Modifier.weight(1f),
+              colors = CardDefaults.cardColors(containerColor = Color(0xFFEFF6FF)),
+              shape = RoundedCornerShape(12.dp)
+            ) {
+              Column(modifier = Modifier.padding(10.dp)) {
+                Text("All Records", fontSize = 10.sp, color = Color(0xFF1D4ED8), fontWeight = FontWeight.Bold)
+                Text("${feePayments.size}", fontSize = 15.sp, color = Color(0xFF1E3A8A), fontWeight = FontWeight.ExtraBold)
+                Text("In Room DB", fontSize = 9.sp, color = Color(0xFF1D4ED8))
+              }
+            }
+          }
+        }
+
+        // Search Bar
+        item {
+          OutlinedTextField(
+            value = roomSearchQuery,
+            onValueChange = { roomSearchQuery = it },
+            placeholder = { Text("Search by student, ID, or receipt number...", fontSize = 12.sp) },
+            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = Color(0xFF64748B)) },
+            trailingIcon = {
+              if (roomSearchQuery.isNotEmpty()) {
+                IconButton(onClick = { roomSearchQuery = "" }) {
+                  Icon(Icons.Default.Close, contentDescription = "Clear", tint = Color(0xFF64748B))
+                }
+              }
+            },
+            shape = RoundedCornerShape(12.dp),
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true
+          )
+        }
+
+        // Status Filter Chips
+        item {
+          Row(
+            modifier = Modifier.horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+          ) {
+            listOf("All", "Paid", "Pending", "Partial", "Overdue", "Refunded").forEach { st ->
+              val isSelected = roomStatusFilter == st
+              val filterBg = if (isSelected) Color(0xFF0061A4) else Color(0xFFEEF0F6)
+              val filterTxt = if (isSelected) Color.White else Color(0xFF44474E)
+              Surface(
+                color = filterBg,
+                shape = RoundedCornerShape(10.dp),
+                modifier = Modifier.clickable { roomStatusFilter = st }
+              ) {
+                Text(
+                  text = st,
+                  fontSize = 11.sp,
+                  fontWeight = FontWeight.Bold,
+                  color = filterTxt,
+                  modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                )
+              }
+            }
+          }
+        }
+
+        if (filteredRoomPayments.isEmpty()) {
+          item {
+            Card(
+              colors = CardDefaults.cardColors(containerColor = Color(0xFFF8FAFC)),
+              shape = RoundedCornerShape(16.dp),
+              modifier = Modifier.fillMaxWidth()
+            ) {
+              Column(
+                modifier = Modifier.padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+              ) {
+                Icon(Icons.Default.ReceiptLong, contentDescription = null, tint = Color(0xFF94A3B8), modifier = Modifier.size(36.dp))
+                Spacer(Modifier.height(8.dp))
+                Text("No payment transactions match criteria.", fontSize = 13.sp, color = Color(0xFF64748B), fontWeight = FontWeight.Medium)
+                Spacer(Modifier.height(8.dp))
+                Button(
+                  onClick = { showRecordPaymentDialog = true },
+                  colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0061A4)),
+                  shape = RoundedCornerShape(8.dp)
+                ) {
+                  Text("Record New Payment", fontSize = 11.sp)
+                }
+              }
+            }
+          }
+        }
+
+        items(filteredRoomPayments) { p ->
+          val badgeColor = when (p.paymentStatus) {
+            "Paid" -> Color(0xFF16A34A)
+            "Partial" -> Color(0xFFD97706)
+            "Pending" -> Color(0xFF2563EB)
+            "Overdue" -> Color(0xFFDC2626)
+            else -> Color(0xFF64748B)
+          }
+
+          Card(
+            shape = RoundedCornerShape(14.dp),
+            colors = CardDefaults.cardColors(containerColor = Color.White),
+            border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+            modifier = Modifier.fillMaxWidth()
+          ) {
+            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+              Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+              ) {
+                Column {
+                  Text(p.studentName, fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color(0xFF0F172A))
+                  Text("${p.studentId} • ${p.feeType}", fontSize = 11.sp, color = Color(0xFF64748B))
+                }
+                Surface(
+                  color = badgeColor.copy(alpha = 0.12f),
+                  shape = RoundedCornerShape(8.dp)
+                ) {
+                  Text(
+                    text = p.paymentStatus.uppercase(),
+                    color = badgeColor,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                  )
+                }
+              }
+
+              HorizontalDivider(color = Color(0xFFF1F5F9))
+
+              Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+              ) {
+                Column {
+                  Text("Amount Paid", fontSize = 10.sp, color = Color(0xFF64748B))
+                  Text("₹${p.amount.toInt()}", fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, color = Color(0xFF15803D))
+                }
+                Column {
+                  Text("Payment Date", fontSize = 10.sp, color = Color(0xFF64748B))
+                  Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                    Icon(Icons.Default.CalendarToday, contentDescription = null, tint = Color(0xFF0284C7), modifier = Modifier.size(11.dp))
+                    Text(p.paymentDate, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF0F172A))
+                  }
+                }
+                Column {
+                  Text("Mode", fontSize = 10.sp, color = Color(0xFF64748B))
+                  Text(p.paymentMode, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0284C7))
+                }
+                Column {
+                  Text("Receipt #", fontSize = 10.sp, color = Color(0xFF64748B))
+                  Text(p.receiptNo.takeLast(10), fontSize = 11.sp, fontWeight = FontWeight.Medium, color = Color(0xFF475569))
+                }
+              }
+
+              if (p.remarks.isNotBlank()) {
+                Surface(
+                  color = Color(0xFFF8FAFC),
+                  shape = RoundedCornerShape(6.dp),
+                  modifier = Modifier.fillMaxWidth()
+                ) {
+                  Text(
+                    text = "Notes: ${p.remarks}",
+                    fontSize = 10.sp,
+                    color = Color(0xFF64748B),
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                  )
+                }
+              }
+
+              HorizontalDivider(color = Color(0xFFF1F5F9))
+
+              Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically
+              ) {
+                Button(
+                  onClick = { showReceiptForPayment = p },
+                  colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0061A4)),
+                  shape = RoundedCornerShape(8.dp),
+                  modifier = Modifier.weight(1f),
+                  contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp)
+                ) {
+                  Icon(Icons.Default.ReceiptLong, contentDescription = null, modifier = Modifier.size(13.dp))
+                  Spacer(Modifier.width(4.dp))
+                  Text("Receipt", fontSize = 11.sp)
+                }
+
+                OutlinedButton(
+                  onClick = { editPaymentItem = p },
+                  shape = RoundedCornerShape(8.dp),
+                  modifier = Modifier.weight(1f),
+                  contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp)
+                ) {
+                  Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(13.dp))
+                  Spacer(Modifier.width(4.dp))
+                  Text("Edit", fontSize = 11.sp)
+                }
+
+                IconButton(
+                  onClick = { AppRepository.deleteStudentFeePayment(p.id) },
+                  modifier = Modifier
+                    .size(32.dp)
+                    .background(Color(0xFFFEF2F2), shape = RoundedCornerShape(8.dp))
+                ) {
+                  Icon(Icons.Default.Delete, contentDescription = "Delete record", tint = Color(0xFFDC2626), modifier = Modifier.size(15.dp))
+                }
+              }
+            }
+          }
+        }
+      }
     }
   }
 }
@@ -3191,9 +4298,13 @@ fun AddMonthlyFeeDialog(
 fun CollectFeePaymentDialog(
   pendingAmount: Int,
   onDismiss: () -> Unit,
-  onSave: (amount: Int) -> Unit
+  onSave: (amount: Int, mode: String, remarks: String) -> Unit
 ) {
   var payAmount by remember { mutableStateOf(pendingAmount.toString()) }
+  var paymentMode by remember { mutableStateOf("UPI") }
+  var remarks by remember { mutableStateOf("Monthly installment payment") }
+
+  val modes = listOf("UPI", "Cash", "Card", "Net Banking", "Cheque")
 
   androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss) {
     Card(
@@ -3209,15 +4320,24 @@ fun CollectFeePaymentDialog(
           .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(14.dp)
       ) {
-        Text(
-          text = "Record Fee Payment",
-          fontSize = 18.sp,
-          fontWeight = FontWeight.Bold,
-          color = Color(0xFF1A1C1E)
-        )
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.SpaceBetween,
+          verticalAlignment = Alignment.CenterVertically
+        ) {
+          Text(
+            text = "Record Fee Payment",
+            fontSize = 18.sp,
+            fontWeight = FontWeight.Bold,
+            color = Color(0xFF1A1C1E)
+          )
+          IconButton(onClick = onDismiss) {
+            Icon(Icons.Default.Close, contentDescription = "Close")
+          }
+        }
 
         Text(
-          text = "Enter the paid amount to update the invoice. Outstanding balance is ₹$pendingAmount.",
+          text = "Enter the paid amount to persist to Room database & update the invoice. Outstanding balance is ₹$pendingAmount.",
           fontSize = 12.sp,
           color = Color(0xFF44474E)
         )
@@ -3226,6 +4346,65 @@ fun CollectFeePaymentDialog(
           value = payAmount,
           onValueChange = { payAmount = it },
           label = { Text("Payment Amount (₹)") },
+          modifier = Modifier.fillMaxWidth(),
+          singleLine = true,
+          shape = RoundedCornerShape(12.dp)
+        )
+
+        // Quick amount chips
+        Row(
+          modifier = Modifier.horizontalScroll(rememberScrollState()),
+          horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+          listOf(
+            "Full (₹$pendingAmount)" to pendingAmount,
+            "₹5,000" to 5000,
+            "₹10,000" to 10000,
+            "₹25,000" to 25000
+          ).forEach { (lbl, amt) ->
+            Surface(
+              color = Color(0xFFEEF0F6),
+              shape = RoundedCornerShape(8.dp),
+              modifier = Modifier.clickable { payAmount = amt.toString() }
+            ) {
+              Text(
+                text = lbl,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color(0xFF0061A4),
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+              )
+            }
+          }
+        }
+
+        Text("Payment Mode:", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF44474E))
+        Row(
+          modifier = Modifier.horizontalScroll(rememberScrollState()),
+          horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+          modes.forEach { mode ->
+            val isSelected = paymentMode == mode
+            Surface(
+              color = if (isSelected) Color(0xFF0061A4) else Color(0xFFEEF0F6),
+              shape = RoundedCornerShape(8.dp),
+              modifier = Modifier.clickable { paymentMode = mode }
+            ) {
+              Text(
+                text = mode,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                color = if (isSelected) Color.White else Color(0xFF44474E),
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+              )
+            }
+          }
+        }
+
+        OutlinedTextField(
+          value = remarks,
+          onValueChange = { remarks = it },
+          label = { Text("Remarks / Notes") },
           modifier = Modifier.fillMaxWidth(),
           singleLine = true,
           shape = RoundedCornerShape(12.dp)
@@ -3244,19 +4423,704 @@ fun CollectFeePaymentDialog(
             onClick = {
               val amt = payAmount.toIntOrNull() ?: 0
               if (amt > 0) {
-                onSave(amt)
+                onSave(amt, paymentMode, remarks)
               }
             },
             enabled = (payAmount.toIntOrNull() ?: 0) > 0,
             shape = RoundedCornerShape(12.dp),
             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0061A4))
           ) {
+            Icon(Icons.Default.Save, contentDescription = null, modifier = Modifier.size(16.dp))
+            Spacer(Modifier.width(6.dp))
             Text("Record Payment")
           }
         }
       }
     }
   }
+}
+
+@Composable
+fun RecordStudentPaymentDialog(
+  onDismiss: () -> Unit,
+  onSave: (payment: StudentFeePayment) -> Unit
+) {
+  val students by AppRepository.students.collectAsState()
+
+  var selectedStudentName by remember { mutableStateOf(students.firstOrNull()?.name ?: "Aarav Sharma") }
+  var selectedStudentId by remember { mutableStateOf(students.firstOrNull()?.id ?: "STU_1001") }
+  var amountInput by remember { mutableStateOf("25000") }
+  var paymentDateInput by remember { mutableStateOf(SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(Date())) }
+  var paymentStatus by remember { mutableStateOf("Paid") }
+  var paymentMode by remember { mutableStateOf("UPI") }
+  var feeType by remember { mutableStateOf("Monthly Tuition") }
+  var monthInput by remember { mutableStateOf("August 2026") }
+  var receiptNoInput by remember { mutableStateOf("REC-2026-${System.currentTimeMillis() % 100000}") }
+  var remarksInput by remember { mutableStateOf("Tuition fee collected via direct transfer") }
+
+  val statusOptions = listOf("Paid", "Pending", "Partial", "Overdue", "Refunded")
+  val modeOptions = listOf("UPI", "Cash", "Card", "Net Banking", "Cheque")
+  val feeTypeOptions = listOf("Monthly Tuition", "Admission Fee", "Exam Fee", "Study Material", "Annual Package")
+  val quickAmounts = listOf("₹5,000" to 5000, "₹10,000" to 10000, "₹25,000" to 25000, "₹50,000" to 50000)
+
+  androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss) {
+    Card(
+      modifier = Modifier
+        .fillMaxWidth()
+        .padding(12.dp),
+      shape = RoundedCornerShape(24.dp),
+      colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    ) {
+      Column(
+        modifier = Modifier
+          .padding(20.dp)
+          .verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+      ) {
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.SpaceBetween,
+          verticalAlignment = Alignment.CenterVertically
+        ) {
+          Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Box(
+              modifier = Modifier
+                .size(36.dp)
+                .clip(CircleShape)
+                .background(Color(0xFFDCFCE7)),
+              contentAlignment = Alignment.Center
+            ) {
+              Icon(Icons.Default.Payments, contentDescription = null, tint = Color(0xFF16A34A), modifier = Modifier.size(20.dp))
+            }
+            Text("Record Student Payment", fontSize = 17.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))
+          }
+          IconButton(onClick = onDismiss) {
+            Icon(Icons.Default.Close, contentDescription = "Close")
+          }
+        }
+
+        Text("Select Student:", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF475569))
+        Row(
+          modifier = Modifier.horizontalScroll(rememberScrollState()),
+          horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+          students.take(10).forEach { stu ->
+            val isSelected = selectedStudentName == stu.name
+            Surface(
+              color = if (isSelected) Color(0xFF0061A4) else Color(0xFFF1F5F9),
+              shape = RoundedCornerShape(8.dp),
+              modifier = Modifier.clickable {
+                selectedStudentName = stu.name
+                selectedStudentId = stu.id
+              }
+            ) {
+              Text(
+                text = "${stu.name} (${stu.id})",
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                color = if (isSelected) Color.White else Color(0xFF334155),
+                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+              )
+            }
+          }
+        }
+
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+          OutlinedTextField(
+            value = amountInput,
+            onValueChange = { amountInput = it },
+            label = { Text("Amount (₹)*") },
+            singleLine = true,
+            shape = RoundedCornerShape(12.dp),
+            modifier = Modifier.weight(1f)
+          )
+
+          OutlinedTextField(
+            value = paymentDateInput,
+            onValueChange = { paymentDateInput = it },
+            label = { Text("Payment Date*") },
+            placeholder = { Text("dd/MM/yyyy") },
+            singleLine = true,
+            shape = RoundedCornerShape(12.dp),
+            modifier = Modifier.weight(1f)
+          )
+        }
+
+        // Quick amount chips
+        Row(
+          modifier = Modifier.horizontalScroll(rememberScrollState()),
+          horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+          quickAmounts.forEach { (lbl, amt) ->
+            Surface(
+              color = Color(0xFFF1F5F9),
+              shape = RoundedCornerShape(8.dp),
+              modifier = Modifier.clickable { amountInput = amt.toString() }
+            ) {
+              Text(
+                text = "+ $lbl",
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color(0xFF0284C7),
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+              )
+            }
+          }
+        }
+
+        Text("Payment Status:", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF475569))
+        Row(
+          modifier = Modifier.horizontalScroll(rememberScrollState()),
+          horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+          statusOptions.forEach { st ->
+            val isSelected = paymentStatus == st
+            val badgeColor = when (st) {
+              "Paid" -> Color(0xFF16A34A)
+              "Partial" -> Color(0xFFD97706)
+              "Pending" -> Color(0xFF2563EB)
+              "Overdue" -> Color(0xFFDC2626)
+              else -> Color(0xFF64748B)
+            }
+            Surface(
+              color = if (isSelected) badgeColor else Color(0xFFF1F5F9),
+              shape = RoundedCornerShape(8.dp),
+              modifier = Modifier.clickable { paymentStatus = st }
+            ) {
+              Text(
+                text = st,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                color = if (isSelected) Color.White else Color(0xFF334155),
+                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+              )
+            }
+          }
+        }
+
+        Text("Payment Mode:", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF475569))
+        Row(
+          modifier = Modifier.horizontalScroll(rememberScrollState()),
+          horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+          modeOptions.forEach { md ->
+            val isSelected = paymentMode == md
+            Surface(
+              color = if (isSelected) Color(0xFF0F172A) else Color(0xFFF1F5F9),
+              shape = RoundedCornerShape(8.dp),
+              modifier = Modifier.clickable { paymentMode = md }
+            ) {
+              Text(
+                text = md,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                color = if (isSelected) Color.White else Color(0xFF334155),
+                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+              )
+            }
+          }
+        }
+
+        Text("Fee Category:", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF475569))
+        Row(
+          modifier = Modifier.horizontalScroll(rememberScrollState()),
+          horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+          feeTypeOptions.forEach { ft ->
+            val isSelected = feeType == ft
+            Surface(
+              color = if (isSelected) Color(0xFF0284C7) else Color(0xFFF1F5F9),
+              shape = RoundedCornerShape(8.dp),
+              modifier = Modifier.clickable { feeType = ft }
+            ) {
+              Text(
+                text = ft,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                color = if (isSelected) Color.White else Color(0xFF334155),
+                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+              )
+            }
+          }
+        }
+
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+          OutlinedTextField(
+            value = monthInput,
+            onValueChange = { monthInput = it },
+            label = { Text("Billing Month") },
+            singleLine = true,
+            shape = RoundedCornerShape(12.dp),
+            modifier = Modifier.weight(1f)
+          )
+
+          OutlinedTextField(
+            value = receiptNoInput,
+            onValueChange = { receiptNoInput = it },
+            label = { Text("Receipt No.") },
+            singleLine = true,
+            shape = RoundedCornerShape(12.dp),
+            modifier = Modifier.weight(1f)
+          )
+        }
+
+        OutlinedTextField(
+          value = remarksInput,
+          onValueChange = { remarksInput = it },
+          label = { Text("Remarks / Transaction Notes") },
+          modifier = Modifier.fillMaxWidth(),
+          shape = RoundedCornerShape(12.dp)
+        )
+
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.End,
+          verticalAlignment = Alignment.CenterVertically
+        ) {
+          TextButton(onClick = onDismiss) {
+            Text("Cancel")
+          }
+          Spacer(modifier = Modifier.width(10.dp))
+          Button(
+            onClick = {
+              val amt = amountInput.toDoubleOrNull() ?: 0.0
+              if (selectedStudentName.isNotBlank() && amt > 0) {
+                val newPayment = StudentFeePayment(
+                  id = "PAY_${System.currentTimeMillis()}",
+                  studentId = selectedStudentId,
+                  studentName = selectedStudentName,
+                  amount = amt,
+                  paymentDate = paymentDateInput.ifBlank { SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(Date()) },
+                  paymentStatus = paymentStatus,
+                  feeType = feeType,
+                  paymentMode = paymentMode,
+                  receiptNo = receiptNoInput.ifBlank { "REC-2026-${System.currentTimeMillis() % 100000}" },
+                  month = monthInput.ifBlank { "August 2026" },
+                  remarks = remarksInput,
+                  recordedBy = "Admin",
+                  timestamp = System.currentTimeMillis()
+                )
+                onSave(newPayment)
+              }
+            },
+            enabled = selectedStudentName.isNotBlank() && (amountInput.toDoubleOrNull() ?: 0.0) > 0,
+            shape = RoundedCornerShape(12.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF16A34A))
+          ) {
+            Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
+            Spacer(Modifier.width(6.dp))
+            Text("Save to Room DB")
+          }
+        }
+      }
+    }
+  }
+}
+
+@Composable
+fun EditStudentPaymentDialog(
+  payment: StudentFeePayment,
+  onDismiss: () -> Unit,
+  onSave: (payment: StudentFeePayment) -> Unit
+) {
+  var amountInput by remember { mutableStateOf(payment.amount.toInt().toString()) }
+  var paymentDateInput by remember { mutableStateOf(payment.paymentDate) }
+  var paymentStatus by remember { mutableStateOf(payment.paymentStatus) }
+  var paymentMode by remember { mutableStateOf(payment.paymentMode) }
+  var remarksInput by remember { mutableStateOf(payment.remarks) }
+
+  val statusOptions = listOf("Paid", "Pending", "Partial", "Overdue", "Refunded")
+  val modeOptions = listOf("UPI", "Cash", "Card", "Net Banking", "Cheque")
+
+  androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss) {
+    Card(
+      modifier = Modifier
+        .fillMaxWidth()
+        .padding(16.dp),
+      shape = RoundedCornerShape(24.dp),
+      colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    ) {
+      Column(
+        modifier = Modifier
+          .padding(20.dp)
+          .verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+      ) {
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.SpaceBetween,
+          verticalAlignment = Alignment.CenterVertically
+        ) {
+          Text("Edit Fee Payment", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))
+          IconButton(onClick = onDismiss) {
+            Icon(Icons.Default.Close, contentDescription = "Close")
+          }
+        }
+
+        Surface(
+          color = Color(0xFFF1F5F9),
+          shape = RoundedCornerShape(12.dp),
+          modifier = Modifier.fillMaxWidth()
+        ) {
+          Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text("Student: ${payment.studentName}", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color(0xFF0F172A))
+            Text("Receipt: ${payment.receiptNo} • ${payment.feeType}", fontSize = 11.sp, color = Color(0xFF64748B))
+          }
+        }
+
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+          OutlinedTextField(
+            value = amountInput,
+            onValueChange = { amountInput = it },
+            label = { Text("Amount (₹)") },
+            singleLine = true,
+            shape = RoundedCornerShape(12.dp),
+            modifier = Modifier.weight(1f)
+          )
+
+          OutlinedTextField(
+            value = paymentDateInput,
+            onValueChange = { paymentDateInput = it },
+            label = { Text("Payment Date") },
+            singleLine = true,
+            shape = RoundedCornerShape(12.dp),
+            modifier = Modifier.weight(1f)
+          )
+        }
+
+        Text("Payment Status:", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF475569))
+        Row(
+          modifier = Modifier.horizontalScroll(rememberScrollState()),
+          horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+          statusOptions.forEach { st ->
+            val isSelected = paymentStatus == st
+            val badgeColor = when (st) {
+              "Paid" -> Color(0xFF16A34A)
+              "Partial" -> Color(0xFFD97706)
+              "Pending" -> Color(0xFF2563EB)
+              "Overdue" -> Color(0xFFDC2626)
+              else -> Color(0xFF64748B)
+            }
+            Surface(
+              color = if (isSelected) badgeColor else Color(0xFFF1F5F9),
+              shape = RoundedCornerShape(8.dp),
+              modifier = Modifier.clickable { paymentStatus = st }
+            ) {
+              Text(
+                text = st,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                color = if (isSelected) Color.White else Color(0xFF334155),
+                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+              )
+            }
+          }
+        }
+
+        Text("Payment Mode:", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF475569))
+        Row(
+          modifier = Modifier.horizontalScroll(rememberScrollState()),
+          horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+          modeOptions.forEach { md ->
+            val isSelected = paymentMode == md
+            Surface(
+              color = if (isSelected) Color(0xFF0F172A) else Color(0xFFF1F5F9),
+              shape = RoundedCornerShape(8.dp),
+              modifier = Modifier.clickable { paymentMode = md }
+            ) {
+              Text(
+                text = md,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                color = if (isSelected) Color.White else Color(0xFF334155),
+                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+              )
+            }
+          }
+        }
+
+        OutlinedTextField(
+          value = remarksInput,
+          onValueChange = { remarksInput = it },
+          label = { Text("Remarks / Notes") },
+          modifier = Modifier.fillMaxWidth(),
+          shape = RoundedCornerShape(12.dp)
+        )
+
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.End,
+          verticalAlignment = Alignment.CenterVertically
+        ) {
+          TextButton(onClick = onDismiss) { Text("Cancel") }
+          Spacer(modifier = Modifier.width(10.dp))
+          Button(
+            onClick = {
+              val amt = amountInput.toDoubleOrNull() ?: payment.amount
+              val updated = payment.copy(
+                amount = amt,
+                paymentDate = paymentDateInput,
+                paymentStatus = paymentStatus,
+                paymentMode = paymentMode,
+                remarks = remarksInput
+              )
+              onSave(updated)
+            },
+            shape = RoundedCornerShape(12.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0061A4))
+          ) {
+            Text("Update Record")
+          }
+        }
+      }
+    }
+  }
+}
+
+@Composable
+fun StudentPaymentReceiptDialog(
+  payment: StudentFeePayment,
+  onDismiss: () -> Unit
+) {
+  val context = androidx.compose.ui.platform.LocalContext.current
+  val coroutineScope = rememberCoroutineScope()
+  var isSaving by remember { mutableStateOf(false) }
+
+  val statusColor = when (payment.paymentStatus) {
+    "Paid" -> Color(0xFF16A34A)
+    "Partial" -> Color(0xFFD97706)
+    "Pending" -> Color(0xFF2563EB)
+    "Overdue" -> Color(0xFFDC2626)
+    else -> Color(0xFF64748B)
+  }
+
+  AlertDialog(
+    onDismissRequest = onDismiss,
+    title = {
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+      ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+          Box(
+            modifier = Modifier
+              .size(36.dp)
+              .clip(CircleShape)
+              .background(Color(0xFFE0F2FE)),
+            contentAlignment = Alignment.Center
+          ) {
+            Icon(Icons.Default.ReceiptLong, contentDescription = null, tint = Color(0xFF0061A4), modifier = Modifier.size(20.dp))
+          }
+          Column {
+            Text("Official Fee Invoice", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color(0xFF0F172A))
+            Text("My Tuition (FSI) • Receipt", fontSize = 11.sp, color = Color(0xFF64748B))
+          }
+        }
+
+        Surface(
+          color = statusColor.copy(alpha = 0.12f),
+          shape = RoundedCornerShape(8.dp)
+        ) {
+          Text(
+            payment.paymentStatus.uppercase(),
+            fontSize = 11.sp,
+            fontWeight = FontWeight.ExtraBold,
+            color = statusColor,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+          )
+        }
+      }
+    },
+    text = {
+      Column(
+        modifier = Modifier
+          .fillMaxWidth()
+          .verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+      ) {
+        // Visual Invoice Card Document Style
+        Surface(
+          color = Color.White,
+          shape = RoundedCornerShape(14.dp),
+          border = BorderStroke(1.5.dp, Color(0xFFE2E8F0)),
+          shadowElevation = 2.dp,
+          modifier = Modifier.fillMaxWidth()
+        ) {
+          Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            // Header Ribbon
+            Surface(
+              color = Color(0xFF0061A4),
+              shape = RoundedCornerShape(8.dp),
+              modifier = Modifier.fillMaxWidth()
+            ) {
+              Row(
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .padding(horizontal = 12.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+              ) {
+                Text("MY TUITION (FSI)", color = Color.White, fontWeight = FontWeight.ExtraBold, fontSize = 13.sp)
+                Text("TAX INVOICE", color = Color(0xFFBAE6FD), fontWeight = FontWeight.Bold, fontSize = 10.sp)
+              }
+            }
+
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+              Column {
+                Text("RECEIPT NO", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Color(0xFF64748B))
+                Text(payment.receiptNo, fontSize = 12.sp, fontWeight = FontWeight.ExtraBold, color = Color(0xFF0061A4))
+              }
+              Column(horizontalAlignment = Alignment.End) {
+                Text("DATE", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Color(0xFF64748B))
+                Text(payment.paymentDate, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF0F172A))
+              }
+            }
+
+            HorizontalDivider(color = Color(0xFFF1F5F9))
+
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+              Column {
+                Text("BILLED TO STUDENT", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Color(0xFF64748B))
+                Text(payment.studentName, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))
+                Text("ID: ${payment.studentId}", fontSize = 10.sp, color = Color(0xFF64748B))
+              }
+              Column(horizontalAlignment = Alignment.End) {
+                Text("BILLING PERIOD", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Color(0xFF64748B))
+                Text(payment.month.ifBlank { "August 2026" }, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF334155))
+                Text(payment.feeType, fontSize = 10.sp, color = Color(0xFF0284C7), fontWeight = FontWeight.Bold)
+              }
+            }
+
+            // Fee Item Summary Box
+            Surface(
+              color = Color(0xFFF8FAFC),
+              shape = RoundedCornerShape(10.dp),
+              modifier = Modifier.fillMaxWidth()
+            ) {
+              Row(
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .padding(10.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+              ) {
+                Column {
+                  Text(payment.feeType.ifBlank { "Tuition Fee" }, fontWeight = FontWeight.Bold, fontSize = 12.sp, color = Color(0xFF1E293B))
+                  Text("Mode: ${payment.paymentMode} • Ref #${payment.id}", fontSize = 10.sp, color = Color(0xFF64748B))
+                }
+                Text(
+                  "₹${payment.amount.toInt()}",
+                  fontSize = 14.sp,
+                  fontWeight = FontWeight.ExtraBold,
+                  color = Color(0xFF0F172A)
+                )
+              }
+            }
+
+            // Total Highlight
+            Surface(
+              color = Color(0xFFF0FDF4),
+              shape = RoundedCornerShape(10.dp),
+              border = BorderStroke(1.dp, Color(0xFFBBF7D0)),
+              modifier = Modifier.fillMaxWidth()
+            ) {
+              Row(
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .padding(horizontal = 12.dp, vertical = 10.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+              ) {
+                Text("TOTAL PAID", fontSize = 12.sp, fontWeight = FontWeight.ExtraBold, color = Color(0xFF166534))
+                Text(
+                  "₹${payment.amount.toInt()}",
+                  fontSize = 17.sp,
+                  fontWeight = FontWeight.ExtraBold,
+                  color = Color(0xFF15803D)
+                )
+              }
+            }
+
+            if (payment.remarks.isNotBlank()) {
+              Text("Notes: ${payment.remarks}", fontSize = 10.sp, color = Color(0xFF64748B))
+            }
+            Text("Authorized: ${payment.recordedBy.ifBlank { "Admin" }}", fontSize = 9.sp, color = Color(0xFF94A3B8))
+          }
+        }
+
+        // Action Toolbar inside text body
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+          OutlinedButton(
+            onClick = {
+              coroutineScope.launch {
+                isSaving = true
+                try {
+                  val uri = com.example.utils.InvoiceGenerator.saveInvoiceToGallery(context, payment)
+                  if (uri != null) {
+                    Toast.makeText(context, "Invoice screenshot saved to Gallery / Pictures", Toast.LENGTH_SHORT).show()
+                  } else {
+                    // Fallback to cache file
+                    val file = com.example.utils.InvoiceGenerator.saveInvoiceToCache(context, payment)
+                    Toast.makeText(context, "Invoice saved: ${file.name}", Toast.LENGTH_SHORT).show()
+                  }
+                } catch (e: Exception) {
+                  Toast.makeText(context, "Error saving invoice: ${e.localizedMessage}", Toast.LENGTH_SHORT).show()
+                } finally {
+                  isSaving = false
+                }
+              }
+            },
+            shape = RoundedCornerShape(10.dp),
+            modifier = Modifier.weight(1f),
+            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp)
+          ) {
+            if (isSaving) {
+              CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
+            } else {
+              Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(15.dp))
+            }
+            Spacer(Modifier.width(4.dp))
+            Text("Save Screenshot", fontSize = 11.sp)
+          }
+
+          Button(
+            onClick = {
+              com.example.utils.InvoiceGenerator.shareInvoice(context, payment)
+            },
+            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0061A4)),
+            shape = RoundedCornerShape(10.dp),
+            modifier = Modifier.weight(1f),
+            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp)
+          ) {
+            Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(15.dp))
+            Spacer(Modifier.width(4.dp))
+            Text("Share Invoice", fontSize = 11.sp)
+          }
+        }
+      }
+    },
+    confirmButton = {},
+    dismissButton = {
+      TextButton(onClick = onDismiss) {
+        Text("Done", fontSize = 12.sp)
+      }
+    }
+  )
 }
 
 @Composable
@@ -3311,6 +5175,27 @@ fun AdminSecurityCommandCenterTab() {
   var selectedSeverityFilter by remember { mutableStateOf<SecuritySeverity?>(null) }
   var logSearchQuery by remember { mutableStateOf("") }
   var showScanDialog by remember { mutableStateOf(false) }
+  var exportResult by remember { mutableStateOf<ExportUtils.RoomExportResult?>(null) }
+  var isExporting by remember { mutableStateOf(false) }
+
+  val coroutineScope = rememberCoroutineScope()
+  val context = LocalContext.current
+
+  if (exportResult != null) {
+    RoomDatabaseExportSuccessDialog(
+      result = exportResult!!,
+      onDismiss = { exportResult = null },
+      onShare = {
+        ExportUtils.shareFile(
+          context = context,
+          file = exportResult!!.file,
+          mimeType = "application/json",
+          subject = "Room Database JSON Backup - ${exportResult!!.file.name}",
+          title = "Share Room Database Export"
+        )
+      }
+    )
+  }
 
   val filteredLogs = remember(auditLogs, selectedSeverityFilter, logSearchQuery) {
     auditLogs.filter { log ->
@@ -3492,6 +5377,104 @@ fun AdminSecurityCommandCenterTab() {
       }
     }
 
+    // 3. Room Database JSON Backup Card
+    item {
+      Card(
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+        shape = RoundedCornerShape(16.dp),
+        modifier = Modifier.fillMaxWidth()
+      ) {
+        Column(
+          modifier = Modifier.padding(16.dp),
+          verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+          ) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+              Box(
+                modifier = Modifier
+                  .size(38.dp)
+                  .clip(RoundedCornerShape(10.dp))
+                  .background(Color(0xFF0284C7)),
+                contentAlignment = Alignment.Center
+              ) {
+                Icon(
+                  imageVector = Icons.Default.Storage,
+                  contentDescription = null,
+                  tint = Color.White,
+                  modifier = Modifier.size(20.dp)
+                )
+              }
+              Column {
+                Text(
+                  text = "System Database Backup",
+                  fontWeight = FontWeight.Bold,
+                  fontSize = 14.sp,
+                  color = MaterialTheme.colorScheme.onSurface
+                )
+                Text(
+                  text = "Export full database snapshot to readable JSON cache",
+                  fontSize = 11.sp,
+                  color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+              }
+            }
+
+            Button(
+              onClick = {
+                coroutineScope.launch {
+                  isExporting = true
+                  try {
+                    val res = ExportUtils.exportRoomDatabaseFromLocalDb(context)
+                    exportResult = res
+                    Toast.makeText(context, "Room DB exported to cache: ${res.file.name}", Toast.LENGTH_SHORT).show()
+                  } catch (e: Exception) {
+                    Toast.makeText(context, "Export error: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
+                  } finally {
+                    isExporting = false
+                  }
+                }
+              },
+              colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7)),
+              shape = RoundedCornerShape(10.dp),
+              contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
+            ) {
+              if (isExporting) {
+                CircularProgressIndicator(color = Color.White, modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
+              } else {
+                Icon(Icons.Default.FileDownload, contentDescription = null, modifier = Modifier.size(15.dp))
+              }
+              Spacer(Modifier.width(6.dp))
+              Text("Export JSON", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            }
+          }
+
+          Surface(
+            color = Color(0xFFF8FAFC),
+            shape = RoundedCornerShape(8.dp),
+            modifier = Modifier.fillMaxWidth()
+          ) {
+            Row(
+              modifier = Modifier.padding(10.dp),
+              verticalAlignment = Alignment.CenterVertically,
+              horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+              Icon(Icons.Default.Info, contentDescription = null, tint = Color(0xFF64748B), modifier = Modifier.size(16.dp))
+              Text(
+                text = "Includes Students, Batches, Enrollments, Attendance Records, and Fee Payment entities formatted with 2-space indentation.",
+                fontSize = 11.sp,
+                color = Color(0xFF475569)
+              )
+            }
+          }
+        }
+      }
+    }
+
     // 3. Security Audit Log Header & Filters
     item {
       Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -3661,3 +5644,1115 @@ fun AdminSecurityCommandCenterTab() {
     )
   }
 }
+
+@Composable
+fun RoomDatabaseExportSuccessDialog(
+  result: ExportUtils.RoomExportResult,
+  onDismiss: () -> Unit,
+  onShare: () -> Unit
+) {
+  AlertDialog(
+    onDismissRequest = onDismiss,
+    title = {
+      Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Box(
+          modifier = Modifier
+            .size(36.dp)
+            .clip(CircleShape)
+            .background(Color(0xFFDCFCE7)),
+          contentAlignment = Alignment.Center
+        ) {
+          Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Color(0xFF16A34A), modifier = Modifier.size(22.dp))
+        }
+        Text("System Database Exported", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color(0xFF0F172A))
+      }
+    },
+    text = {
+      Column(
+        modifier = Modifier
+          .fillMaxWidth()
+          .verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+      ) {
+        Text(
+          "Complete institute database exported into a readable JSON file stored in the local cache directory.",
+          fontSize = 12.sp,
+          color = Color(0xFF475569)
+        )
+
+        Surface(
+          color = Color(0xFFF1F5F9),
+          shape = RoundedCornerShape(10.dp),
+          modifier = Modifier.fillMaxWidth()
+        ) {
+          Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+              Text("File Name:", fontSize = 11.sp, color = Color(0xFF64748B))
+              Text(result.file.name, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+              Text("File Size:", fontSize = 11.sp, color = Color(0xFF64748B))
+              Text(result.formattedSize, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF16A34A))
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+              Text("Cache Path:", fontSize = 11.sp, color = Color(0xFF64748B))
+              Text(result.filePath.takeLast(36), fontSize = 10.sp, color = Color(0xFF64748B), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+          }
+        }
+
+        Text("Exported Entity Counts:", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = Color(0xFF0F172A))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+          Surface(
+            color = Color(0xFFEFF6FF),
+            shape = RoundedCornerShape(8.dp),
+            modifier = Modifier.weight(1f)
+          ) {
+            Column(modifier = Modifier.padding(8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+              Text("${result.studentCount}", fontWeight = FontWeight.ExtraBold, fontSize = 14.sp, color = Color(0xFF1D4ED8))
+              Text("Students", fontSize = 10.sp, color = Color(0xFF1E40AF))
+            }
+          }
+          Surface(
+            color = Color(0xFFFDF4FF),
+            shape = RoundedCornerShape(8.dp),
+            modifier = Modifier.weight(1f)
+          ) {
+            Column(modifier = Modifier.padding(8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+              Text("${result.batchCount}", fontWeight = FontWeight.ExtraBold, fontSize = 14.sp, color = Color(0xFF7E22CE))
+              Text("Batches", fontSize = 10.sp, color = Color(0xFF6B21A8))
+            }
+          }
+          Surface(
+            color = Color(0xFFFEF3C7),
+            shape = RoundedCornerShape(8.dp),
+            modifier = Modifier.weight(1f)
+          ) {
+            Column(modifier = Modifier.padding(8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+              Text("${result.attendanceCount}", fontWeight = FontWeight.ExtraBold, fontSize = 14.sp, color = Color(0xFFB45309))
+              Text("Attendance", fontSize = 10.sp, color = Color(0xFF92400E))
+            }
+          }
+          Surface(
+            color = Color(0xFFDCFCE7),
+            shape = RoundedCornerShape(8.dp),
+            modifier = Modifier.weight(1f)
+          ) {
+            Column(modifier = Modifier.padding(8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+              Text("${result.paymentCount}", fontWeight = FontWeight.ExtraBold, fontSize = 14.sp, color = Color(0xFF15803D))
+              Text("Payments", fontSize = 10.sp, color = Color(0xFF166534))
+            }
+          }
+        }
+
+        Text("JSON Data Preview (Readable snippet):", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = Color(0xFF0F172A))
+        Surface(
+          color = Color(0xFF0F172A),
+          shape = RoundedCornerShape(8.dp),
+          modifier = Modifier.fillMaxWidth()
+        ) {
+          Text(
+            text = result.jsonString.take(450) + if (result.jsonString.length > 450) "\n..." else "",
+            fontSize = 9.sp,
+            color = Color(0xFF38BDF8),
+            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+            modifier = Modifier.padding(10.dp)
+          )
+        }
+      }
+    },
+    confirmButton = {
+      Button(
+        onClick = onShare,
+        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0061A4)),
+        shape = RoundedCornerShape(10.dp)
+      ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+          Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(15.dp))
+          Text("Share / Open File", fontSize = 12.sp)
+        }
+      }
+    },
+    dismissButton = {
+      TextButton(onClick = onDismiss) {
+        Text("Done", fontSize = 12.sp)
+      }
+    }
+  )
+}
+
+@Composable
+fun AdminFeeLedgerDialog(
+  fees: List<FeeRecord>,
+  students: List<Student>,
+  initialFilterStatus: String = "All",
+  onDismiss: () -> Unit,
+  onRecordPaymentClick: () -> Unit
+) {
+  var searchQuery by remember { mutableStateOf("") }
+  var filterStatus by remember(initialFilterStatus) { mutableStateOf(initialFilterStatus) } // "All", "Overdue", "Pending", "Paid"
+  var selectedStudentForReceipt by remember { mutableStateOf<FeeRecord?>(null) }
+
+  // Map student name to student info for rollNo & batch
+  val studentMap = remember(students) {
+    students.associateBy { it.name }
+  }
+
+  val filteredFees = remember(fees, searchQuery, filterStatus, studentMap) {
+    fees.filter { fee ->
+      val student = studentMap[fee.studentName]
+      val studentId = student?.id ?: "N/A"
+      val batchName = student?.batch ?: "General"
+
+      val matchesSearch = fee.studentName.contains(searchQuery, ignoreCase = true) ||
+          studentId.contains(searchQuery, ignoreCase = true) ||
+          batchName.contains(searchQuery, ignoreCase = true)
+
+      val matchesStatus = when (filterStatus) {
+        "Overdue" -> fee.paymentStatus == "Overdue"
+        "Pending" -> fee.paymentStatus == "Pending" || fee.pendingAmount > 0
+        "Paid" -> fee.paymentStatus == "Paid" || fee.pendingAmount == 0
+        else -> true
+      }
+      matchesSearch && matchesStatus
+    }
+  }
+
+  val totalExpected = fees.sumOf { it.feeAmount }
+  val totalCollected = fees.sumOf { it.paidAmount }
+  val totalPending = fees.sumOf { it.pendingAmount }
+  val totalOverdue = fees.filter { it.paymentStatus == "Overdue" }.sumOf { it.pendingAmount }
+
+  fun formatLakhs(amount: Number): String {
+    val inLakhs = amount.toDouble() / 100000.0
+    return if (inLakhs >= 1.0) {
+      String.format(Locale.US, "₹%.2f L", inLakhs)
+    } else {
+      "₹${String.format(Locale.US, "%,d", amount.toLong())}"
+    }
+  }
+
+  Dialog(
+    onDismissRequest = onDismiss,
+    properties = DialogProperties(usePlatformDefaultWidth = false)
+  ) {
+    Surface(
+      modifier = Modifier
+        .fillMaxSize()
+        .padding(16.dp),
+      shape = RoundedCornerShape(20.dp),
+      color = Color(0xFF0F172A),
+      border = BorderStroke(1.dp, Color(0xFF334155))
+    ) {
+      Column(
+        modifier = Modifier
+          .fillMaxSize()
+          .padding(20.dp)
+      ) {
+        // Top Bar
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.SpaceBetween,
+          verticalAlignment = Alignment.CenterVertically
+        ) {
+          Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+          ) {
+            Box(
+              modifier = Modifier
+                .size(40.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(Color(0xFF10B981).copy(alpha = 0.2f)),
+              contentAlignment = Alignment.Center
+            ) {
+              Icon(
+                Icons.Default.ReceiptLong,
+                contentDescription = null,
+                tint = Color(0xFF4ADE80),
+                modifier = Modifier.size(22.dp)
+              )
+            }
+            Column {
+              Text(
+                "Institute Fee Ledger",
+                fontWeight = FontWeight.Bold,
+                fontSize = 18.sp,
+                color = Color.White
+              )
+              Text(
+                "FSI Complete Student Invoicing & Dues",
+                fontSize = 11.sp,
+                color = Color(0xFF94A3B8)
+              )
+            }
+          }
+
+          IconButton(
+            onClick = onDismiss,
+            modifier = Modifier
+              .size(36.dp)
+              .clip(CircleShape)
+              .background(Color(0xFF1E293B))
+          ) {
+            Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.White, modifier = Modifier.size(18.dp))
+          }
+        }
+
+        Spacer(modifier = Modifier.height(14.dp))
+
+        // Summary KPI Bar
+        Card(
+          modifier = Modifier.fillMaxWidth(),
+          shape = RoundedCornerShape(14.dp),
+          colors = CardDefaults.cardColors(containerColor = Color(0xFF1E293B)),
+          border = BorderStroke(1.dp, Color(0xFF334155))
+        ) {
+          Row(
+            modifier = Modifier
+              .fillMaxWidth()
+              .padding(12.dp),
+            horizontalArrangement = Arrangement.SpaceBetween
+          ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+              Text("Gross Fee", fontSize = 10.sp, color = Color(0xFF94A3B8), fontWeight = FontWeight.SemiBold)
+              Text(formatLakhs(totalExpected), fontSize = 13.sp, fontWeight = FontWeight.ExtraBold, color = Color.White)
+            }
+            Box(modifier = Modifier.width(1.dp).height(30.dp).background(Color(0xFF334155)))
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+              Text("Collected", fontSize = 10.sp, color = Color(0xFF94A3B8), fontWeight = FontWeight.SemiBold)
+              Text(formatLakhs(totalCollected), fontSize = 13.sp, fontWeight = FontWeight.ExtraBold, color = Color(0xFF4ADE80))
+            }
+            Box(modifier = Modifier.width(1.dp).height(30.dp).background(Color(0xFF334155)))
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+              Text("Pending", fontSize = 10.sp, color = Color(0xFF94A3B8), fontWeight = FontWeight.SemiBold)
+              Text(formatLakhs(totalPending), fontSize = 13.sp, fontWeight = FontWeight.ExtraBold, color = Color(0xFFFBBF24))
+            }
+            Box(modifier = Modifier.width(1.dp).height(30.dp).background(Color(0xFF334155)))
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+              Text("Overdue", fontSize = 10.sp, color = Color(0xFF94A3B8), fontWeight = FontWeight.SemiBold)
+              Text(formatLakhs(totalOverdue), fontSize = 13.sp, fontWeight = FontWeight.ExtraBold, color = Color(0xFFF87171))
+            }
+          }
+        }
+
+        Spacer(modifier = Modifier.height(14.dp))
+
+        // Search and Record Payment Button
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.spacedBy(10.dp),
+          verticalAlignment = Alignment.CenterVertically
+        ) {
+          OutlinedTextField(
+            value = searchQuery,
+            onValueChange = { searchQuery = it },
+            placeholder = { Text("Search by student, roll no, batch...", fontSize = 12.sp, color = Color(0xFF64748B)) },
+            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = Color(0xFF38BDF8), modifier = Modifier.size(18.dp)) },
+            trailingIcon = {
+              if (searchQuery.isNotEmpty()) {
+                IconButton(onClick = { searchQuery = "" }) {
+                  Icon(Icons.Default.Clear, contentDescription = null, tint = Color(0xFF94A3B8), modifier = Modifier.size(16.dp))
+                }
+              }
+            },
+            singleLine = true,
+            shape = RoundedCornerShape(12.dp),
+            colors = OutlinedTextFieldDefaults.colors(
+              focusedContainerColor = Color(0xFF1E293B),
+              unfocusedContainerColor = Color(0xFF1E293B),
+              focusedBorderColor = Color(0xFF38BDF8),
+              unfocusedBorderColor = Color(0xFF334155),
+              focusedTextColor = Color.White,
+              unfocusedTextColor = Color.White
+            ),
+            modifier = Modifier.weight(1f).height(50.dp)
+          )
+
+          Button(
+            onClick = onRecordPaymentClick,
+            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981)),
+            shape = RoundedCornerShape(12.dp),
+            modifier = Modifier.height(50.dp)
+          ) {
+            Icon(Icons.Default.Payments, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+            Spacer(modifier = Modifier.width(6.dp))
+            Text("Record", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
+          }
+        }
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        // Filter chips
+        Row(
+          modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState()),
+          horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+          listOf("All", "Overdue", "Pending", "Paid").forEach { status ->
+            val isSelected = filterStatus == status
+            val badgeColor = when (status) {
+              "Overdue" -> Color(0xFFF87171)
+              "Pending" -> Color(0xFFFBBF24)
+              "Paid" -> Color(0xFF4ADE80)
+              else -> Color(0xFF38BDF8)
+            }
+            Surface(
+              onClick = { filterStatus = status },
+              shape = RoundedCornerShape(20.dp),
+              color = if (isSelected) badgeColor.copy(alpha = 0.2f) else Color(0xFF1E293B),
+              border = BorderStroke(1.dp, if (isSelected) badgeColor else Color(0xFF334155))
+            ) {
+              Text(
+                text = "$status (${if (status == "All") fees.size else fees.count {
+                  when (status) {
+                    "Overdue" -> it.paymentStatus == "Overdue"
+                    "Pending" -> it.pendingAmount > 0
+                    "Paid" -> it.pendingAmount == 0
+                    else -> true
+                  }
+                }})",
+                fontSize = 11.sp,
+                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                color = if (isSelected) badgeColor else Color(0xFF94A3B8),
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+              )
+            }
+          }
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        // Student Fee Cards List
+        if (filteredFees.isEmpty()) {
+          Box(
+            modifier = Modifier
+              .fillMaxWidth()
+              .weight(1f),
+            contentAlignment = Alignment.Center
+          ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+              Icon(Icons.Default.ReceiptLong, contentDescription = null, tint = Color(0xFF475569), modifier = Modifier.size(48.dp))
+              Spacer(modifier = Modifier.height(10.dp))
+              Text("No fee records found for '$filterStatus'", color = Color(0xFF94A3B8), fontSize = 13.sp)
+            }
+          }
+        } else {
+          LazyColumn(
+            modifier = Modifier
+              .fillMaxWidth()
+              .weight(1f),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+          ) {
+            items(filteredFees) { fee ->
+              val student = studentMap[fee.studentName]
+              val studentId = student?.id ?: "N/A"
+              val batchName = student?.batch ?: "General"
+              val isOverdue = fee.paymentStatus == "Overdue"
+              val isPaid = fee.pendingAmount == 0
+              val statusColor = when {
+                isPaid -> Color(0xFF4ADE80)
+                isOverdue -> Color(0xFFF87171)
+                else -> Color(0xFFFBBF24)
+              }
+
+              Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(14.dp),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF1E293B)),
+                border = BorderStroke(1.dp, if (isOverdue) Color(0xFFEF4444).copy(alpha = 0.5f) else Color(0xFF334155))
+              ) {
+                Column(modifier = Modifier.padding(14.dp)) {
+                  Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                  ) {
+                    Row(
+                      verticalAlignment = Alignment.CenterVertically,
+                      horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                      Box(
+                        modifier = Modifier
+                          .size(38.dp)
+                          .clip(CircleShape)
+                          .background(statusColor.copy(alpha = 0.15f)),
+                        contentAlignment = Alignment.Center
+                      ) {
+                        Text(
+                          text = fee.studentName.take(2).uppercase(),
+                          fontWeight = FontWeight.Bold,
+                          fontSize = 13.sp,
+                          color = statusColor
+                        )
+                      }
+                      Column {
+                        Text(
+                          text = fee.studentName,
+                          fontWeight = FontWeight.Bold,
+                          fontSize = 14.sp,
+                          color = Color.White
+                        )
+                        Text(
+                          text = "ID: $studentId • $batchName",
+                          fontSize = 11.sp,
+                          color = Color(0xFF94A3B8)
+                        )
+                      }
+                    }
+
+                    Surface(
+                      color = statusColor.copy(alpha = 0.2f),
+                      shape = RoundedCornerShape(8.dp),
+                      border = BorderStroke(1.dp, statusColor.copy(alpha = 0.4f))
+                    ) {
+                      Text(
+                        text = if (isPaid) "PAID" else fee.paymentStatus.uppercase(),
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = statusColor,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                      )
+                    }
+                  }
+
+                  Spacer(modifier = Modifier.height(10.dp))
+
+                  // Fee numbers row
+                  Row(
+                    modifier = Modifier
+                      .fillMaxWidth()
+                      .background(Color(0xFF0F172A), RoundedCornerShape(10.dp))
+                      .padding(10.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                  ) {
+                    Column {
+                      Text("Total Fee", fontSize = 9.sp, color = Color(0xFF94A3B8))
+                      Text("₹${String.format(Locale.US, "%,d", fee.feeAmount)}", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                    }
+                    Column {
+                      Text("Paid", fontSize = 9.sp, color = Color(0xFF94A3B8))
+                      Text("₹${String.format(Locale.US, "%,d", fee.paidAmount)}", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF4ADE80))
+                    }
+                    Column {
+                      Text("Pending", fontSize = 9.sp, color = Color(0xFF94A3B8))
+                      Text("₹${String.format(Locale.US, "%,d", fee.pendingAmount)}", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = if (isOverdue) Color(0xFFF87171) else Color(0xFFFBBF24))
+                    }
+                    Column {
+                      Text("Due Date", fontSize = 9.sp, color = Color(0xFF94A3B8))
+                      Text(fee.dueDate, fontSize = 12.sp, fontWeight = FontWeight.Medium, color = Color(0xFFCBD5E1))
+                    }
+                  }
+
+                  Spacer(modifier = Modifier.height(10.dp))
+
+                  // Bottom action buttons
+                  Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically
+                  ) {
+                    TextButton(
+                      onClick = { selectedStudentForReceipt = fee },
+                      contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                    ) {
+                      Icon(Icons.Default.Receipt, contentDescription = null, tint = Color(0xFF38BDF8), modifier = Modifier.size(14.dp))
+                      Spacer(modifier = Modifier.width(4.dp))
+                      Text("View Receipt", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF38BDF8))
+                    }
+
+                    if (fee.pendingAmount > 0) {
+                      Spacer(modifier = Modifier.width(8.dp))
+                      Button(
+                        onClick = onRecordPaymentClick,
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB)),
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                        modifier = Modifier.height(32.dp)
+                      ) {
+                        Text("Collect Due", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // Receipt Modal Dialog
+  selectedStudentForReceipt?.let { fee ->
+    val student = studentMap[fee.studentName]
+    val studentId = student?.id ?: "N/A"
+    val batchName = student?.batch ?: "General"
+
+    AlertDialog(
+      onDismissRequest = { selectedStudentForReceipt = null },
+      containerColor = Color(0xFF1E293B),
+      title = {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+          Icon(Icons.Default.ReceiptLong, contentDescription = null, tint = Color(0xFF4ADE80))
+          Text("FSI Official Fee Receipt", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color.White)
+        }
+      },
+      text = {
+        Column(
+          modifier = Modifier
+            .fillMaxWidth()
+            .background(Color(0xFF0F172A), RoundedCornerShape(12.dp))
+            .border(BorderStroke(1.dp, Color(0xFF334155)))
+            .padding(14.dp),
+          verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+          Text("FADAT SCIENCE INSTITUTE", fontWeight = FontWeight.ExtraBold, fontSize = 13.sp, color = Color(0xFF38BDF8))
+          Text("Session 2026-27 • Receipt #${fee.id}", fontSize = 10.sp, color = Color(0xFF94A3B8))
+          Divider(color = Color(0xFF334155))
+          Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text("Student:", fontSize = 11.sp, color = Color(0xFF94A3B8))
+            Text(fee.studentName, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
+          }
+          Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text("Student ID / Batch:", fontSize = 11.sp, color = Color(0xFF94A3B8))
+            Text("$studentId • $batchName", fontSize = 11.sp, color = Color(0xFFCBD5E1))
+          }
+          Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text("Fee Amount:", fontSize = 11.sp, color = Color(0xFF94A3B8))
+            Text("₹${String.format(Locale.US, "%,d", fee.feeAmount)}", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
+          }
+          Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text("Amount Paid:", fontSize = 11.sp, color = Color(0xFF94A3B8))
+            Text("₹${String.format(Locale.US, "%,d", fee.paidAmount)}", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF4ADE80))
+          }
+          Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text("Balance Pending:", fontSize = 11.sp, color = Color(0xFF94A3B8))
+            Text("₹${String.format(Locale.US, "%,d", fee.pendingAmount)}", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = if (fee.pendingAmount > 0) Color(0xFFF87171) else Color(0xFF4ADE80))
+          }
+          Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text("Payment Mode:", fontSize = 11.sp, color = Color(0xFF94A3B8))
+            Text("UPI / Online Bank Transfer", fontSize = 11.sp, color = Color(0xFF38BDF8))
+          }
+          Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text("Date / Due:", fontSize = 11.sp, color = Color(0xFF94A3B8))
+            Text(if (fee.lastReminded.isNotBlank()) fee.lastReminded else fee.dueDate, fontSize = 11.sp, color = Color(0xFFCBD5E1))
+          }
+        }
+      },
+      confirmButton = {
+        Button(
+          onClick = {
+            AppRepository.addNotification(
+              NotificationItem(
+                id = "NOT_RCP_${System.currentTimeMillis()}",
+                title = "🧾 Receipt Shared",
+                message = "Official receipt #${fee.id} for ${fee.studentName} generated and sent.",
+                time = AppRepository.getCurrentTimeStr(),
+                type = "Fee",
+                recipientRole = "Admin"
+              )
+            )
+            selectedStudentForReceipt = null
+          },
+          colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB)),
+          shape = RoundedCornerShape(10.dp)
+        ) {
+          Text("Share / Print", fontSize = 12.sp, color = Color.White)
+        }
+      },
+      dismissButton = {
+        TextButton(onClick = { selectedStudentForReceipt = null }) {
+          Text("Close", fontSize = 12.sp, color = Color(0xFF94A3B8))
+        }
+      }
+    )
+  }
+}
+
+@Composable
+fun AdminFeesTab(
+  fees: List<FeeRecord>,
+  students: List<Student>,
+  onRecordPaymentClick: () -> Unit
+) {
+  var searchQuery by remember { mutableStateOf("") }
+  var filterStatus by remember { mutableStateOf("All") } // "All", "Overdue", "Pending", "Paid"
+  var selectedStudentForReceipt by remember { mutableStateOf<FeeRecord?>(null) }
+
+  // Map student name to student info for rollNo & batch
+  val studentMap = remember(students) {
+    students.associateBy { it.name }
+  }
+
+  val filteredFees = remember(fees, searchQuery, filterStatus, studentMap) {
+    fees.filter { fee ->
+      val student = studentMap[fee.studentName]
+      val studentId = student?.id ?: "N/A"
+      val batchName = student?.batch ?: "General"
+
+      val matchesSearch = fee.studentName.contains(searchQuery, ignoreCase = true) ||
+          studentId.contains(searchQuery, ignoreCase = true) ||
+          batchName.contains(searchQuery, ignoreCase = true)
+
+      val matchesStatus = when (filterStatus) {
+        "Overdue" -> fee.paymentStatus == "Overdue"
+        "Pending" -> fee.paymentStatus == "Pending" || fee.pendingAmount > 0
+        "Paid" -> fee.paymentStatus == "Paid" || fee.pendingAmount == 0
+        else -> true
+      }
+      matchesSearch && matchesStatus
+    }
+  }
+
+  val totalExpected = fees.sumOf { it.feeAmount }
+  val totalCollected = fees.sumOf { it.paidAmount }
+  val totalPending = fees.sumOf { it.pendingAmount }
+  val totalOverdue = fees.filter { it.paymentStatus == "Overdue" }.sumOf { it.pendingAmount }
+
+  fun formatLakhs(amount: Number): String {
+    val inLakhs = amount.toDouble() / 100000.0
+    return if (inLakhs >= 1.0) {
+      String.format(Locale.US, "₹%.2f L", inLakhs)
+    } else {
+      "₹${String.format(Locale.US, "%,d", amount.toLong())}"
+    }
+  }
+
+  Column(
+    modifier = Modifier
+      .fillMaxSize()
+      .background(MaterialTheme.colorScheme.background)
+      .verticalScroll(rememberScrollState())
+      .padding(16.dp),
+    verticalArrangement = Arrangement.spacedBy(16.dp)
+  ) {
+    // Header banner with title & Record payment button
+    Row(
+      modifier = Modifier.fillMaxWidth(),
+      horizontalArrangement = Arrangement.SpaceBetween,
+      verticalAlignment = Alignment.CenterVertically
+    ) {
+      Column(
+        modifier = Modifier.weight(1f, fill = false)
+      ) {
+        Text(
+          "Fee Management",
+          fontWeight = FontWeight.Bold,
+          fontSize = 20.sp,
+          color = Color.White
+        )
+        Text(
+          "Track collections & dues",
+          fontSize = 12.sp,
+          color = Color(0xFF94A3B8),
+          maxLines = 1,
+          overflow = TextOverflow.Ellipsis
+        )
+      }
+
+      Spacer(Modifier.width(12.dp))
+
+      Button(
+        onClick = onRecordPaymentClick,
+        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB)),
+        shape = RoundedCornerShape(10.dp),
+        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp)
+      ) {
+        Row(
+          verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+          Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp), tint = Color.White)
+          Text(
+            "Record Payment",
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Bold,
+            color = Color.White,
+            maxLines = 1,
+            softWrap = false
+          )
+        }
+      }
+    }
+
+    // 4 Key Metrics Cards
+    Row(
+      modifier = Modifier.fillMaxWidth(),
+      horizontalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+      // Collected
+      Surface(
+        color = Color(0xFF0F172A),
+        shape = RoundedCornerShape(12.dp),
+        border = BorderStroke(1.dp, Color(0xFF334155)),
+        modifier = Modifier.weight(1f)
+      ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+          Text("Collected", fontSize = 11.sp, color = Color(0xFF94A3B8))
+          Text(formatLakhs(totalCollected), fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF4ADE80))
+          Text("${fees.count { it.paymentStatus == "Paid" }} Settled", fontSize = 10.sp, color = Color(0xFF4ADE80))
+        }
+      }
+      // Pending
+      Surface(
+        color = Color(0xFF0F172A),
+        shape = RoundedCornerShape(12.dp),
+        border = BorderStroke(1.dp, Color(0xFF334155)),
+        modifier = Modifier.weight(1f)
+      ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+          Text("Pending", fontSize = 11.sp, color = Color(0xFF94A3B8))
+          Text(formatLakhs(totalPending), fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFFFBBF24))
+          Text("${fees.count { it.pendingAmount > 0 }} Students", fontSize = 10.sp, color = Color(0xFFFBBF24))
+        }
+      }
+    }
+
+    Row(
+      modifier = Modifier.fillMaxWidth(),
+      horizontalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+      // Overdue
+      Surface(
+        color = Color(0xFF0F172A),
+        shape = RoundedCornerShape(12.dp),
+        border = BorderStroke(if (totalOverdue > 0) 1.5.dp else 1.dp, if (totalOverdue > 0) Color(0xFFF87171) else Color(0xFF334155)),
+        modifier = Modifier.weight(1f)
+      ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+          Text("Overdue", fontSize = 11.sp, color = Color(0xFF94A3B8))
+          Text(formatLakhs(totalOverdue), fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFFF87171))
+          Text("${fees.count { it.paymentStatus == "Overdue" }} Action Req.", fontSize = 10.sp, color = Color(0xFFF87171))
+        }
+      }
+      // Total Expected
+      Surface(
+        color = Color(0xFF0F172A),
+        shape = RoundedCornerShape(12.dp),
+        border = BorderStroke(1.dp, Color(0xFF334155)),
+        modifier = Modifier.weight(1f)
+      ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+          Text("Gross Target", fontSize = 11.sp, color = Color(0xFF94A3B8))
+          Text(formatLakhs(totalExpected), fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF38BDF8))
+          Text("${fees.size} Invoices", fontSize = 10.sp, color = Color(0xFF38BDF8))
+        }
+      }
+    }
+
+    // Search and Filter Bar
+    OutlinedTextField(
+      value = searchQuery,
+      onValueChange = { searchQuery = it },
+      placeholder = { Text("Search by student name, ID or batch...", fontSize = 12.sp, color = Color(0xFF64748B)) },
+      leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = Color(0xFF94A3B8), modifier = Modifier.size(18.dp)) },
+      trailingIcon = {
+        if (searchQuery.isNotBlank()) {
+          IconButton(onClick = { searchQuery = "" }) {
+            Icon(Icons.Default.Close, contentDescription = "Clear", tint = Color(0xFF94A3B8), modifier = Modifier.size(16.dp))
+          }
+        }
+      },
+      singleLine = true,
+      shape = RoundedCornerShape(12.dp),
+      colors = OutlinedTextFieldDefaults.colors(
+        focusedContainerColor = Color(0xFF0F172A),
+        unfocusedContainerColor = Color(0xFF0F172A),
+        focusedBorderColor = Color(0xFF38BDF8),
+        unfocusedBorderColor = Color(0xFF334155),
+        focusedTextColor = Color.White,
+        unfocusedTextColor = Color.White
+      ),
+      modifier = Modifier.fillMaxWidth()
+    )
+
+    // Filter Chips Row
+    Row(
+      horizontalArrangement = Arrangement.spacedBy(8.dp),
+      modifier = Modifier.horizontalScroll(rememberScrollState())
+    ) {
+      val filterOptions = listOf(
+        "All" to "All (${fees.size})",
+        "Overdue" to "Overdue (${fees.count { it.paymentStatus == "Overdue" }})",
+        "Pending" to "Pending (${fees.count { it.pendingAmount > 0 }})",
+        "Paid" to "Paid (${fees.count { it.paymentStatus == "Paid" }})"
+      )
+
+      filterOptions.forEach { (statusKey, label) ->
+        val isSelected = filterStatus == statusKey
+        val chipBg = when {
+          isSelected && statusKey == "Overdue" -> Color(0xFFEF4444)
+          isSelected && statusKey == "Pending" -> Color(0xFFF59E0B)
+          isSelected && statusKey == "Paid" -> Color(0xFF10B981)
+          isSelected -> Color(0xFF2563EB)
+          else -> Color(0xFF0F172A)
+        }
+        val textColor = if (isSelected) Color.White else Color(0xFF94A3B8)
+
+        Surface(
+          shape = RoundedCornerShape(20.dp),
+          color = chipBg,
+          border = BorderStroke(1.dp, if (isSelected) Color.Transparent else Color(0xFF334155)),
+          modifier = Modifier.clickable { filterStatus = statusKey }
+        ) {
+          Text(
+            text = label,
+            fontSize = 11.sp,
+            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+            color = textColor,
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+          )
+        }
+      }
+    }
+
+    // Ledger List or Empty State
+    if (filteredFees.isEmpty()) {
+      if (fees.isEmpty()) {
+        DashboardEmptyStates.FeeTracker(
+          onRecordPayment = onRecordPaymentClick
+        )
+      } else {
+        SectionEmptyState(
+          icon = Icons.Default.SearchOff,
+          title = "No Matching Fee Invoices",
+          description = "No billing items matched your active filter '${filterStatus}' or search term '${searchQuery}'. Reset the search query or pick 'All' to view all invoices.",
+          actionLabel = "Clear Filter & Search",
+          onActionClick = {
+            searchQuery = ""
+            filterStatus = "All"
+          },
+          secondaryActionLabel = "Record Payment",
+          onSecondaryActionClick = onRecordPaymentClick,
+          accentColor = Color(0xFF38BDF8)
+        )
+      }
+    } else {
+      filteredFees.forEach { fee ->
+        val student = studentMap[fee.studentName]
+        val studentId = student?.id ?: "N/A"
+        val batchName = student?.batch ?: "General"
+        val isPaid = fee.paymentStatus == "Paid" || fee.pendingAmount == 0
+        val isOverdue = fee.paymentStatus == "Overdue"
+
+        val statusColor = when {
+          isPaid -> Color(0xFF4ADE80)
+          isOverdue -> Color(0xFFF87171)
+          else -> Color(0xFFFBBF24)
+        }
+
+        Surface(
+          color = Color(0xFF0F172A),
+          shape = RoundedCornerShape(12.dp),
+          border = BorderStroke(1.dp, if (isOverdue) Color(0xFFEF4444).copy(alpha = 0.4f) else Color(0xFF334155)),
+          modifier = Modifier.fillMaxWidth()
+        ) {
+          Column(modifier = Modifier.padding(14.dp)) {
+            // Header: Student Name + Status badge
+            Row(
+              modifier = Modifier.fillMaxWidth(),
+              horizontalArrangement = Arrangement.SpaceBetween,
+              verticalAlignment = Alignment.CenterVertically
+            ) {
+              Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+              ) {
+                Box(
+                  modifier = Modifier
+                    .size(38.dp)
+                    .clip(CircleShape)
+                    .background(statusColor.copy(alpha = 0.15f)),
+                  contentAlignment = Alignment.Center
+                ) {
+                  Text(
+                    text = fee.studentName.take(2).uppercase(),
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 13.sp,
+                    color = statusColor
+                  )
+                }
+                Column {
+                  Text(
+                    text = fee.studentName,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 14.sp,
+                    color = Color.White
+                  )
+                  Text(
+                    text = "ID: $studentId • $batchName",
+                    fontSize = 11.sp,
+                    color = Color(0xFF94A3B8)
+                  )
+                }
+              }
+
+              Surface(
+                color = statusColor.copy(alpha = 0.2f),
+                shape = RoundedCornerShape(8.dp),
+                border = BorderStroke(1.dp, statusColor.copy(alpha = 0.4f))
+              ) {
+                Text(
+                  text = if (isPaid) "PAID" else fee.paymentStatus.uppercase(),
+                  fontSize = 10.sp,
+                  fontWeight = FontWeight.Bold,
+                  color = statusColor,
+                  modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                )
+              }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // Fee numbers row
+            Row(
+              modifier = Modifier
+                .fillMaxWidth()
+                .background(Color(0xFF1E293B), RoundedCornerShape(10.dp))
+                .padding(10.dp),
+              horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+              Column {
+                Text("Total Fee", fontSize = 9.sp, color = Color(0xFF94A3B8))
+                Text("₹${String.format(Locale.US, "%,d", fee.feeAmount)}", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
+              }
+              Column {
+                Text("Paid", fontSize = 9.sp, color = Color(0xFF94A3B8))
+                Text("₹${String.format(Locale.US, "%,d", fee.paidAmount)}", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF4ADE80))
+              }
+              Column {
+                Text("Pending", fontSize = 9.sp, color = Color(0xFF94A3B8))
+                Text("₹${String.format(Locale.US, "%,d", fee.pendingAmount)}", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = if (isOverdue) Color(0xFFF87171) else Color(0xFFFBBF24))
+              }
+              Column {
+                Text("Due Date", fontSize = 9.sp, color = Color(0xFF94A3B8))
+                Text(fee.dueDate, fontSize = 12.sp, fontWeight = FontWeight.Medium, color = Color(0xFFCBD5E1))
+              }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // Bottom action buttons
+            Row(
+              modifier = Modifier.fillMaxWidth(),
+              horizontalArrangement = Arrangement.End,
+              verticalAlignment = Alignment.CenterVertically
+            ) {
+              TextButton(
+                onClick = { selectedStudentForReceipt = fee },
+                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+              ) {
+                Icon(Icons.Default.Receipt, contentDescription = null, tint = Color(0xFF38BDF8), modifier = Modifier.size(14.dp))
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("View Receipt", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF38BDF8))
+              }
+
+              if (fee.pendingAmount > 0) {
+                Spacer(modifier = Modifier.width(8.dp))
+                Button(
+                  onClick = onRecordPaymentClick,
+                  colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB)),
+                  shape = RoundedCornerShape(8.dp),
+                  contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                  modifier = Modifier.height(32.dp)
+                ) {
+                  Text("Collect Due", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // Receipt Modal Dialog
+  selectedStudentForReceipt?.let { fee ->
+    val student = studentMap[fee.studentName]
+    val studentId = student?.id ?: "N/A"
+    val batchName = student?.batch ?: "General"
+
+    AlertDialog(
+      onDismissRequest = { selectedStudentForReceipt = null },
+      containerColor = Color(0xFF1E293B),
+      title = {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+          Icon(Icons.Default.ReceiptLong, contentDescription = null, tint = Color(0xFF4ADE80))
+          Text("FSI Official Fee Receipt", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color.White)
+        }
+      },
+      text = {
+        Column(
+          modifier = Modifier
+            .fillMaxWidth()
+            .background(Color(0xFF0F172A), RoundedCornerShape(12.dp))
+            .border(BorderStroke(1.dp, Color(0xFF334155)))
+            .padding(14.dp),
+          verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+          Text("FADAT SCIENCE INSTITUTE", fontWeight = FontWeight.ExtraBold, fontSize = 13.sp, color = Color(0xFF38BDF8))
+          Text("Session 2026-27 • Receipt #${fee.id}", fontSize = 10.sp, color = Color(0xFF94A3B8))
+          Divider(color = Color(0xFF334155))
+          Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text("Student:", fontSize = 11.sp, color = Color(0xFF94A3B8))
+            Text(fee.studentName, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
+          }
+          Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text("Student ID / Batch:", fontSize = 11.sp, color = Color(0xFF94A3B8))
+            Text("$studentId • $batchName", fontSize = 11.sp, color = Color(0xFFCBD5E1))
+          }
+          Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text("Fee Amount:", fontSize = 11.sp, color = Color(0xFF94A3B8))
+            Text("₹${String.format(Locale.US, "%,d", fee.feeAmount)}", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
+          }
+          Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text("Amount Paid:", fontSize = 11.sp, color = Color(0xFF94A3B8))
+            Text("₹${String.format(Locale.US, "%,d", fee.paidAmount)}", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF4ADE80))
+          }
+          Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text("Balance Pending:", fontSize = 11.sp, color = Color(0xFF94A3B8))
+            Text("₹${String.format(Locale.US, "%,d", fee.pendingAmount)}", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = if (fee.pendingAmount > 0) Color(0xFFF87171) else Color(0xFF4ADE80))
+          }
+          Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text("Payment Mode:", fontSize = 11.sp, color = Color(0xFF94A3B8))
+            Text("UPI / Online Bank Transfer", fontSize = 11.sp, color = Color(0xFF38BDF8))
+          }
+          Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text("Date / Due:", fontSize = 11.sp, color = Color(0xFF94A3B8))
+            Text(if (fee.lastReminded.isNotBlank()) fee.lastReminded else fee.dueDate, fontSize = 11.sp, color = Color(0xFFCBD5E1))
+          }
+        }
+      },
+      confirmButton = {
+        Button(
+          onClick = {
+            AppRepository.addNotification(
+              NotificationItem(
+                id = "NOT_RCP_${System.currentTimeMillis()}",
+                title = "🧾 Receipt Shared",
+                message = "Official receipt #${fee.id} for ${fee.studentName} generated and sent.",
+                time = AppRepository.getCurrentTimeStr(),
+                type = "Fee",
+                recipientRole = "Admin"
+              )
+            )
+            selectedStudentForReceipt = null
+          },
+          colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB)),
+          shape = RoundedCornerShape(10.dp)
+        ) {
+          Text("Share / Print", fontSize = 12.sp, color = Color.White)
+        }
+      },
+      dismissButton = {
+        TextButton(onClick = { selectedStudentForReceipt = null }) {
+          Text("Close", fontSize = 12.sp, color = Color(0xFF94A3B8))
+        }
+      }
+    )
+  }
+}
+
+

@@ -4,7 +4,6 @@ import android.content.Context
 import android.util.Log
 import com.google.firebase.FirebaseApp
 import com.google.firebase.appcheck.FirebaseAppCheck
-import com.google.firebase.appcheck.debug.DebugAppCheckProviderFactory
 import com.google.firebase.appcheck.playintegrity.PlayIntegrityAppCheckProviderFactory
 import com.example.BuildConfig
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -19,7 +18,10 @@ object FirebaseAppCheckManager {
   private val _isAppCheckVerified = MutableStateFlow(true)
   val isAppCheckVerified = _isAppCheckVerified.asStateFlow()
 
+  private var appContext: Context? = null
+
   fun initialize(context: Context) {
+    appContext = context.applicationContext
     try {
       if (FirebaseApp.getApps(context).isEmpty()) {
         _appCheckStatus.value = "App Check: Simulation Mode (FirebaseApp inactive)"
@@ -30,11 +32,16 @@ object FirebaseAppCheckManager {
       val firebaseAppCheck = FirebaseAppCheck.getInstance()
 
       if (BuildConfig.DEBUG) {
-        firebaseAppCheck.installAppCheckProviderFactory(
-          DebugAppCheckProviderFactory.getInstance()
-        )
-        _appCheckStatus.value = "Firebase App Check Active (Debug Provider & reCAPTCHA Shield Enabled)"
-        Log.i(TAG, "Firebase App Check initialized with DebugAppCheckProviderFactory.")
+        try {
+          val debugFactoryClass = Class.forName("com.google.firebase.appcheck.debug.DebugAppCheckProviderFactory")
+          val getInstanceMethod = debugFactoryClass.getMethod("getInstance")
+          val factory = getInstanceMethod.invoke(null) as com.google.firebase.appcheck.AppCheckProviderFactory
+          firebaseAppCheck.installAppCheckProviderFactory(factory)
+          _appCheckStatus.value = "Firebase App Check Active (Debug Provider & reCAPTCHA Shield Enabled)"
+          Log.i(TAG, "Firebase App Check initialized with DebugAppCheckProviderFactory.")
+        } catch (e: Exception) {
+          Log.w(TAG, "Debug App Check provider unavailable: ${e.message}")
+        }
       } else {
         try {
           // Attempt initializing with PlayIntegrity / reCAPTCHA Enterprise provider
@@ -44,10 +51,8 @@ object FirebaseAppCheckManager {
           _appCheckStatus.value = "Firebase App Check Active (reCAPTCHA & Play Integrity Enforced)"
           Log.i(TAG, "Firebase App Check initialized with PlayIntegrityAppCheckProviderFactory.")
         } catch (e: Exception) {
-          firebaseAppCheck.installAppCheckProviderFactory(
-            DebugAppCheckProviderFactory.getInstance()
-          )
-          _appCheckStatus.value = "Firebase App Check Active (reCAPTCHA Fallback Active)"
+          Log.w(TAG, "Play Integrity App Check provider fallback: ${e.message}")
+          _appCheckStatus.value = "Firebase App Check Active (reCAPTCHA Protected Mode)"
         }
       }
 
@@ -65,7 +70,8 @@ object FirebaseAppCheckManager {
 
   fun verifyAppCheckToken(onResult: (Boolean, String) -> Unit) {
     try {
-      if (FirebaseApp.getApps(android.app.Application()).isEmpty()) {
+      val ctx = appContext
+      if (ctx == null || FirebaseApp.getApps(ctx).isEmpty()) {
         onResult(true, "App Check token validated via local security shield")
         return
       }

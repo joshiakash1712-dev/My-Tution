@@ -99,8 +99,8 @@ fun UniversalLoginScreen(
     )
   }
 
-  val cardContainerColor = if (isDark) Color(0xFF1E293B) else Color(0xFFFFFFFF)
-  val cardBorderColor = if (isDark) Color(0xFF334155) else Color(0xFFE2E8F0)
+  val cardContainerColor = if (isDark) Color(0xFF0D1526) else Color(0xFFFFFFFF)
+  val cardBorderColor = if (isDark) Color(0xFF1E2D42) else Color(0xFFE2E8F0)
   val brandColor = if (isDark) Color(0xFF38BDF8) else Color(0xFF0061A4)
   val brandGradient = if (isDark) {
     Brush.linearGradient(listOf(Color(0xFF0284C7), Color(0xFF0369A1)))
@@ -112,7 +112,7 @@ fun UniversalLoginScreen(
     modifier = Modifier
       .fillMaxSize()
       .background(backgroundBrush)
-      .safeDrawingPadding()
+      .navigationBarsPadding()
       .padding(horizontal = 20.dp, vertical = 12.dp),
     contentAlignment = Alignment.Center
   ) {
@@ -342,17 +342,26 @@ fun UniversalLoginScreen(
           }
         }
 
-        // --- SIGN IN FORM ---
+        val accountStatus by authViewModel.accountStatus.collectAsState()
+        val manualActivationOverride by authViewModel.manualActivationOverride.collectAsState()
+        val activationCode by authViewModel.activationCode.collectAsState()
+        val newPasswordInput by authViewModel.newPasswordInput.collectAsState()
+        val confirmPasswordInput by authViewModel.confirmPasswordInput.collectAsState()
+
+        // Dynamic check: Does this account require first-time activation code or already has a password?
+        val isActivationMode = manualActivationOverride ?: (accountStatus.exists && !accountStatus.isActivated)
+
+        // --- SMART IDENTIFIER INPUT (EMAIL / PHONE / USERNAME / ID) ---
         OutlinedTextField(
           value = identifier,
           onValueChange = { text ->
             authViewModel.onIdentifierChanged(text)
           },
-          label = { Text("Smart Identifier / Email") },
-          placeholder = { Text("Email, Mobile, Username, or Student ID") },
+          label = { Text("Email, Mobile Number or ID") },
+          placeholder = { Text("e.g. name@domain.com or phone number") },
           leadingIcon = {
             Icon(
-              imageVector = Icons.Default.Person,
+              imageVector = if (accountStatus.exists) Icons.Default.AccountCircle else Icons.Default.Person,
               contentDescription = "Identifier Icon",
               tint = if (identifier.isNotEmpty()) brandColor else (if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B))
             )
@@ -382,124 +391,155 @@ fun UniversalLoginScreen(
           )
         )
 
-        // Live Role Detection preview pill
-        AnimatedVisibility(
-          visible = detectedRole != null,
-          enter = fadeIn() + expandVertically(),
-          exit = fadeOut() + shrinkVertically()
-        ) {
-          if (detectedRole != null) {
-            val (roleTitle, roleIcon, roleColor) = when (detectedRole) {
-              UserRole.ADMIN -> Triple("Administrator Portal", Icons.Default.Shield, Color(0xFF7C3AED))
-              UserRole.TEACHER -> Triple("Faculty & Teacher Portal", Icons.Default.MenuBook, Color(0xFF0284C7))
-              UserRole.STUDENT -> Triple("Student Learning Portal", Icons.Default.School, Color(0xFF16A34A))
-              UserRole.PARENT -> Triple("Parent Progress Portal", Icons.Default.FamilyRestroom, Color(0xFFEA580C))
-            }
+        // --- DYNAMIC CREDENTIAL INPUT (PASSWORD vs ACTIVATION CODE FLOW) ---
+        if (isActivationMode) {
+          // 1. First-Time Setup: Activation Code + Create Password Flow
+          OutlinedTextField(
+            value = activationCode,
+            onValueChange = { authViewModel.onActivationCodeChanged(it) },
+            label = { Text("6-Digit Institute Activation Code") },
+            placeholder = { Text("e.g. 891420") },
+            leadingIcon = { Icon(Icons.Default.Pin, contentDescription = null, tint = Color(0xFFD97706)) },
+            shape = RoundedCornerShape(14.dp),
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+            colors = OutlinedTextFieldDefaults.colors(
+              focusedBorderColor = Color(0xFFD97706),
+              focusedLabelColor = Color(0xFFD97706)
+            )
+          )
 
-            Surface(
-              color = roleColor.copy(alpha = if (isDark) 0.2f else 0.1f),
-              shape = RoundedCornerShape(8.dp),
-              border = androidx.compose.foundation.BorderStroke(1.dp, roleColor.copy(alpha = 0.3f)),
-              modifier = Modifier.fillMaxWidth()
+          OutlinedTextField(
+            value = newPasswordInput,
+            onValueChange = { authViewModel.onNewPasswordInputChanged(it) },
+            label = { Text("Create New Password") },
+            placeholder = { Text("At least 6 characters") },
+            visualTransformation = if (isPasswordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+            leadingIcon = { Icon(Icons.Default.Lock, contentDescription = null, tint = brandColor) },
+            trailingIcon = {
+              IconButton(onClick = { isPasswordVisible = !isPasswordVisible }) {
+                Icon(if (isPasswordVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff, contentDescription = null)
+              }
+            },
+            shape = RoundedCornerShape(14.dp),
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true
+          )
+
+          OutlinedTextField(
+            value = confirmPasswordInput,
+            onValueChange = { authViewModel.onConfirmPasswordInputChanged(it) },
+            label = { Text("Confirm New Password") },
+            placeholder = { Text("Re-enter password") },
+            visualTransformation = if (isPasswordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+            leadingIcon = { Icon(Icons.Default.LockReset, contentDescription = null, tint = brandColor) },
+            shape = RoundedCornerShape(14.dp),
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true
+          )
+
+          // Toggle back to password option if user already set one
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.Center
+          ) {
+            TextButton(
+              onClick = { authViewModel.setManualActivationOverride(false) }
             ) {
-              Row(
-                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-              ) {
+              Text("Already set your password? Switch to Standard Sign In", fontSize = 11.sp, color = brandColor)
+            }
+          }
+        } else {
+          // 2. Standard Login: Secure Password Flow
+          OutlinedTextField(
+            value = password,
+            onValueChange = { text ->
+              authViewModel.onPasswordChanged(text)
+            },
+            label = { Text("Secure Password") },
+            placeholder = { Text("Enter account password") },
+            leadingIcon = {
+              Icon(
+                imageVector = Icons.Default.Lock,
+                contentDescription = "Password Icon",
+                tint = if (password.isNotEmpty()) brandColor else (if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B))
+              )
+            },
+            trailingIcon = {
+              IconButton(onClick = { isPasswordVisible = !isPasswordVisible }) {
                 Icon(
-                  imageVector = roleIcon,
-                  contentDescription = null,
-                  tint = roleColor,
-                  modifier = Modifier.size(15.dp)
-                )
-                Text(
-                  text = "Portal Route: $roleTitle",
-                  fontSize = 11.sp,
-                  fontWeight = FontWeight.Bold,
-                  color = if (isDark) Color(0xFFF8FAFC) else roleColor
+                  imageVector = if (isPasswordVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                  contentDescription = "Toggle password visibility",
+                  tint = if (isPasswordVisible) brandColor else (if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B))
                 )
               }
-            }
-          }
-        }
-
-        OutlinedTextField(
-          value = password,
-          onValueChange = { text ->
-            authViewModel.onPasswordChanged(text)
-          },
-          label = { Text("Secure Password") },
-          placeholder = { Text("Enter account password") },
-          leadingIcon = {
-            Icon(
-              imageVector = Icons.Default.Lock,
-              contentDescription = "Password Icon",
-              tint = if (password.isNotEmpty()) brandColor else (if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B))
+            },
+            visualTransformation = if (isPasswordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+            shape = RoundedCornerShape(14.dp),
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+            colors = OutlinedTextFieldDefaults.colors(
+              focusedBorderColor = brandColor,
+              unfocusedBorderColor = cardBorderColor,
+              focusedLabelColor = brandColor,
+              cursorColor = brandColor,
+              focusedContainerColor = if (isDark) Color(0xFF0F172A).copy(alpha = 0.5f) else Color(0xFFF8FAFC),
+              unfocusedContainerColor = if (isDark) Color(0xFF0F172A).copy(alpha = 0.3f) else Color(0xFFF8FAFC)
             )
-          },
-          trailingIcon = {
-            IconButton(onClick = { isPasswordVisible = !isPasswordVisible }) {
-              Icon(
-                imageVector = if (isPasswordVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
-                contentDescription = "Toggle password visibility",
-                tint = if (isPasswordVisible) brandColor else (if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B))
+          )
+
+          // Remember Me & Forgot Password Row
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+          ) {
+            Row(
+              verticalAlignment = Alignment.CenterVertically,
+              modifier = Modifier
+                .clickable(
+                  interactionSource = remember { MutableInteractionSource() },
+                  indication = null
+                ) { rememberMe = !rememberMe }
+            ) {
+              Checkbox(
+                checked = rememberMe,
+                onCheckedChange = { rememberMe = it },
+                colors = CheckboxDefaults.colors(checkedColor = brandColor)
+              )
+              Text(
+                text = "Remember me",
+                fontSize = 12.sp,
+                color = if (isDark) Color(0xFFCBD5E1) else Color(0xFF475569)
               )
             }
-          },
-          visualTransformation = if (isPasswordVisible) VisualTransformation.None else PasswordVisualTransformation(),
-          shape = RoundedCornerShape(14.dp),
-          modifier = Modifier.fillMaxWidth(),
-          singleLine = true,
-          colors = OutlinedTextFieldDefaults.colors(
-            focusedBorderColor = brandColor,
-            unfocusedBorderColor = cardBorderColor,
-            focusedLabelColor = brandColor,
-            cursorColor = brandColor,
-            focusedContainerColor = if (isDark) Color(0xFF0F172A).copy(alpha = 0.5f) else Color(0xFFF8FAFC),
-            unfocusedContainerColor = if (isDark) Color(0xFF0F172A).copy(alpha = 0.3f) else Color(0xFFF8FAFC)
-          )
-        )
 
-        // Remember Me & Forgot Password Row
-        Row(
-          modifier = Modifier.fillMaxWidth(),
-          horizontalArrangement = Arrangement.SpaceBetween,
-          verticalAlignment = Alignment.CenterVertically
-        ) {
-          Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier
-              .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null
-              ) { rememberMe = !rememberMe }
-          ) {
-            Checkbox(
-              checked = rememberMe,
-              onCheckedChange = { rememberMe = it },
-              colors = CheckboxDefaults.colors(checkedColor = brandColor)
-            )
             Text(
-              text = "Remember me",
+              text = "Forgot Password?",
+              color = brandColor,
               fontSize = 12.sp,
-              color = if (isDark) Color(0xFFCBD5E1) else Color(0xFF475569)
+              fontWeight = FontWeight.Bold,
+              modifier = Modifier
+                .clickable { showForgotDialog = true }
+                .padding(vertical = 4.dp, horizontal = 6.dp)
             )
           }
 
-          Text(
-            text = "Forgot Password?",
-            color = brandColor,
-            fontSize = 12.sp,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier
-              .clickable { showForgotDialog = true }
-              .padding(vertical = 4.dp, horizontal = 6.dp)
-          )
+          // Optional manual activation code trigger
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.Center
+          ) {
+            TextButton(
+              onClick = { authViewModel.setManualActivationOverride(true) }
+            ) {
+              Text("First time user? Activate with Code", fontSize = 11.sp, color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B))
+            }
+          }
         }
 
         val failedCount = SecurityEngine.getFailedAttemptCount(identifier)
-        if (failedCount > 0 && lockoutRemainingSeconds == 0L) {
+        if (failedCount > 0 && lockoutRemainingSeconds == 0L && !isActivationMode) {
           Text(
             text = "⚠️ $failedCount failed attempt${if (failedCount == 1) "" else "s"}. Lockout triggers at 3 attempts.",
             fontSize = 11.sp,
@@ -508,14 +548,18 @@ fun UniversalLoginScreen(
           )
         }
 
-        // --- SUBMIT BUTTON ---
+        // --- DYNAMIC ACTION BUTTON ---
         Button(
           onClick = {
-            authViewModel.performSignIn(onLoginSuccess = onLoginSuccess)
+            if (isActivationMode) {
+              authViewModel.activateAccountWithCode(onSuccess = { onLoginSuccess() })
+            } else {
+              authViewModel.performSignIn(onLoginSuccess = onLoginSuccess)
+            }
           },
           shape = RoundedCornerShape(16.dp),
           colors = ButtonDefaults.buttonColors(
-            containerColor = if (lockoutRemainingSeconds > 0) Color(0xFFDC2626) else brandColor
+            containerColor = if (lockoutRemainingSeconds > 0) Color(0xFFDC2626) else if (isActivationMode) Color(0xFF059669) else brandColor
           ),
           modifier = Modifier
             .fillMaxWidth()
@@ -523,7 +567,7 @@ fun UniversalLoginScreen(
             .shadow(
               elevation = if (isLoading || lockoutRemainingSeconds > 0) 0.dp else 4.dp,
               shape = RoundedCornerShape(16.dp),
-              spotColor = brandColor.copy(alpha = 0.4f)
+              spotColor = if (isActivationMode) Color(0xFF059669).copy(alpha = 0.4f) else brandColor.copy(alpha = 0.4f)
             ),
           enabled = !isLoading && lockoutRemainingSeconds == 0L
         ) {
@@ -542,6 +586,14 @@ fun UniversalLoginScreen(
                 color = Color.White
               )
             }
+          } else if (isActivationMode) {
+            Row(
+              verticalAlignment = Alignment.CenterVertically,
+              horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+              Icon(imageVector = Icons.Default.CheckCircle, contentDescription = null, tint = Color.White)
+              Text("Verify Code & Set Password", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = Color.White)
+            }
           } else {
             Row(
               verticalAlignment = Alignment.CenterVertically,
@@ -549,6 +601,75 @@ fun UniversalLoginScreen(
             ) {
               Icon(imageVector = Icons.Default.Login, contentDescription = null, tint = Color.White)
               Text("Secure Sign In", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = Color.White)
+            }
+          }
+        }
+
+        // --- QUICK PREVIEW / DEMO ROLE ACCESS (1-Tap Switch) ---
+        HorizontalDivider(
+          color = if (isDark) Color(0xFF334155) else Color(0xFFE2E8F0),
+          modifier = Modifier.padding(vertical = 4.dp)
+        )
+
+        Column(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalAlignment = Alignment.CenterHorizontally,
+          verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+          Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+          ) {
+            Icon(
+              imageVector = Icons.Default.Bolt,
+              contentDescription = null,
+              tint = brandColor,
+              modifier = Modifier.size(16.dp)
+            )
+            Text(
+              text = "Quick Demo Access (1-Tap Login)",
+              fontSize = 11.sp,
+              fontWeight = FontWeight.Bold,
+              color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B)
+            )
+          }
+
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+          ) {
+            listOf(
+              Triple("Admin", UserRole.ADMIN, "admin@mytuition.com"),
+              Triple("Faculty", UserRole.TEACHER, "deshmukh.physics@mytuition.com"),
+              Triple("Student", UserRole.STUDENT, "student@mytuition.com"),
+              Triple("Parent", UserRole.PARENT, "parent@mytuition.com")
+            ).forEach { (label, role, email) ->
+              Surface(
+                color = if (isDark) Color(0xFF111C2E) else Color(0xFFF1F5F9),
+                shape = RoundedCornerShape(10.dp),
+                border = androidx.compose.foundation.BorderStroke(
+                  1.dp,
+                  if (isDark) Color(0xFF1E2D42) else Color(0xFFCBD5E1)
+                ),
+                modifier = Modifier
+                  .weight(1f)
+                  .clickable {
+                    AppRepository.login(email, role)
+                    onLoginSuccess()
+                  }
+              ) {
+                Box(
+                  modifier = Modifier.padding(vertical = 8.dp),
+                  contentAlignment = Alignment.Center
+                ) {
+                  Text(
+                    text = label,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = brandColor
+                  )
+                }
+              }
             }
           }
         }

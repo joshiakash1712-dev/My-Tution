@@ -89,6 +89,15 @@ object SecurityEngine {
    * Registers or updates an account credential in the vault with BCrypt salting & hashing.
    * Plaintext passwords are NEVER retained in memory or database storage.
    */
+  fun registerUserCredential(
+    identifier: String,
+    rawPassword: String,
+    role: UserRole,
+    fullName: String = ""
+  ) {
+    registerSaltedCredential(identifier, rawPassword, role, fullName)
+  }
+
   fun registerSaltedCredential(
     identifier: String,
     rawPassword: String,

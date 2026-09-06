@@ -22,6 +22,8 @@ class StudentBatchRepository(private val context: Context) {
   private val batchDao = database.batchDao()
   private val enrollmentDao = database.batchEnrollmentDao()
   private val attendanceDao = database.attendanceDao()
+  private val feePaymentDao = database.feePaymentDao()
+  private val timetableDao = database.timetableDao()
   private val scope = CoroutineScope(Dispatchers.IO)
 
   val allStudents: Flow<List<Student>> = studentDao.getAllStudents().map { entities ->
@@ -36,6 +38,49 @@ class StudentBatchRepository(private val context: Context) {
 
   val allAttendance: Flow<List<AttendanceRecord>> = attendanceDao.getAllAttendance().map { entities ->
     entities.map { it.toDomain() }
+  }
+
+  val allFeePayments: Flow<List<StudentFeePayment>> = feePaymentDao.getAllPayments().map { entities ->
+    entities.map { it.toDomain() }
+  }
+
+  val allTimetableEntries: Flow<List<DynamicTimetableEntry>> = timetableDao.getAllTimetableEntries().map { entities ->
+    entities.map { it.toDomain() }
+  }
+
+  fun getFeePaymentsByStudent(studentId: String): Flow<List<StudentFeePayment>> {
+    return feePaymentDao.getPaymentsByStudent(studentId).map { entities -> entities.map { it.toDomain() } }
+  }
+
+  fun getFeePaymentsByStatus(status: String): Flow<List<StudentFeePayment>> {
+    return feePaymentDao.getPaymentsByStatus(status).map { entities -> entities.map { it.toDomain() } }
+  }
+
+  fun getFeePaymentsByMonth(month: String): Flow<List<StudentFeePayment>> {
+    return feePaymentDao.getPaymentsByMonth(month).map { entities -> entities.map { it.toDomain() } }
+  }
+
+  suspend fun insertFeePayment(payment: StudentFeePayment) {
+    val entity = com.example.data.db.FeePaymentEntity.fromDomain(payment)
+    feePaymentDao.insertPayment(entity)
+  }
+
+  suspend fun insertFeePayments(payments: List<StudentFeePayment>) {
+    val entities = payments.map { com.example.data.db.FeePaymentEntity.fromDomain(it) }
+    feePaymentDao.insertPayments(entities)
+  }
+
+  suspend fun updateFeePayment(payment: StudentFeePayment) {
+    val entity = com.example.data.db.FeePaymentEntity.fromDomain(payment)
+    feePaymentDao.updatePayment(entity)
+  }
+
+  suspend fun deleteFeePayment(paymentId: String) {
+    feePaymentDao.deletePaymentById(paymentId)
+  }
+
+  suspend fun deleteAllFeePayments() {
+    feePaymentDao.deleteAllPayments()
   }
 
   fun getAttendanceByDate(date: String): Flow<List<AttendanceRecord>> {
@@ -73,6 +118,24 @@ class StudentBatchRepository(private val context: Context) {
     attendanceDao.deleteAllAttendance()
   }
 
+  suspend fun insertTimetableEntry(entry: DynamicTimetableEntry) {
+    val entity = com.example.data.db.TimetableEntryEntity.fromDomain(entry)
+    timetableDao.insertTimetableEntry(entity)
+  }
+
+  suspend fun insertTimetableEntries(entries: List<DynamicTimetableEntry>) {
+    val entities = entries.map { com.example.data.db.TimetableEntryEntity.fromDomain(it) }
+    timetableDao.insertTimetableEntries(entities)
+  }
+
+  suspend fun deleteTimetableEntry(entryId: String) {
+    timetableDao.deleteTimetableEntry(entryId)
+  }
+
+  suspend fun deleteAllTimetableEntries() {
+    timetableDao.deleteAllTimetableEntries()
+  }
+
   init {
     // Database initializes clean and empty for real production users
   }
@@ -108,6 +171,14 @@ class StudentBatchRepository(private val context: Context) {
   suspend fun deleteStudent(studentId: String) {
     studentDao.deleteStudentById(studentId)
     FirestoreService.deleteStudentProfile(studentId, {}, {})
+  }
+
+  suspend fun deleteStudents(studentIds: List<String>) {
+    if (studentIds.isEmpty()) return
+    studentDao.deleteStudentsByIds(studentIds)
+    studentIds.forEach { id ->
+      FirestoreService.deleteStudentProfile(id, {}, {})
+    }
   }
 
   suspend fun clearAllData() {

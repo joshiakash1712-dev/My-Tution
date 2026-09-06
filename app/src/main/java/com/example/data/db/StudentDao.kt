@@ -34,6 +34,9 @@ interface StudentDao {
   @Query("DELETE FROM students WHERE id = :id")
   suspend fun deleteStudentById(id: String)
 
+  @Query("DELETE FROM students WHERE id IN (:ids)")
+  suspend fun deleteStudentsByIds(ids: List<String>)
+
   @Query("DELETE FROM students")
   suspend fun deleteAllStudents()
 

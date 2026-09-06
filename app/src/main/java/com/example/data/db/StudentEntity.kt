@@ -28,6 +28,16 @@ data class StudentEntity(
   val strongestSubject: String,
   val weakestSubject: String,
   val recentScoresSerialized: String,
+  val caste: String = "General",
+  val motherTongue: String = "Marathi",
+  val parentOccupation: String = "Business / Service",
+  val yearlyIncome: String = "₹4,50,000",
+  val aadharPhoto: String = "",
+  val markMemoPhoto10th: String = "",
+  val markMemoPhoto11th: String = "",
+  val targetExam: String = "JEE / NEET / CET",
+  val activationCode: String = "742189",
+  val isActivated: Boolean = true,
   val syncedToFirestore: Boolean = false,
   val lastUpdated: Long = System.currentTimeMillis()
 ) {
@@ -65,7 +75,17 @@ data class StudentEntity(
       rank = rank,
       strongestSubject = strongestSubject,
       weakestSubject = weakestSubject,
-      recentScores = scores
+      recentScores = scores,
+      caste = caste,
+      motherTongue = motherTongue,
+      parentOccupation = parentOccupation,
+      yearlyIncome = yearlyIncome,
+      aadharPhoto = aadharPhoto,
+      markMemoPhoto10th = markMemoPhoto10th,
+      markMemoPhoto11th = markMemoPhoto11th,
+      targetExam = targetExam,
+      activationCode = activationCode,
+      isActivated = isActivated
     )
   }
 
@@ -95,6 +115,16 @@ data class StudentEntity(
         strongestSubject = student.strongestSubject,
         weakestSubject = student.weakestSubject,
         recentScoresSerialized = scoresSerialized,
+        caste = student.caste,
+        motherTongue = student.motherTongue,
+        parentOccupation = student.parentOccupation,
+        yearlyIncome = student.yearlyIncome,
+        aadharPhoto = student.aadharPhoto,
+        markMemoPhoto10th = student.markMemoPhoto10th,
+        markMemoPhoto11th = student.markMemoPhoto11th,
+        targetExam = student.targetExam,
+        activationCode = student.activationCode,
+        isActivated = student.isActivated,
         syncedToFirestore = synced
       )
     }

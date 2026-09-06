@@ -36,44 +36,44 @@ val Typography =
   Typography(
     displayLarge = TextStyle(
       fontFamily = FontFamily.Default,
-      fontWeight = FontWeight.Light,
-      fontSize = 2.5.rem,
-      lineHeight = 3.2.rem,
+      fontWeight = FontWeight.Bold,
+      fontSize = 2.2.rem,
+      lineHeight = 2.8.rem,
       letterSpacing = (-0.5).sp
     ),
     displayMedium = TextStyle(
       fontFamily = FontFamily.Default,
-      fontWeight = FontWeight.Normal,
-      fontSize = 2.1.rem,
-      lineHeight = 2.7.rem,
-      letterSpacing = 0.sp
+      fontWeight = FontWeight.Bold,
+      fontSize = 1.9.rem,
+      lineHeight = 2.4.rem,
+      letterSpacing = (-0.25).sp
     ),
     displaySmall = TextStyle(
-      fontFamily = FontFamily.Default,
-      fontWeight = FontWeight.Normal,
-      fontSize = 1.8.rem,
-      lineHeight = 2.4.rem,
-      letterSpacing = 0.sp
-    ),
-    headlineLarge = TextStyle(
       fontFamily = FontFamily.Default,
       fontWeight = FontWeight.SemiBold,
       fontSize = 1.6.rem,
       lineHeight = 2.1.rem,
       letterSpacing = 0.sp
     ),
+    headlineLarge = TextStyle(
+      fontFamily = FontFamily.Default,
+      fontWeight = FontWeight.Bold,
+      fontSize = 1.45.rem,
+      lineHeight = 1.9.rem,
+      letterSpacing = 0.sp
+    ),
     headlineMedium = TextStyle(
       fontFamily = FontFamily.Default,
       fontWeight = FontWeight.SemiBold,
-      fontSize = 1.4.rem,
-      lineHeight = 1.9.rem,
+      fontSize = 1.3.rem,
+      lineHeight = 1.75.rem,
       letterSpacing = 0.sp
     ),
     headlineSmall = TextStyle(
       fontFamily = FontFamily.Default,
       fontWeight = FontWeight.SemiBold,
-      fontSize = 1.25.rem,
-      lineHeight = 1.7.rem,
+      fontSize = 1.15.rem,
+      lineHeight = 1.55.rem,
       letterSpacing = 0.sp
     ),
     titleLarge = TextStyle(
@@ -85,7 +85,7 @@ val Typography =
     ),
     titleMedium = TextStyle(
       fontFamily = FontFamily.Default,
-      fontWeight = FontWeight.Medium,
+      fontWeight = FontWeight.SemiBold,
       fontSize = 1.0.rem,
       lineHeight = 1.35.rem,
       letterSpacing = 0.15.sp
@@ -93,8 +93,8 @@ val Typography =
     titleSmall = TextStyle(
       fontFamily = FontFamily.Default,
       fontWeight = FontWeight.Medium,
-      fontSize = 0.85.rem,
-      lineHeight = 1.15.rem,
+      fontSize = 0.9.rem,
+      lineHeight = 1.25.rem,
       letterSpacing = 0.1.sp
     ),
     bodyLarge = TextStyle(
@@ -102,25 +102,25 @@ val Typography =
       fontWeight = FontWeight.Normal,
       fontSize = 1.0.rem,
       lineHeight = 1.4.rem,
-      letterSpacing = 0.5.sp
+      letterSpacing = 0.25.sp
     ),
     bodyMedium = TextStyle(
       fontFamily = FontFamily.Default,
       fontWeight = FontWeight.Normal,
-      fontSize = 0.85.rem,
-      lineHeight = 1.2.rem,
+      fontSize = 0.9.rem,
+      lineHeight = 1.3.rem,
       letterSpacing = 0.25.sp
     ),
     bodySmall = TextStyle(
       fontFamily = FontFamily.Default,
       fontWeight = FontWeight.Normal,
-      fontSize = 0.75.rem,
-      lineHeight = 1.0.rem,
-      letterSpacing = 0.4.sp
+      fontSize = 0.8.rem,
+      lineHeight = 1.15.rem,
+      letterSpacing = 0.3.sp
     ),
     labelLarge = TextStyle(
       fontFamily = FontFamily.Default,
-      fontWeight = FontWeight.Medium,
+      fontWeight = FontWeight.SemiBold,
       fontSize = 0.85.rem,
       lineHeight = 1.2.rem,
       letterSpacing = 0.1.sp
@@ -128,16 +128,141 @@ val Typography =
     labelMedium = TextStyle(
       fontFamily = FontFamily.Default,
       fontWeight = FontWeight.Medium,
-      fontSize = 0.7.rem,
-      lineHeight = 1.0.rem,
-      letterSpacing = 0.5.sp
+      fontSize = 0.75.rem,
+      lineHeight = 1.05.rem,
+      letterSpacing = 0.4.sp
     ),
     labelSmall = TextStyle(
       fontFamily = FontFamily.Default,
       fontWeight = FontWeight.Medium,
-      fontSize = 0.6.rem,
-      lineHeight = 0.85.rem,
-      letterSpacing = 0.5.sp
+      fontSize = 0.7.rem,
+      lineHeight = 0.95.rem,
+      letterSpacing = 0.4.sp
     )
   )
+
+/**
+ * 4-Tier Typographic Scale for Numerical & Quantitative Data:
+ *
+ * Tier 1 (Hero Stat):
+ *   Display/headline KPI figures (e.g. ₹9.60 L, 154 enrolled, 94% institute attendance, 92.4% overall score)
+ *   Size: 24.sp, FontWeight.Bold, tight letterSpacing (-0.3.sp), lineHeight: 28.sp
+ *
+ * Tier 2 (Card-Level Stat):
+ *   Primary metric tile / card figures (e.g. ₹73,600 collected, 18/20 students, 86%, ₹12,800 overdue)
+ *   Size: 20.sp, FontWeight.Bold, letterSpacing (-0.2.sp), lineHeight: 24.sp
+ *
+ * Tier 3 (Inline Numerical Stat):
+ *   List-row metrics, secondary card stats, timetable slots, subject marks, table amounts (e.g. ₹6,400, 92.5%, 45 mins, 24 Enrolled)
+ *   Size: 13.sp, FontWeight.SemiBold, letterSpacing (0.sp), lineHeight: 17.sp
+ *
+ * Tier 4 (Micro-Label / Telemetry Badge / Axis):
+ *   Chart axes, trend deltas (+4.2%), micro status counts, timestamps, sub-labels (e.g. 100% Present, ₹12k axis, 10/12/2026)
+ *   Size: 11.sp, FontWeight.Medium, letterSpacing (+0.1.sp), lineHeight: 14.sp
+ */
+object NumberTypography {
+  val heroStat = TextStyle(
+    fontFamily = FontFamily.Default,
+    fontWeight = FontWeight.Bold,
+    fontSize = 24.sp,
+    lineHeight = 28.sp,
+    letterSpacing = (-0.3).sp
+  )
+
+  val cardStat = TextStyle(
+    fontFamily = FontFamily.Default,
+    fontWeight = FontWeight.Bold,
+    fontSize = 20.sp,
+    lineHeight = 24.sp,
+    letterSpacing = (-0.2).sp
+  )
+
+  val inlineStat = TextStyle(
+    fontFamily = FontFamily.Default,
+    fontWeight = FontWeight.SemiBold,
+    fontSize = 13.sp,
+    lineHeight = 17.sp,
+    letterSpacing = 0.sp
+  )
+
+  val microLabel = TextStyle(
+    fontFamily = FontFamily.Default,
+    fontWeight = FontWeight.Medium,
+    fontSize = 11.sp,
+    lineHeight = 14.sp,
+    letterSpacing = 0.1.sp
+  )
+}
+
+@androidx.compose.runtime.Composable
+fun HeroStatText(
+  text: String,
+  modifier: androidx.compose.ui.Modifier = androidx.compose.ui.Modifier,
+  color: androidx.compose.ui.graphics.Color = androidx.compose.ui.graphics.Color.Unspecified,
+  maxLines: Int = 1,
+  overflow: androidx.compose.ui.text.style.TextOverflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+) {
+  androidx.compose.material3.Text(
+    text = text,
+    modifier = modifier,
+    style = NumberTypography.heroStat,
+    color = color,
+    maxLines = maxLines,
+    overflow = overflow
+  )
+}
+
+@androidx.compose.runtime.Composable
+fun CardStatText(
+  text: String,
+  modifier: androidx.compose.ui.Modifier = androidx.compose.ui.Modifier,
+  color: androidx.compose.ui.graphics.Color = androidx.compose.ui.graphics.Color.Unspecified,
+  maxLines: Int = 1,
+  overflow: androidx.compose.ui.text.style.TextOverflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+) {
+  androidx.compose.material3.Text(
+    text = text,
+    modifier = modifier,
+    style = NumberTypography.cardStat,
+    color = color,
+    maxLines = maxLines,
+    overflow = overflow
+  )
+}
+
+@androidx.compose.runtime.Composable
+fun InlineStatText(
+  text: String,
+  modifier: androidx.compose.ui.Modifier = androidx.compose.ui.Modifier,
+  color: androidx.compose.ui.graphics.Color = androidx.compose.ui.graphics.Color.Unspecified,
+  maxLines: Int = 1,
+  overflow: androidx.compose.ui.text.style.TextOverflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+) {
+  androidx.compose.material3.Text(
+    text = text,
+    modifier = modifier,
+    style = NumberTypography.inlineStat,
+    color = color,
+    maxLines = maxLines,
+    overflow = overflow
+  )
+}
+
+@androidx.compose.runtime.Composable
+fun MicroLabelText(
+  text: String,
+  modifier: androidx.compose.ui.Modifier = androidx.compose.ui.Modifier,
+  color: androidx.compose.ui.graphics.Color = androidx.compose.ui.graphics.Color.Unspecified,
+  maxLines: Int = 1,
+  overflow: androidx.compose.ui.text.style.TextOverflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+) {
+  androidx.compose.material3.Text(
+    text = text,
+    modifier = modifier,
+    style = NumberTypography.microLabel,
+    color = color,
+    maxLines = maxLines,
+    overflow = overflow
+  )
+}
 

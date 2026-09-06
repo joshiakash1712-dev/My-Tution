@@ -18,22 +18,26 @@ import com.example.data.DarkThemeMode
 
 private val DarkColorScheme =
   darkColorScheme(
-    primary = GeoPrimaryContainer,
-    onPrimary = GeoOnPrimaryContainer,
-    primaryContainer = GeoPrimary,
+    primary = Color(0xFF38BDF8),
+    onPrimary = Color(0xFF0F172A),
+    primaryContainer = Color(0xFF0284C7),
     onPrimaryContainer = Color.White,
-    secondary = GeoSecondaryContainer,
-    onSecondary = GeoOnSecondaryContainer,
-    tertiary = GeoTertiaryContainer,
-    onTertiary = GeoOnTertiaryContainer,
-    background = Color(0xFF111827), // Deep slate dark backdrop
-    onBackground = Color(0xFFF9FAFB),
-    surface = Color(0xFF1F2937), // Lighter slate surface for cards and panels
-    onSurface = Color(0xFFF9FAFB),
-    surfaceVariant = Color(0xFF374151),
-    onSurfaceVariant = Color(0xFFD1D5DB),
-    outline = Color(0xFF4B5563),
-    outlineVariant = Color(0xFF374151)
+    secondary = Color(0xFF818CF8),
+    onSecondary = Color(0xFF0F172A),
+    secondaryContainer = Color(0xFF1E293B),
+    onSecondaryContainer = Color(0xFFE2E8F0),
+    tertiary = Color(0xFF4ADE80),
+    onTertiary = Color(0xFF0F172A),
+    tertiaryContainer = Color(0xFF1E293B),
+    onTertiaryContainer = Color(0xFFE2E8F0),
+    background = Color(0xFF0A0F1D), // Deep midnight slate backdrop
+    onBackground = Color(0xFFF8FAFC),
+    surface = Color(0xFF111C2E), // Symmetrical card and panel surface
+    onSurface = Color(0xFFF8FAFC),
+    surfaceVariant = Color(0xFF182438),
+    onSurfaceVariant = Color(0xFF94A3B8),
+    outline = Color(0xFF334155),
+    outlineVariant = Color(0xFF24334A)
   )
 
 private val LightColorScheme =

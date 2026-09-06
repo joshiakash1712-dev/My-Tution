@@ -536,27 +536,6 @@ private fun Step1BatchSelectionScreen(
 
     Spacer(modifier = Modifier.height(20.dp))
 
-    // Search Field Box
-    OutlinedTextField(
-      value = searchQuery,
-      onValueChange = onSearchQueryChange,
-      placeholder = { Text("Search batch...", color = Color(0xFF64748B), fontSize = 14.sp) },
-      leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = Color(0xFF64748B)) },
-      singleLine = true,
-      colors = OutlinedTextFieldDefaults.colors(
-        focusedContainerColor = Color(0xFF161F32),
-        unfocusedContainerColor = Color(0xFF161F32),
-        focusedBorderColor = Color(0xFF38BDF8),
-        unfocusedBorderColor = Color(0xFF26334D),
-        focusedTextColor = Color.White,
-        unfocusedTextColor = Color.White
-      ),
-      shape = RoundedCornerShape(14.dp),
-      modifier = Modifier.fillMaxWidth()
-    )
-
-    Spacer(modifier = Modifier.height(16.dp))
-
     // Batches Header Row
     Row(
       modifier = Modifier.fillMaxWidth(),

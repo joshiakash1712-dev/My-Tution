@@ -7,8 +7,15 @@ import androidx.room.RoomDatabase
 import androidx.room.TypeConverters
 
 @Database(
-  entities = [StudentEntity::class, BatchEntity::class, BatchEnrollmentEntity::class, AttendanceRecordEntity::class],
-  version = 2,
+  entities = [
+    StudentEntity::class,
+    BatchEntity::class,
+    BatchEnrollmentEntity::class,
+    AttendanceRecordEntity::class,
+    FeePaymentEntity::class,
+    TimetableEntryEntity::class
+  ],
+  version = 4,
   exportSchema = false
 )
 @TypeConverters(RoomConverters::class)
@@ -18,6 +25,8 @@ abstract class AppRoomDatabase : RoomDatabase() {
   abstract fun batchDao(): BatchDao
   abstract fun batchEnrollmentDao(): BatchEnrollmentDao
   abstract fun attendanceDao(): AttendanceDao
+  abstract fun feePaymentDao(): FeePaymentDao
+  abstract fun timetableDao(): TimetableEntryDao
 
   companion object {
     @Volatile

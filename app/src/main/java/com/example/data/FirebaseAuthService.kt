@@ -48,6 +48,40 @@ object FirebaseAuthService {
     return auth != null
   }
 
+  /**
+   * Checks for an existing active Firebase Auth session upon app launch.
+   * If a session is present, fetches or detects their UserRole and invokes onSuccess
+   * so returning users are automatically logged in without re-verifying their identifier.
+   */
+  fun checkExistingSession(
+    onSessionFound: (email: String, role: UserRole, uid: String) -> Unit,
+    onNoSession: () -> Unit
+  ) {
+    val firebaseAuth = auth
+    if (firebaseAuth == null) {
+      onNoSession()
+      return
+    }
+
+    val currentUser = firebaseAuth.currentUser
+    if (currentUser != null) {
+      val uid = currentUser.uid
+      val userEmail = currentUser.email ?: currentUser.phoneNumber ?: uid
+      Log.d(TAG, "Active Firebase Auth session discovered on app launch for: $userEmail (UID: $uid)")
+      _authStatus.value = "Active session restored for $userEmail"
+
+      fetchUserRole(uid, userEmail, { role ->
+        onSessionFound(userEmail, role, uid)
+      }, { error ->
+        val detectedRole = smartDetectRole(userEmail)
+        onSessionFound(userEmail, detectedRole, uid)
+      })
+    } else {
+      Log.d(TAG, "No active Firebase Auth session found on app launch.")
+      onNoSession()
+    }
+  }
+
   // Real Sign In with Role-Based Access Control Retrieval
   fun signIn(
     email: String,

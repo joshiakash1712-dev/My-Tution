@@ -1,5 +1,6 @@
 package com.example.ui.components
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -21,6 +22,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.layout.ContentScale
+import coil.compose.AsyncImage
 import com.example.data.*
 import java.text.SimpleDateFormat
 import java.util.*
@@ -65,7 +68,16 @@ fun DigitalIdCardDialog(student: Student, onDismiss: () -> Unit) {
             .border(3.dp, Color(0xFFAAC7FF), CircleShape),
           contentAlignment = Alignment.Center
         ) {
-          Text(student.name.take(1), fontSize = 36.sp, fontWeight = FontWeight.Bold, color = Color(0xFF001D36))
+          if (student.photo.isNotBlank()) {
+            AsyncImage(
+              model = student.photo,
+              contentDescription = student.name,
+              modifier = Modifier.fillMaxSize(),
+              contentScale = ContentScale.Crop
+            )
+          } else {
+            Text(student.name.take(1), fontSize = 36.sp, fontWeight = FontWeight.Bold, color = Color(0xFF001D36))
+          }
         }
         Spacer(Modifier.height(12.dp))
 
@@ -118,7 +130,7 @@ fun ReportCardDialog(student: Student, onDismiss: () -> Unit) {
     confirmButton = {
       Button(
         onClick = onDismiss,
-        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0061A4))
+        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7))
       ) {
         Icon(Icons.Default.Print, contentDescription = null, modifier = Modifier.size(16.dp))
         Spacer(Modifier.width(6.dp))
@@ -126,13 +138,13 @@ fun ReportCardDialog(student: Student, onDismiss: () -> Unit) {
       }
     },
     dismissButton = {
-      TextButton(onClick = onDismiss) { Text("Close", color = Color(0xFF74777F)) }
+      TextButton(onClick = onDismiss) { Text("Close", color = Color(0xFF94A3B8)) }
     },
     title = {
       Row(verticalAlignment = Alignment.CenterVertically) {
-        Icon(Icons.Default.School, contentDescription = null, tint = Color(0xFF0061A4))
+        Icon(Icons.Default.School, contentDescription = null, tint = Color(0xFF38BDF8))
         Spacer(Modifier.width(8.dp))
-        Text("Official Report Card", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+        Text("Official Report Card", fontWeight = FontWeight.Bold, fontSize = 18.sp, color = Color.White)
       }
     },
     text = {
@@ -142,51 +154,79 @@ fun ReportCardDialog(student: Student, onDismiss: () -> Unit) {
           .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(14.dp)
       ) {
-        Surface(color = MaterialTheme.colorScheme.surfaceVariant, shape = RoundedCornerShape(16.dp)) {
-          Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(student.name, fontWeight = FontWeight.Bold, fontSize = 16.sp, color = MaterialTheme.colorScheme.onSurface)
-            Text("ID: ${student.id} • Batch: ${student.batch}", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text("Overall Attendance: ${student.attendancePercent}%", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF0061A4))
+        Surface(color = Color(0xFF111C2E), border = BorderStroke(1.dp, Color(0xFF1E2D42)), shape = RoundedCornerShape(16.dp)) {
+          Row(
+            modifier = Modifier
+              .fillMaxWidth()
+              .padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+          ) {
+            Box(
+              modifier = Modifier
+                .size(48.dp)
+                .clip(CircleShape)
+                .background(Color(0xFF1E293B))
+                .border(1.5.dp, Color(0xFF38BDF8), CircleShape),
+              contentAlignment = Alignment.Center
+            ) {
+              if (student.photo.isNotBlank()) {
+                AsyncImage(
+                  model = student.photo,
+                  contentDescription = student.name,
+                  modifier = Modifier.fillMaxSize(),
+                  contentScale = ContentScale.Crop
+                )
+              } else {
+                Text(student.name.take(1), fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Color(0xFF38BDF8))
+              }
+            }
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+              Text(student.name, fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color.White)
+              Text("ID: ${student.id} • Batch: ${student.batch}", fontSize = 12.sp, color = Color(0xFF94A3B8))
+              Text("Overall Attendance: ${student.attendancePercent}%", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF38BDF8))
+            }
           }
         }
 
-        Text("Academic Performance Summary", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+        Text("Academic Performance Summary", fontWeight = FontWeight.SemiBold, fontSize = 14.sp, color = Color.White)
         
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-          StatMiniCard("Overall Avg", "${student.overallAvg}%", Color(0xFFD1E4FF), Color(0xFF001D36), Modifier.weight(1f))
-          StatMiniCard("Batch Rank", "#${student.rank}", Color(0xFFF7D8FF), Color(0xFF2B1236), Modifier.weight(1f))
+          StatMiniCard("Overall Avg", "${student.overallAvg}%", Color(0xFF0284C7).copy(alpha = 0.2f), Color(0xFF38BDF8), Modifier.weight(1f))
+          StatMiniCard("Batch Rank", "#${student.rank}", Color(0xFFA855F7).copy(alpha = 0.2f), Color(0xFFC084FC), Modifier.weight(1f))
         }
 
-        Text("Recent Test Breakdown", fontWeight = FontWeight.SemiBold, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("Recent Test Breakdown", fontWeight = FontWeight.SemiBold, fontSize = 13.sp, color = Color(0xFF94A3B8))
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
           student.recentScores.forEach { (tName, score) ->
             Row(
               modifier = Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(10.dp))
-                .background(MaterialTheme.colorScheme.surfaceVariant)
+                .background(Color(0xFF111C2E))
+                .border(1.dp, Color(0xFF1E2D42), RoundedCornerShape(10.dp))
                 .padding(10.dp),
               horizontalArrangement = Arrangement.SpaceBetween,
               verticalAlignment = Alignment.CenterVertically
             ) {
-              Text(tName, fontSize = 13.sp, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onSurface)
-              Text("$score / 100", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0061A4))
+              Text(tName, fontSize = 13.sp, fontWeight = FontWeight.Medium, color = Color.White)
+              Text("$score / 100", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFF38BDF8))
             }
           }
         }
 
-        Surface(color = Color(0xFFD1F2D1), shape = RoundedCornerShape(12.dp)) {
+        Surface(color = Color(0xFF064E3B), border = BorderStroke(1.dp, Color(0xFF059669)), shape = RoundedCornerShape(12.dp)) {
           Text(
             "Faculty Remarks: Excellent grasping power in Calculus. Needs consistent practice in Organic mechanisms.",
             fontSize = 12.sp,
-            color = Color(0xFF072711),
+            color = Color(0xFF4ADE80),
             modifier = Modifier.padding(12.dp)
           )
         }
       }
     },
-    containerColor = MaterialTheme.colorScheme.surface,
-    shape = RoundedCornerShape(28.dp)
+    containerColor = Color(0xFF0D1526),
+    shape = RoundedCornerShape(24.dp)
   )
 }
 
@@ -210,7 +250,7 @@ fun AddStudentDialog(onDismiss: () -> Unit, onSave: (Student) -> Unit) {
 
   AlertDialog(
     onDismissRequest = onDismiss,
-    title = { Text("Admit New Student", fontWeight = FontWeight.Bold) },
+    title = { Text("Admit New Student", fontWeight = FontWeight.Bold, color = Color.White) },
     text = {
       Column(
         modifier = Modifier
@@ -222,10 +262,25 @@ fun AddStudentDialog(onDismiss: () -> Unit, onSave: (Student) -> Unit) {
         OutlinedTextField(value = mobile, onValueChange = { mobile = it }, label = { Text("Student Mobile") }, singleLine = true, modifier = Modifier.fillMaxWidth())
         OutlinedTextField(value = parentName, onValueChange = { parentName = it }, label = { Text("Parent / Guardian Name") }, singleLine = true, modifier = Modifier.fillMaxWidth())
         
-        Text("Assign Batch", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("Assign Batch", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFFCBD5E1))
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
           listOf("JEE Apex Morning", "NEET Zenith", "Foundation Target").forEach { b ->
-            FilterChip(selected = batch == b, onClick = { batch = b }, label = { Text(b.substringBefore(" "), fontSize = 10.sp) })
+            FilterChip(
+              selected = batch == b,
+              onClick = { batch = b },
+              colors = FilterChipDefaults.filterChipColors(
+                containerColor = Color(0xFF111C2E),
+                labelColor = Color(0xFF94A3B8),
+                selectedContainerColor = Color(0xFF0284C7),
+                selectedLabelColor = Color.White
+              ),
+              border = FilterChipDefaults.filterChipBorder(
+                enabled = true,
+                selected = batch == b,
+                borderColor = if (batch == b) Color(0xFF38BDF8) else Color(0xFF1E2D42)
+              ),
+              label = { Text(b.substringBefore(" "), fontSize = 10.sp) }
+            )
           }
         }
       }
@@ -261,13 +316,13 @@ fun AddStudentDialog(onDismiss: () -> Unit, onSave: (Student) -> Unit) {
             onSave(s)
           }
         },
-        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0061A4))
+        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7))
       ) { Text("Admit Student") }
     },
     dismissButton = {
-      TextButton(onClick = onDismiss) { Text("Cancel") }
+      TextButton(onClick = onDismiss) { Text("Cancel", color = Color(0xFF94A3B8)) }
     },
-    containerColor = MaterialTheme.colorScheme.surface,
+    containerColor = Color(0xFF0D1526),
     shape = RoundedCornerShape(24.dp)
   )
 }
@@ -335,14 +390,14 @@ fun CreateUserAccountDialog(onDismiss: () -> Unit) {
         }
 
         if (successMsg != null) {
-          Surface(color = Color(0xFFDCFCE7), shape = RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth()) {
-            Text(successMsg ?: "", color = Color(0xFF15803D), fontSize = 11.sp, modifier = Modifier.padding(10.dp), fontWeight = FontWeight.SemiBold)
+          Surface(color = Color(0xFF064E3B), border = BorderStroke(1.dp, Color(0xFF059669)), shape = RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth()) {
+            Text(successMsg ?: "", color = Color(0xFF4ADE80), fontSize = 11.sp, modifier = Modifier.padding(10.dp), fontWeight = FontWeight.SemiBold)
           }
         }
 
         if (errorMsg != null) {
-          Surface(color = Color(0xFFFEE2E2), shape = RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth()) {
-            Text(errorMsg ?: "", color = Color(0xFFB91C1C), fontSize = 11.sp, modifier = Modifier.padding(10.dp), fontWeight = FontWeight.SemiBold)
+          Surface(color = Color(0xFF450A0A), border = BorderStroke(1.dp, Color(0xFFEF4444)), shape = RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth()) {
+            Text(errorMsg ?: "", color = Color(0xFFF87171), fontSize = 11.sp, modifier = Modifier.padding(10.dp), fontWeight = FontWeight.SemiBold)
           }
         }
       }
@@ -421,7 +476,7 @@ fun CreateUserAccountDialog(onDismiss: () -> Unit) {
             }
           )
         },
-        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0061A4)),
+        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7)),
         enabled = !isLoading
       ) {
         if (isLoading) {
@@ -432,9 +487,9 @@ fun CreateUserAccountDialog(onDismiss: () -> Unit) {
       }
     },
     dismissButton = {
-      TextButton(onClick = onDismiss, enabled = !isLoading) { Text("Close") }
+      TextButton(onClick = onDismiss, enabled = !isLoading) { Text("Close", color = Color(0xFF94A3B8)) }
     },
-    containerColor = MaterialTheme.colorScheme.surface,
+    containerColor = Color(0xFF0D1526),
     shape = RoundedCornerShape(24.dp)
   )
 }

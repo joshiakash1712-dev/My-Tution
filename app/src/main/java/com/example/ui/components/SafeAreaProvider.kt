@@ -15,13 +15,11 @@ import androidx.compose.ui.Modifier
 fun SafeAreaProvider(
     content: @Composable () -> Unit
 ) {
-    // Retrieve top insets of the status bar and notch dynamically
-    val topPadding = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
-
+    // In edge-to-edge mode, provide safe insets without doubling them for inner components
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .padding(top = topPadding)
+            .statusBarsPadding()
     ) {
         content()
     }
