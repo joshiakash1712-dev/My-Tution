@@ -126,12 +126,14 @@ fun MyTuitionApp() {
         "Dashboard" to Icons.Outlined.Home,
         "Timetable" to Icons.Outlined.Schedule,
         "CBT Test" to Icons.Outlined.Quiz,
-        "Gemini AI" to Icons.Outlined.AutoAwesome
+        "Gemini AI" to Icons.Outlined.AutoAwesome,
+        "Study & Doubts" to Icons.Outlined.FactCheck
       )
       UserRole.PARENT -> listOf(
         "Dashboard" to Icons.Outlined.Home,
         "Attendance" to Icons.Outlined.CalendarMonth,
         "Test Standing" to Icons.Outlined.Assessment,
+        "Fee Ledger" to Icons.Outlined.Payment,
         "Timetable" to Icons.Outlined.Schedule
       )
     }
@@ -511,8 +513,8 @@ fun MyTuitionApp() {
               AnimatedContent(
                 targetState = currentTabIndex,
                 transitionSpec = {
-                  fadeIn(animationSpec = tween(100, easing = FastOutSlowInEasing))
-                    .togetherWith(fadeOut(animationSpec = tween(70, easing = FastOutLinearInEasing)))
+                  (fadeIn(animationSpec = tween(90, easing = FastOutSlowInEasing)) + scaleIn(initialScale = 0.988f, animationSpec = tween(90)))
+                    .togetherWith(fadeOut(animationSpec = tween(60, easing = FastOutLinearInEasing)))
                 },
                 label = "phone_tab_transition"
               ) { tabIndex ->

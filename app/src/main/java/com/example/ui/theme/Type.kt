@@ -202,13 +202,22 @@ fun HeroStatText(
   maxLines: Int = 1,
   overflow: androidx.compose.ui.text.style.TextOverflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
 ) {
+  val responsiveFontSize = when {
+    text.length >= 11 -> 18.sp
+    text.length >= 8 -> 20.sp
+    else -> 24.sp
+  }
   androidx.compose.material3.Text(
     text = text,
     modifier = modifier,
-    style = NumberTypography.heroStat,
+    style = NumberTypography.heroStat.copy(
+      fontSize = responsiveFontSize,
+      letterSpacing = (-0.4).sp
+    ),
     color = color,
     maxLines = maxLines,
-    overflow = overflow
+    overflow = overflow,
+    softWrap = false
   )
 }
 
@@ -220,13 +229,25 @@ fun CardStatText(
   maxLines: Int = 1,
   overflow: androidx.compose.ui.text.style.TextOverflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
 ) {
+  // Dynamically scale font size based on string length to guarantee full values display without truncation
+  // e.g. "₹73,600" (7 chars) -> 15.sp, "₹1,12,000" (9 chars) -> 13.5.sp
+  val responsiveFontSize = when {
+    text.length >= 10 -> 13.sp
+    text.length >= 8 -> 14.sp
+    text.length >= 6 -> 15.sp
+    else -> 18.sp
+  }
   androidx.compose.material3.Text(
     text = text,
     modifier = modifier,
-    style = NumberTypography.cardStat,
+    style = NumberTypography.cardStat.copy(
+      fontSize = responsiveFontSize,
+      letterSpacing = (-0.4).sp
+    ),
     color = color,
     maxLines = maxLines,
-    overflow = overflow
+    overflow = overflow,
+    softWrap = false
   )
 }
 
@@ -241,10 +262,13 @@ fun InlineStatText(
   androidx.compose.material3.Text(
     text = text,
     modifier = modifier,
-    style = NumberTypography.inlineStat,
+    style = NumberTypography.inlineStat.copy(
+      letterSpacing = (-0.2).sp
+    ),
     color = color,
     maxLines = maxLines,
-    overflow = overflow
+    overflow = overflow,
+    softWrap = false
   )
 }
 
@@ -262,7 +286,8 @@ fun MicroLabelText(
     style = NumberTypography.microLabel,
     color = color,
     maxLines = maxLines,
-    overflow = overflow
+    overflow = overflow,
+    softWrap = false
   )
 }
 

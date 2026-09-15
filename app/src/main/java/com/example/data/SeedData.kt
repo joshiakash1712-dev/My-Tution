@@ -6,20 +6,20 @@ object SeedData {
     id = "BATCH_10_SCI_A",
     name = "10th - Science (A)",
     schedule = "08:00 AM – 09:30 AM",
-    studentCount = 28,
-    teacherName = "Prof. Deshmukh"
+    studentCount = 4,
+    teacherName = "Prof. Shrirang Deshmukh"
   )
 
   val defaultBatches = listOf(
-    Batch("BATCH_8TH", "8th Standard", "07:30 AM – 09:00 AM", 28, "Prof. Joshi"),
+    Batch("BATCH_8TH", "8th Standard", "07:30 AM – 09:00 AM", 0, "Prof. Akash Joshi"),
     batch10thSciA,
-    Batch("BATCH_11_SCI_B", "11th - Science (B)", "09:45 AM – 11:15 AM", 32, "Prof. Patil"),
-    Batch("BATCH_JEE_APEX_M", "JEE Apex Morning", "11:30 AM – 01:00 PM", 52, "Er. Kulkarni"),
-    Batch("BATCH_FOUNDATION_T", "Foundation Target", "04:00 PM – 05:30 PM", 31, "Dr. Shinde"),
-    Batch("BATCH_10_SCI_B", "10th - Science (B)", "05:45 PM – 07:15 PM", 26, "Prof. Joshi"),
-    Batch("BATCH_12_SCI", "12th Science", "08:00 AM – 01:30 PM", 53, "Prof. Deshmukh & Science Faculty"),
-    Batch("BATCH_11_SCI", "11th Science", "02:00 PM – 06:30 PM", 42, "Prof. Patil"),
-    Batch("BATCH_NEET", "NEET Zenith", "08:00 AM – 02:00 PM", 45, "Dr. Shinde")
+    Batch("BATCH_11_SCI_B", "11th - Science (B)", "09:45 AM – 11:15 AM", 2, "Dr. Faisal Patel"),
+    Batch("BATCH_JEE_APEX_M", "JEE Apex Morning", "11:30 AM – 01:00 PM", 2, "Prof. Akash Joshi"),
+    Batch("BATCH_FOUNDATION_T", "Foundation Target", "04:00 PM – 05:30 PM", 2, "Prof. Shrirang Deshmukh"),
+    Batch("BATCH_10_SCI_B", "10th - Science (B)", "05:45 PM – 07:15 PM", 2, "Prof. Akash Joshi"),
+    Batch("BATCH_12_SCI", "12th Science", "08:00 AM – 01:30 PM", 2, "Prof. Shrirang Deshmukh"),
+    Batch("BATCH_11_SCI", "11th Science", "02:00 PM – 06:30 PM", 0, "Dr. Faisal Patel"),
+    Batch("BATCH_NEET", "NEET Zenith", "08:00 AM – 02:00 PM", 1, "Dr. Faisal Patel")
   )
 
   val defaultSubjects = listOf(
@@ -37,7 +37,7 @@ object SeedData {
       contact = "+91 98221 11001",
       qualification = "M.Sc. Physics (IIT Bombay)",
       experience = "12 Years",
-      assignedBatches = listOf("12th Science", "JEE Apex Target"),
+      assignedBatches = listOf("10th - Science (A)", "12th Science", "Foundation Target"),
       classesTaken = 142,
       attendancePercent = 98,
       feedbackRating = 4.9f,
@@ -54,7 +54,7 @@ object SeedData {
       contact = "+91 98221 11002",
       qualification = "Ph.D. Organic Chemistry",
       experience = "10 Years",
-      assignedBatches = listOf("12th Science", "NEET Zenith"),
+      assignedBatches = listOf("11th - Science (B)", "11th Science", "NEET Zenith"),
       classesTaken = 128,
       attendancePercent = 96,
       feedbackRating = 4.8f,
@@ -71,7 +71,7 @@ object SeedData {
       contact = "+91 98221 11003",
       qualification = "M.Tech Mathematics & Computing",
       experience = "9 Years",
-      assignedBatches = listOf("12th Science", "JEE Apex Target"),
+      assignedBatches = listOf("8th Standard", "10th - Science (B)", "JEE Apex Morning"),
       classesTaken = 135,
       attendancePercent = 99,
       feedbackRating = 5.0f,
@@ -668,7 +668,7 @@ object SeedData {
         startTime = "02:00 PM",
         endTime = "03:30 PM",
         createdAt = now - (2 * 60 * 60 * 1000L), // 2 hours ago -> 21 hours left
-        teacherName = "Prof. Patil"
+        teacherName = "Prof. Shrirang Deshmukh"
       ),
       DynamicTimetableEntry(
         id = "DTT_SEED_02",
@@ -677,7 +677,7 @@ object SeedData {
         startTime = "03:45 PM",
         endTime = "05:15 PM",
         createdAt = now - (2 * 60 * 60 * 1000L),
-        teacherName = "Prof. Deshmukh"
+        teacherName = "Dr. Faisal Patel"
       ),
       DynamicTimetableEntry(
         id = "DTT_SEED_03",
@@ -686,7 +686,7 @@ object SeedData {
         startTime = "11:30 AM",
         endTime = "01:00 PM",
         createdAt = now - (4 * 60 * 60 * 1000L), // 4 hours ago -> 19 hours left
-        teacherName = "Er. Kulkarni"
+        teacherName = "Prof. Akash Joshi"
       ),
       DynamicTimetableEntry(
         id = "DTT_SEED_04",
@@ -704,7 +704,7 @@ object SeedData {
         startTime = "07:30 AM",
         endTime = "09:00 AM",
         createdAt = now - (3 * 60 * 60 * 1000L), // 3 hours ago -> 20 hours left
-        teacherName = "Prof. Joshi"
+        teacherName = "Prof. Akash Joshi"
       ),
       DynamicTimetableEntry(
         id = "DTT_SEED_06",
@@ -713,7 +713,7 @@ object SeedData {
         startTime = "08:00 AM",
         endTime = "09:30 AM",
         createdAt = now - (5 * 60 * 60 * 1000L), // 5 hours ago -> 18 hours left
-        teacherName = "Dr. Shinde"
+        teacherName = "Dr. Faisal Patel"
       ),
       // Archived entries (strictly > 23 hours ago, permanently stored in database)
       DynamicTimetableEntry(
@@ -732,7 +732,7 @@ object SeedData {
         startTime = "11:30 AM",
         endTime = "01:00 PM",
         createdAt = now - (28 * 60 * 60 * 1000L), // 28 hours ago -> Archived
-        teacherName = "Er. Kulkarni"
+        teacherName = "Prof. Akash Joshi"
       ),
       DynamicTimetableEntry(
         id = "DTT_SEED_ARCHIVE_03",
@@ -741,7 +741,7 @@ object SeedData {
         startTime = "07:30 AM",
         endTime = "09:00 AM",
         createdAt = now - (48 * 60 * 60 * 1000L), // 48 hours ago -> Archived
-        teacherName = "Prof. Joshi"
+        teacherName = "Prof. Shrirang Deshmukh"
       )
     )
   }

@@ -92,17 +92,17 @@ fun GeoHeader(
         // Institute Shield / Emblem (Multi-tenant configurable)
         Box(
           modifier = Modifier
-            .size(40.dp)
-            .clip(RoundedCornerShape(12.dp))
+            .size(36.dp)
+            .clip(RoundedCornerShape(10.dp))
             .background(Color(0xFF0F172A))
-            .border(1.dp, Color(0xFF334155), RoundedCornerShape(12.dp)),
+            .border(1.dp, Color(0xFF334155), RoundedCornerShape(10.dp)),
           contentAlignment = Alignment.Center
         ) {
           Icon(
             imageVector = Icons.Outlined.School,
             contentDescription = "${instituteConfig.instituteName} Logo",
             tint = Color(0xFF38BDF8),
-            modifier = Modifier.size(22.dp)
+            modifier = Modifier.size(19.dp)
           )
         }
 
@@ -110,14 +110,16 @@ fun GeoHeader(
           Text(
             text = instituteConfig.instituteName.ifBlank { "Fadat Science Institute" },
             fontWeight = FontWeight.Bold,
-            fontSize = 16.sp,
+            fontSize = 15.sp,
+            letterSpacing = (-0.2).sp,
             color = MaterialTheme.colorScheme.onSurface,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
           )
           Text(
             text = instituteConfig.tagline.ifBlank { "Empowering minds. Building futures." },
-            fontSize = 11.sp,
+            fontSize = 10.5.sp,
+            letterSpacing = (-0.1).sp,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
@@ -128,13 +130,13 @@ fun GeoHeader(
       // Actions: Notification Bell + Profile Avatar
       Row(
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
       ) {
         // Notification bell with badge
         Box(contentAlignment = Alignment.TopEnd) {
           Box(
             modifier = Modifier
-              .size(40.dp)
+              .size(38.dp)
               .pressSpring(0.92f)
               .clip(RoundedCornerShape(12.dp))
               .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f))
@@ -146,7 +148,7 @@ fun GeoHeader(
               imageVector = Icons.Outlined.Notifications,
               contentDescription = "Notifications",
               tint = MaterialTheme.colorScheme.onSurfaceVariant,
-              modifier = Modifier.size(20.dp)
+              modifier = Modifier.size(19.dp)
             )
           }
           if (unreadCount > 0) {
@@ -181,13 +183,13 @@ fun GeoHeader(
             }
         ) {
           Row(
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+            modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
+            horizontalArrangement = Arrangement.spacedBy(5.dp)
           ) {
             Box(
               modifier = Modifier
-                .size(26.dp)
+                .size(24.dp)
                 .clip(CircleShape)
                 .background(
                   when (currentRole) {
@@ -202,7 +204,7 @@ fun GeoHeader(
               Text(
                 text = currentRole.displayName.take(1).uppercase(),
                 color = Color.White,
-                fontSize = 12.sp,
+                fontSize = 11.sp,
                 fontWeight = FontWeight.Bold
               )
             }
@@ -210,10 +212,12 @@ fun GeoHeader(
             Column(modifier = Modifier.padding(end = 2.dp)) {
               Text(
                 text = currentRole.displayName,
-                fontSize = 11.sp,
+                fontSize = 10.5.sp,
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.onSurface,
-                lineHeight = 12.sp
+                lineHeight = 12.sp,
+                maxLines = 1,
+                softWrap = false
               )
               Row(
                 verticalAlignment = Alignment.CenterVertically,
@@ -227,9 +231,11 @@ fun GeoHeader(
                 )
                 Text(
                   text = "Active",
-                  fontSize = 9.sp,
+                  fontSize = 8.5.sp,
+                  color = MaterialTheme.colorScheme.onSurfaceVariant,
                   fontWeight = FontWeight.Medium,
-                  color = Color(0xFF16A34A)
+                  maxLines = 1,
+                  softWrap = false
                 )
               }
             }
@@ -556,10 +562,12 @@ fun GeoBottomNav(
         label = {
           Text(
             text = tab.first,
-            fontSize = 10.sp,
+            fontSize = 9.5.sp,
+            letterSpacing = (-0.3).sp,
             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
             color = targetTextColor,
             maxLines = 1,
+            softWrap = false,
             overflow = TextOverflow.Ellipsis
           )
         },
@@ -1841,7 +1849,7 @@ fun GlobalSearchDialog(onDismiss: () -> Unit) {
                       shape = RoundedCornerShape(6.dp)
                     ) {
                       Text(
-                        text = "${batch.studentCount} Students",
+                        text = "${AppRepository.getLiveBatchStudentCount(batch.name)} Students",
                         color = Color.White,
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Bold,

@@ -46,6 +46,39 @@ object SecurityEngine {
 
   // Cryptographic BCrypt Salted Credential Vault (No Plaintext Passwords Stored)
   private val credentialVault = mutableMapOf<String, SaltedCredential>()
+  private const val PREFS_VAULT = "fsi_security_credential_vault"
+  private var prefs: android.content.SharedPreferences? = null
+
+  fun initialize(context: android.content.Context) {
+    if (prefs == null) {
+      prefs = context.applicationContext.getSharedPreferences(PREFS_VAULT, android.content.Context.MODE_PRIVATE)
+      loadPersistedCredentials()
+    }
+  }
+
+  private fun loadPersistedCredentials() {
+    val p = prefs ?: return
+    p.all.forEach { (key, value) ->
+      if (key.startsWith("cred_") && value is String) {
+        val parts = value.split("|||")
+        if (parts.size >= 4) {
+          val cleanKey = key.removePrefix("cred_")
+          val hash = parts[0]
+          val roleStr = parts[1]
+          val fullName = parts[2]
+          val algorithm = parts[3]
+          val role = try { UserRole.valueOf(roleStr) } catch (_: Exception) { UserRole.STUDENT }
+          credentialVault[cleanKey] = SaltedCredential(
+            identifier = cleanKey,
+            bcryptHash = hash,
+            role = role,
+            fullName = fullName,
+            algorithm = algorithm
+          )
+        }
+      }
+    }
+  }
 
   // Audit Logs Stream
   private val _auditLogs = MutableStateFlow<List<SecurityAuditLog>>(emptyList())
@@ -117,6 +150,7 @@ object SecurityEngine {
       algorithm = "BCrypt-2a"
     )
     credentialVault[cleanKey] = cred
+    prefs?.edit()?.putString("cred_$cleanKey", "${cred.bcryptHash}|||${cred.role.name}|||${cred.fullName}|||${cred.algorithm}")?.apply()
 
     logEvent(
       severity = SecuritySeverity.INFO,
@@ -140,7 +174,26 @@ object SecurityEngine {
    */
   fun verifySaltedCredential(identifier: String, rawPassword: String): Pair<Boolean, UserRole?> {
     val cleanKey = identifier.trim().lowercase()
-    val cred = credentialVault[cleanKey] ?: return Pair(false, null)
+    var cred = credentialVault[cleanKey]
+    if (cred == null) {
+      // Check if saved in prefs
+      val stored = prefs?.getString("cred_$cleanKey", null)
+      if (stored != null) {
+        val parts = stored.split("|||")
+        if (parts.size >= 4) {
+          val role = try { UserRole.valueOf(parts[1]) } catch (_: Exception) { UserRole.STUDENT }
+          cred = SaltedCredential(
+            identifier = cleanKey,
+            bcryptHash = parts[0],
+            role = role,
+            fullName = parts[2],
+            algorithm = parts[3]
+          )
+          credentialVault[cleanKey] = cred
+        }
+      }
+    }
+    if (cred == null) return Pair(false, null)
 
     val isMatch = verifyBCryptPassword(rawPassword, cred.bcryptHash)
 

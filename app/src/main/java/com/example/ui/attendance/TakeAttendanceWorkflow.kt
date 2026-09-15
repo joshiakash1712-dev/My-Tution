@@ -265,7 +265,7 @@ fun TakeAttendanceWorkflow(
           val currentStudent = batchStudents.getOrNull(currentStudentIndex)
           if (currentStudent != null) {
             Step2CardSwipeScreen(
-              batch = selectedBatch ?: Batch("B1", "10th - Science (A)", "08:00 AM – 09:30 AM", 28, "Prof. Deshmukh"),
+              batch = selectedBatch ?: Batch("B1", "10th - Science (A)", "08:00 AM – 09:30 AM", 28, "Prof. Shrirang Deshmukh"),
               totalStudentsCount = batchStudents.size,
               currentIndex = currentStudentIndex,
               student = currentStudent,
@@ -600,8 +600,9 @@ private fun Step1BatchSelectionScreen(
                 fontSize = 15.sp,
                 color = Color.White
               )
+              val liveCount = com.example.data.AppRepository.getLiveBatchStudentCount(b.name)
               Text(
-                text = "${b.studentCount} Students",
+                text = "$liveCount Students",
                 fontSize = 12.sp,
                 color = Color(0xFF94A3B8)
               )

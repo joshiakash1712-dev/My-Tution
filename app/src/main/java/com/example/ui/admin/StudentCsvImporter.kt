@@ -688,7 +688,16 @@ fun StudentCsvImportDialog(
                         FilterChip(
                           selected = isSel,
                           onClick = { duplicateResolution = mode },
-                          label = { Text(label, fontSize = 10.sp, fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal) },
+                          label = {
+                            Text(
+                              text = label,
+                              fontSize = 10.sp,
+                              fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal,
+                              maxLines = 1,
+                              softWrap = false,
+                              overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                            )
+                          },
                           colors = FilterChipDefaults.filterChipColors(
                             selectedContainerColor = Color(0xFFD97706),
                             selectedLabelColor = Color.White
@@ -726,7 +735,16 @@ fun StudentCsvImportDialog(
                       FilterChip(
                         selected = isSel,
                         onClick = { overrideBatchSelection = bName },
-                        label = { Text(bName, fontSize = 10.sp, fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal) },
+                        label = {
+                          Text(
+                            text = bName,
+                            fontSize = 10.sp,
+                            fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal,
+                            maxLines = 1,
+                            softWrap = false,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                          )
+                        },
                         colors = FilterChipDefaults.filterChipColors(
                           selectedContainerColor = Color(0xFF0061A4),
                           selectedLabelColor = Color.White

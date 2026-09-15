@@ -628,9 +628,12 @@ fun MonthlyAttendanceSummary(
               onClick = { selectedBatchFilter = bName },
               label = {
                 Text(
-                  if (bName == "All") "All Batches (${allStudents.size})" else bName,
+                  text = if (bName == "All") "All Batches (${allStudents.size})" else bName,
                   fontSize = 11.sp,
-                  fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal
+                  fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal,
+                  maxLines = 1,
+                  softWrap = false,
+                  overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                 )
               },
               colors = FilterChipDefaults.filterChipColors(

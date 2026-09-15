@@ -117,10 +117,12 @@ fun DynamicTimetableScreen() {
       initialBatch = defaultBatchForModal,
       onDismiss = { showAddDialog = false },
       onSave = { batch, entries ->
+        val assignedTeacher = AppRepository.batches.value.firstOrNull { it.name.equals(batch, ignoreCase = true) }?.teacherName ?: "Subject Faculty"
         AppRepository.addDynamicTimetableEntries(
           batch = batch,
           entries = entries.map { Triple(it.subject, it.startTime, it.endTime) },
-          createdAt = System.currentTimeMillis()
+          createdAt = System.currentTimeMillis(),
+          teacherName = assignedTeacher
         )
         showAddDialog = false
       }
@@ -226,7 +228,9 @@ fun DynamicTimetableScreen() {
                   text = batchName,
                   fontSize = 11.sp,
                   fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                  color = if (isSelected) MaterialTheme.colorScheme.onPrimary else Color(0xFFCBD5E1)
+                  color = if (isSelected) MaterialTheme.colorScheme.onPrimary else Color(0xFFCBD5E1),
+                  maxLines = 1,
+                  softWrap = false
                 )
                 Surface(
                   shape = CircleShape,
@@ -237,6 +241,8 @@ fun DynamicTimetableScreen() {
                     fontSize = 10.sp,
                     fontWeight = FontWeight.Bold,
                     color = if (isSelected) MaterialTheme.colorScheme.onPrimary else Color(0xFF94A3B8),
+                    maxLines = 1,
+                    softWrap = false,
                     modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp)
                   )
                 }
@@ -247,7 +253,7 @@ fun DynamicTimetableScreen() {
       }
     }
 
-    // 3. Control Row: Active / History Archive Toggle & Set Timetable Action Button
+    // 3. Control Row: Active / History Toggle & Set Timetable Action Button
     item {
       Row(
         modifier = Modifier.fillMaxWidth(),
@@ -257,11 +263,11 @@ fun DynamicTimetableScreen() {
         // Rounded custom tab buttons
         Row(
           modifier = Modifier
-            .clip(RoundedCornerShape(16.dp))
+            .clip(RoundedCornerShape(14.dp))
             .background(Color(0xFF0D1526))
-            .border(1.dp, Color(0xFF1E2D42), RoundedCornerShape(16.dp))
-            .padding(4.dp),
-          horizontalArrangement = Arrangement.spacedBy(4.dp)
+            .border(1.dp, Color(0xFF1E2D42), RoundedCornerShape(14.dp))
+            .padding(3.dp),
+          horizontalArrangement = Arrangement.spacedBy(2.dp)
         ) {
           TabButton(
             text = "Active (${activeEntries.size})",
@@ -269,7 +275,7 @@ fun DynamicTimetableScreen() {
             onClick = { selectedTab = 0 }
           )
           TabButton(
-            text = "History Archive (${historyEntries.size})",
+            text = "History (${historyEntries.size})",
             isSelected = selectedTab == 1,
             onClick = { selectedTab = 1 }
           )
@@ -281,15 +287,24 @@ fun DynamicTimetableScreen() {
             onClick = { showAddDialog = true },
             shape = RoundedCornerShape(12.dp),
             colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
-            modifier = Modifier.testTag("admin_add_timetable_button")
+            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+            modifier = Modifier
+              .wrapContentWidth()
+              .testTag("admin_add_timetable_button")
           ) {
             Icon(
               imageVector = Icons.Default.Add,
               contentDescription = "Schedule class",
               modifier = Modifier.size(16.dp)
             )
-            Spacer(modifier = Modifier.width(6.dp))
-            Text("Set Timetable", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            Spacer(modifier = Modifier.width(4.dp))
+            Text(
+              text = "Set Timetable",
+              fontSize = 12.sp,
+              fontWeight = FontWeight.Bold,
+              maxLines = 1,
+              softWrap = false
+            )
           }
         }
       }
@@ -338,17 +353,19 @@ fun DynamicTimetableScreen() {
 fun TabButton(text: String, isSelected: Boolean, onClick: () -> Unit) {
   Box(
     modifier = Modifier
-      .clip(RoundedCornerShape(12.dp))
+      .clip(RoundedCornerShape(11.dp))
       .background(if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent)
       .clickable { onClick() }
-      .padding(horizontal = 14.dp, vertical = 8.dp),
+      .padding(horizontal = 10.dp, vertical = 6.dp),
     contentAlignment = Alignment.Center
   ) {
     Text(
       text = text,
       color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
       fontSize = 12.sp,
-      fontWeight = FontWeight.Bold
+      fontWeight = FontWeight.Bold,
+      maxLines = 1,
+      softWrap = false
     )
   }
 }
@@ -409,13 +426,13 @@ fun DynamicTimetableCard(
         if (onDelete != null) {
           IconButton(
             onClick = onDelete,
-            modifier = Modifier.size(24.dp)
+            modifier = Modifier.size(48.dp)
           ) {
             Icon(
               imageVector = Icons.Default.Delete,
               contentDescription = "Delete timetable entry",
               tint = MaterialTheme.colorScheme.error,
-              modifier = Modifier.size(16.dp)
+              modifier = Modifier.size(20.dp)
             )
           }
         }
@@ -557,7 +574,9 @@ fun DynamicTimetableCard(
                 text = "Live: ${hours}h ${minutes}m left",
                 fontSize = 10.sp,
                 fontWeight = FontWeight.Bold,
-                color = if (hours < 2) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onPrimaryContainer
+                color = if (hours < 2) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onPrimaryContainer,
+                maxLines = 1,
+                softWrap = false
               )
             }
           }
@@ -953,7 +972,10 @@ fun checkScheduleConflictMulti(
     }
   }
 
-  // 2. Check external conflicts against currently active entries for this batch
+  // 2. Check external conflicts against currently active entries for this batch or assigned mentor
+  val assignedMentor = com.example.data.AppRepository.batches.value
+    .firstOrNull { it.name.trim().equals(batch.trim(), ignoreCase = true) }?.teacherName?.trim()
+
   for (slot in validSlots) {
     val slotStart = parseTimeTextToMinutes(slot.startTime)
     val slotEnd = parseTimeTextToMinutes(slot.endTime)
@@ -962,14 +984,24 @@ fun checkScheduleConflictMulti(
     for (entry in allEntries) {
       val elapsed = System.currentTimeMillis() - entry.createdAt
       if (elapsed in 0L until twentyThreeHoursInMillis) {
-        if (entry.batch.trim().equals(batch.trim(), ignoreCase = true)) {
-          val entryStart = parseTimeTextToMinutes(entry.startTime)
-          val entryEnd = parseTimeTextToMinutes(entry.endTime)
-          if (entryStart == -1 || entryEnd == -1 || entryStart >= entryEnd) continue
+        val entryStart = parseTimeTextToMinutes(entry.startTime)
+        val entryEnd = parseTimeTextToMinutes(entry.endTime)
+        if (entryStart == -1 || entryEnd == -1 || entryStart >= entryEnd) continue
 
-          if (slotStart < entryEnd && slotEnd > entryStart) {
-            return "⚠️ Batch Conflict: $batch already has an active class '${entry.subject}' (${entry.startTime} - ${entry.endTime})!"
-          }
+        val hasOverlap = slotStart < entryEnd && slotEnd > entryStart
+        if (!hasOverlap) continue
+
+        if (entry.batch.trim().equals(batch.trim(), ignoreCase = true)) {
+          return "⚠️ Batch Conflict: $batch already has an active class '${entry.subject}' (${entry.startTime} - ${entry.endTime})!"
+        }
+
+        if (!assignedMentor.isNullOrBlank() &&
+          !entry.teacherName.equals("Faculty", ignoreCase = true) &&
+          !entry.teacherName.equals("Subject Faculty", ignoreCase = true) &&
+          (entry.teacherName.trim().equals(assignedMentor, ignoreCase = true) ||
+           com.example.data.AppRepository.isSameFaculty(entry.teacherName, assignedMentor))
+        ) {
+          return "⚠️ Faculty Conflict: Faculty '$assignedMentor' is already assigned to '${entry.batch}' (${entry.startTime} - ${entry.endTime})!"
         }
       }
     }

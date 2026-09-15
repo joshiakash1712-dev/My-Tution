@@ -279,7 +279,15 @@ fun AddStudentDialog(onDismiss: () -> Unit, onSave: (Student) -> Unit) {
                 selected = batch == b,
                 borderColor = if (batch == b) Color(0xFF38BDF8) else Color(0xFF1E2D42)
               ),
-              label = { Text(b.substringBefore(" "), fontSize = 10.sp) }
+              label = {
+                Text(
+                  text = b.substringBefore(" "),
+                  fontSize = 10.sp,
+                  maxLines = 1,
+                  softWrap = false,
+                  overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                )
+              }
             )
           }
         }
@@ -384,7 +392,15 @@ fun CreateUserAccountDialog(onDismiss: () -> Unit) {
             FilterChip(
               selected = selectedRole == r,
               onClick = { selectedRole = r },
-              label = { Text(r.name, fontSize = 10.sp) }
+              label = {
+                Text(
+                  text = r.name,
+                  fontSize = 10.sp,
+                  maxLines = 1,
+                  softWrap = false,
+                  overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                )
+              }
             )
           }
         }

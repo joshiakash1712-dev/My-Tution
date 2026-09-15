@@ -243,7 +243,7 @@ fun AddStaffDialog(
                 value = name,
                 onValueChange = { name = it },
                 label = { Text("Teacher / Staff Full Name") },
-                placeholder = { Text("e.g. Prof. Sandeep Shinde") },
+                placeholder = { Text("e.g. Prof. Shrirang Deshmukh") },
                 leadingIcon = { Icon(Icons.Default.Person, contentDescription = null, tint = Color(0xFF0061A4)) },
                 singleLine = true,
                 shape = RoundedCornerShape(12.dp),
@@ -271,7 +271,15 @@ fun AddStaffDialog(
                   FilterChip(
                     selected = gender == g,
                     onClick = { gender = g },
-                    label = { Text(g, fontSize = 11.sp) }
+                    label = {
+                      Text(
+                        text = g,
+                        fontSize = 11.sp,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                      )
+                    }
                   )
                 }
               }
@@ -308,7 +316,7 @@ fun AddStaffDialog(
               value = email,
               onValueChange = { email = it },
               label = { Text("Email (For App Login)") },
-              placeholder = { Text("shinde.faculty@radal.com") },
+              placeholder = { Text("faculty@mytuition.com") },
               leadingIcon = { Icon(Icons.Default.Email, contentDescription = null, tint = Color(0xFF0061A4)) },
               singleLine = true,
               shape = RoundedCornerShape(12.dp),
@@ -394,7 +402,15 @@ fun AddStaffDialog(
                   onClick = {
                     selectedBatches = if (isSel) selectedBatches - b.name else selectedBatches + b.name
                   },
-                  label = { Text(b.name, fontSize = 11.sp) }
+                  label = {
+                    Text(
+                      text = b.name,
+                      fontSize = 11.sp,
+                      maxLines = 1,
+                      softWrap = false,
+                      overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                    )
+                  }
                 )
               }
             }

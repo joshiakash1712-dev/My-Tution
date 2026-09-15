@@ -251,7 +251,10 @@ fun AttendanceHistoryView(
                 Text(
                   text = if (filterBySpecificDate) "Date Filter: ON" else "Show All Dates",
                   fontSize = 11.sp,
-                  fontWeight = FontWeight.Bold
+                  fontWeight = FontWeight.Bold,
+                  maxLines = 1,
+                  softWrap = false,
+                  overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                 )
               },
               leadingIcon = {
@@ -516,7 +519,15 @@ fun AttendanceHistoryView(
                 selected = isSelected,
                 borderColor = if (isSelected) Color(0xFF38BDF8) else Color(0xFF1E2D42)
               ),
-              label = { Text(stat, fontSize = 11.sp) }
+              label = {
+                Text(
+                  text = stat,
+                  fontSize = 11.sp,
+                  maxLines = 1,
+                  softWrap = false,
+                  overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                )
+              }
             )
           }
 
@@ -538,7 +549,15 @@ fun AttendanceHistoryView(
                   selected = isSelected,
                   borderColor = if (isSelected) Color(0xFF38BDF8) else Color(0xFF1E2D42)
                 ),
-                label = { Text(b.name, fontSize = 11.sp) }
+                label = {
+                  Text(
+                    text = b.name,
+                    fontSize = 11.sp,
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                  )
+                }
               )
             }
           }

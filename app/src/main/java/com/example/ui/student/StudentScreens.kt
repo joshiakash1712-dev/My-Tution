@@ -6,7 +6,9 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
@@ -20,6 +22,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -296,6 +300,21 @@ fun StudentOnlineTestTab() {
   var currentQuestionIdx by remember { mutableStateOf(0) }
   var selectedOptions by remember { mutableStateOf<Map<Int, Int>>(emptyMap()) }
   var testSubmitted by remember { mutableStateOf(false) }
+  var remainingSeconds by remember { mutableStateOf(900) }
+
+  // Active Countdown Timer with Auto-Submit
+  LaunchedEffect(testActive) {
+    if (testActive) {
+      while (remainingSeconds > 0 && testActive) {
+        kotlinx.coroutines.delay(1000L)
+        remainingSeconds--
+      }
+      if (remainingSeconds <= 0 && testActive) {
+        testActive = false
+        testSubmitted = true
+      }
+    }
+  }
 
   val sampleQuestions = listOf(
     "A particle moves in a circle of radius R with constant angular acceleration α. If it starts from rest, at what time will the radial acceleration equal tangential acceleration?" to listOf("√(1/α)", "1/α", "√(2/α)", "2/α") to 0,
@@ -312,7 +331,7 @@ fun StudentOnlineTestTab() {
       item {
         HeroFeatureCard(
           title = "Online CBT Examination Portal",
-          subtitle = "Instant Evaluation & Answer Key Generator",
+          subtitle = "Live Auto-Timed Evaluation & AI Solutions",
           tagText = "JEE PATTERN MCQ",
           icon = Icons.Default.Quiz
         )
@@ -321,9 +340,10 @@ fun StudentOnlineTestTab() {
       item {
         GeoSectionCard(title = "Available CBT Examinations") {
           Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("All India JEE Speed Test #12\n3 Questions • +4 Marks / -1 Negative • Time Limit: 15 Mins", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("All India JEE Speed Test #12\n3 Questions • +4 Marks / -1 Negative • Auto-Timed: 15 Mins", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Button(
               onClick = {
+                remainingSeconds = 900
                 testActive = true
                 currentQuestionIdx = 0
                 selectedOptions = emptyMap()
@@ -337,8 +357,12 @@ fun StudentOnlineTestTab() {
     }
   } else if (testActive) {
     val qData = sampleQuestions[currentQuestionIdx]
-    val (qTuple, correctIdx) = qData
+    val (qTuple, _) = qData
     val (qText, opts) = qTuple
+
+    val mins = remainingSeconds / 60
+    val secs = remainingSeconds % 60
+    val timeFormatted = String.format(Locale.getDefault(), "%02d:%02d", mins, secs)
 
     Column(
       modifier = Modifier.fillMaxSize().padding(16.dp),
@@ -348,16 +372,58 @@ fun StudentOnlineTestTab() {
         modifier = Modifier
           .weight(1f)
           .verticalScroll(rememberScrollState()),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+        verticalArrangement = Arrangement.spacedBy(14.dp)
       ) {
+        // Status Row
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
           Text("Question ${currentQuestionIdx + 1} of ${sampleQuestions.size}", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = MaterialTheme.colorScheme.primary)
-          Surface(color = MaterialTheme.colorScheme.tertiaryContainer, shape = RoundedCornerShape(12.dp)) {
-            Text("⏱️ 14:12 Remaining", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onTertiaryContainer, modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp))
+          Surface(
+            color = if (remainingSeconds < 120) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.tertiaryContainer,
+            shape = RoundedCornerShape(12.dp)
+          ) {
+            Text(
+              text = "⏱️ $timeFormatted",
+              fontSize = 13.sp,
+              fontWeight = FontWeight.Bold,
+              color = if (remainingSeconds < 120) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onTertiaryContainer,
+              modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+            )
           }
         }
 
-        GeoSectionCard(title = "Physics / Math MCQ") {
+        // Question Navigator Bar
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+          sampleQuestions.indices.forEach { qIndex ->
+            val isCurrent = currentQuestionIdx == qIndex
+            val isAttempted = selectedOptions.containsKey(qIndex)
+            Surface(
+              shape = RoundedCornerShape(8.dp),
+              color = when {
+                isCurrent -> MaterialTheme.colorScheme.primary
+                isAttempted -> Color(0xFF059669)
+                else -> Color(0xFF1E293B)
+              },
+              border = BorderStroke(1.dp, if (isCurrent) Color.White else Color(0xFF334155)),
+              modifier = Modifier
+                .weight(1f)
+                .clickable { currentQuestionIdx = qIndex }
+            ) {
+              Text(
+                text = "Q${qIndex + 1}${if (isAttempted) " ✓" else ""}",
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color.White,
+                modifier = Modifier.padding(vertical = 6.dp)
+              )
+            }
+          }
+        }
+
+        GeoSectionCard(title = "Physics / Math MCQ (+4, -1)") {
           Text(qText, fontSize = 15.sp, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onSurface)
           Spacer(Modifier.height(14.dp))
           Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -379,10 +445,19 @@ fun StudentOnlineTestTab() {
               }
             }
           }
+
+          if (selectedOptions.containsKey(currentQuestionIdx)) {
+            Spacer(Modifier.height(8.dp))
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+              TextButton(onClick = { selectedOptions = selectedOptions - currentQuestionIdx }) {
+                Text("Clear Selection", fontSize = 12.sp, color = MaterialTheme.colorScheme.error)
+              }
+            }
+          }
         }
       }
 
-      Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+      Row(Modifier.fillMaxWidth().padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         if (currentQuestionIdx > 0) {
           OutlinedButton(onClick = { currentQuestionIdx-- }, modifier = Modifier.weight(1f).height(50.dp)) { Text("Previous") }
         }
@@ -395,16 +470,28 @@ fun StudentOnlineTestTab() {
               testSubmitted = true
             },
             modifier = Modifier.weight(1f).height(50.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF072711))
+            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF059669))
           ) { Text("Submit CBT Test") }
         }
       }
     }
   } else if (testSubmitted) {
     var totalScore = 0
+    var correctCount = 0
+    var wrongCount = 0
     sampleQuestions.forEachIndexed { idx, item ->
-      if (selectedOptions[idx] == item.second) totalScore += 4 else if (selectedOptions.containsKey(idx)) totalScore -= 1
+      val userSel = selectedOptions[idx]
+      if (userSel == item.second) {
+        totalScore += 4
+        correctCount++
+      } else if (userSel != null) {
+        totalScore -= 1
+        wrongCount++
+      }
     }
+    val unattemptedCount = sampleQuestions.size - (correctCount + wrongCount)
+    val timeSpentSeconds = (900 - remainingSeconds).coerceAtLeast(0)
+    val timeSpentStr = "${timeSpentSeconds / 60}m ${timeSpentSeconds % 60}s"
 
     LazyColumn(
       modifier = Modifier.fillMaxSize(),
@@ -414,10 +501,46 @@ fun StudentOnlineTestTab() {
       item {
         HeroFeatureCard(
           title = "CBT Test Evaluation Complete",
-          subtitle = "You scored $totalScore out of 12 Marks!",
-          tagText = "AUTO EVALUATED",
+          subtitle = "Score: $totalScore / 12 Marks • Time Taken: $timeSpentStr",
+          tagText = if (totalScore >= 8) "EXCELLENT" else "COMPLETED",
           icon = Icons.Default.FactCheck
         )
+      }
+
+      // Summary Metric Strip
+      item {
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+          Surface(
+            color = Color(0xFF065F46).copy(alpha = 0.2f),
+            shape = RoundedCornerShape(12.dp),
+            modifier = Modifier.weight(1f)
+          ) {
+            Column(modifier = Modifier.padding(10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+              Text("Correct", fontSize = 11.sp, color = Color(0xFF34D399), fontWeight = FontWeight.SemiBold)
+              Text("$correctCount", fontSize = 18.sp, color = Color(0xFF34D399), fontWeight = FontWeight.Bold)
+            }
+          }
+          Surface(
+            color = Color(0xFF991B1B).copy(alpha = 0.2f),
+            shape = RoundedCornerShape(12.dp),
+            modifier = Modifier.weight(1f)
+          ) {
+            Column(modifier = Modifier.padding(10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+              Text("Incorrect", fontSize = 11.sp, color = Color(0xFFF87171), fontWeight = FontWeight.SemiBold)
+              Text("$wrongCount", fontSize = 18.sp, color = Color(0xFFF87171), fontWeight = FontWeight.Bold)
+            }
+          }
+          Surface(
+            color = Color(0xFF1E293B),
+            shape = RoundedCornerShape(12.dp),
+            modifier = Modifier.weight(1f)
+          ) {
+            Column(modifier = Modifier.padding(10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+              Text("Unattempted", fontSize = 11.sp, color = Color(0xFF94A3B8), fontWeight = FontWeight.SemiBold)
+              Text("$unattemptedCount", fontSize = 18.sp, color = Color.White, fontWeight = FontWeight.Bold)
+            }
+          }
+        }
       }
 
       item { Text("Detailed Answer Key & Solutions", fontWeight = FontWeight.Bold, fontSize = 18.sp) }
@@ -471,95 +594,240 @@ fun StudentOnlineTestTab() {
 fun StudentAiAssistantTab(student: Student) {
   var userPrompt by remember { mutableStateOf("") }
   val studentDisplayName = if (student.name == "No Enrolled Student") "there" else student.name
-  val messages = remember { mutableStateListOf("✨ **Gemini AI Study Mentor**:\nHello $studentDisplayName! I am your AI Study Mentor. Ask me to solve any academic doubt, explain complex concepts, or generate a customized study revision plan.") }
+  val messages = remember {
+    mutableStateListOf(
+      "✨ **Gemini AI Study Mentor**:\nHello $studentDisplayName! I'm your dedicated AI Academic Mentor at My Tuition (FSI).\n\nAsk me to break down complex formulas, explain step-by-step concepts in Maths, Physics, Chemistry, or Biology, or design a custom 7-day revision routine!"
+    )
+  }
   var isThinking by remember { mutableStateOf(false) }
   val scope = rememberCoroutineScope()
+  val listState = rememberLazyListState()
+  val clipboardManager = LocalClipboardManager.current
+  var copiedIndex by remember { mutableStateOf(-1) }
+
+  val suggestionChips = remember {
+    listOf(
+      "⚡ King's Rule in Integration",
+      "📅 7-Day Revision Routine",
+      "📐 Rotational Dynamics & Inertia",
+      "🧪 Le Chatelier's Principle",
+      "🔬 SN1 vs SN2 Mechanisms",
+      "🎯 MCQ Speed & Negative Marking",
+      "🧬 Mendel's Laws of Genetics"
+    )
+  }
+
+  // Smooth auto-scroll to the bottom whenever messages update or thinking state changes
+  LaunchedEffect(messages.size, isThinking) {
+    if (messages.isNotEmpty()) {
+      listState.animateScrollToItem((messages.size).coerceAtLeast(0))
+    }
+  }
 
   Column(
-    modifier = Modifier.fillMaxSize().padding(16.dp),
+    modifier = Modifier.fillMaxSize().padding(14.dp),
     verticalArrangement = Arrangement.SpaceBetween
   ) {
     Column(modifier = Modifier.weight(1f)) {
-      Row(Modifier.fillMaxWidth().padding(bottom = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-          Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = Color(0xFF38BDF8))
-          Spacer(Modifier.width(8.dp))
-          Text("Gemini Academic Assistant", fontWeight = FontWeight.Bold, fontSize = 18.sp, color = Color(0xFFF8FAFC))
-        }
-        Surface(color = if (AiService.hasValidKey()) Color(0xFF064E3B) else Color(0xFF182438), shape = RoundedCornerShape(10.dp), border = BorderStroke(1.dp, Color(0xFF1E2D42))) {
-          Text(if (AiService.hasValidKey()) "CLOUD GEMINI" else "HYBRID ENGINE", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = if (AiService.hasValidKey()) Color(0xFF6EE7B7) else Color(0xFF38BDF8), modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
-        }
-      }
-
-      LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-        reverseLayout = false
+      // Header with Live Status & Clear Action
+      Row(
+        modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
       ) {
-        items(messages) { msg ->
-          val isUser = msg.startsWith("You:")
-          Row(Modifier.fillMaxWidth(), horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start) {
-            Box(
-              modifier = Modifier
-                .fillMaxWidth(0.85f)
-                .clip(RoundedCornerShape(20.dp))
-                .background(if (isUser) Color(0xFF0284C7) else Color(0xFF111C2E))
-                .border(1.dp, if (isUser) Color(0xFF38BDF8) else Color(0xFF1E2D42), RoundedCornerShape(20.dp))
-                .padding(14.dp)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+          Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = Color(0xFF38BDF8), modifier = Modifier.size(22.dp))
+          Spacer(Modifier.width(8.dp))
+          Column {
+            Text("Gemini Academic Mentor", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = MaterialTheme.colorScheme.onSurface)
+            Text(if (AiService.hasValidKey()) "Powered by Gemini 3.5 Flash" else "Instant Academic Knowledge Engine", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+          }
+        }
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+          Surface(
+            color = if (AiService.hasValidKey()) Color(0xFF064E3B) else Color(0xFF1E293B),
+            shape = RoundedCornerShape(10.dp),
+            border = BorderStroke(1.dp, if (AiService.hasValidKey()) Color(0xFF047857) else Color(0xFF334155))
+          ) {
+            Text(
+              if (AiService.hasValidKey()) "CLOUD GEMINI" else "FAST ENGINE",
+              fontSize = 9.sp,
+              fontWeight = FontWeight.Bold,
+              color = if (AiService.hasValidKey()) Color(0xFF6EE7B7) else Color(0xFF38BDF8),
+              modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+            )
+          }
+          if (messages.size > 1) {
+            IconButton(
+              onClick = {
+                messages.clear()
+                messages.add("✨ **Gemini AI Study Mentor**:\nHello $studentDisplayName! Chat reset. What would you like to explore next?")
+              },
+              modifier = Modifier.size(28.dp)
             ) {
-              Text(
-                text = if (isUser) msg.removePrefix("You: ") else msg,
-                color = Color(0xFFF8FAFC),
-                fontSize = 13.sp
-              )
+              Icon(Icons.Default.Refresh, contentDescription = "Clear Chat", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(16.dp))
             }
           }
         }
+      }
+
+      // Chat Messages List
+      LazyColumn(
+        state = listState,
+        modifier = Modifier.fillMaxSize().weight(1f),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+      ) {
+        items(messages.size) { idx ->
+          val msg = messages[idx]
+          val isUser = msg.startsWith("You:")
+
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start
+          ) {
+            Box(
+              modifier = Modifier
+                .fillMaxWidth(if (isUser) 0.82f else 0.94f)
+                .clip(RoundedCornerShape(16.dp))
+                .background(if (isUser) Color(0xFF0284C7) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f))
+                .border(
+                  width = 1.dp,
+                  color = if (isUser) Color(0xFF38BDF8) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+                  shape = RoundedCornerShape(16.dp)
+                )
+                .padding(12.dp)
+            ) {
+              Column {
+                if (!isUser) {
+                  Row(
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                  ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                      Icon(Icons.Default.Psychology, contentDescription = null, tint = Color(0xFF0284C7), modifier = Modifier.size(16.dp))
+                      Spacer(Modifier.width(4.dp))
+                      Text("Academic Mentor", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0284C7))
+                    }
+                    IconButton(
+                      onClick = {
+                        clipboardManager.setText(AnnotatedString(msg))
+                        copiedIndex = idx
+                      },
+                      modifier = Modifier.size(22.dp)
+                    ) {
+                      Icon(
+                        if (copiedIndex == idx) Icons.Default.Check else Icons.Outlined.ContentCopy,
+                        contentDescription = "Copy text",
+                        tint = if (copiedIndex == idx) Color(0xFF16A34A) else MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(14.dp)
+                      )
+                    }
+                  }
+                }
+                Text(
+                  text = if (isUser) msg.removePrefix("You: ") else msg,
+                  color = if (isUser) Color.White else MaterialTheme.colorScheme.onSurface,
+                  fontSize = 13.sp,
+                  lineHeight = 19.sp
+                )
+              }
+            }
+          }
+        }
+
         if (isThinking) {
           item {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-              CircularProgressIndicator(modifier = Modifier.size(16.dp), color = MaterialTheme.colorScheme.primary, strokeWidth = 2.dp)
-              Text("Gemini is formulating academic explanation...", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontStyle = androidx.compose.ui.text.font.FontStyle.Italic)
+            Row(
+              verticalAlignment = Alignment.CenterVertically,
+              horizontalArrangement = Arrangement.spacedBy(8.dp),
+              modifier = Modifier
+                .clip(RoundedCornerShape(12.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                .border(1.dp, Color(0xFF38BDF8).copy(alpha = 0.4f), RoundedCornerShape(12.dp))
+                .padding(horizontal = 12.dp, vertical = 8.dp)
+            ) {
+              CircularProgressIndicator(modifier = Modifier.size(14.dp), color = Color(0xFF0284C7), strokeWidth = 2.dp)
+              Text("Gemini is formulating step-by-step explanation...", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontStyle = androidx.compose.ui.text.font.FontStyle.Italic)
             }
           }
         }
       }
     }
 
-    // Input Row
-    Row(
-      modifier = Modifier
-        .fillMaxWidth()
-        .padding(top = 10.dp),
-      verticalAlignment = Alignment.CenterVertically,
-      horizontalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-      OutlinedTextField(
-        value = userPrompt,
-        onValueChange = { userPrompt = it },
-        placeholder = { Text("Ask doubt, integration trick, schedule...", fontSize = 13.sp) },
-        modifier = Modifier.weight(1f),
-        shape = RoundedCornerShape(24.dp),
-        singleLine = true
-      )
-      FloatingActionButton(
-        onClick = {
-          if (userPrompt.isNotBlank() && !isThinking) {
-            val p = userPrompt
-            userPrompt = ""
-            messages.add("You: $p")
-            isThinking = true
-            scope.launch {
-              val ans = AiService.askAssistant(p, student.strongestSubject)
-              isThinking = false
-              messages.add(ans)
+    // Interactive Quick Topic Chips
+    Column(modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
+      LazyRow(
+        modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
+      ) {
+        items(suggestionChips) { chip ->
+          Surface(
+            shape = RoundedCornerShape(16.dp),
+            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)),
+            modifier = Modifier.clickable {
+              if (!isThinking) {
+                userPrompt = chip
+                val p = chip
+                userPrompt = ""
+                messages.add("You: $p")
+                isThinking = true
+                scope.launch {
+                  val ans = AiService.askAssistant(p, student.strongestSubject)
+                  isThinking = false
+                  messages.add(ans)
+                }
+              }
             }
+          ) {
+            Text(
+              text = chip,
+              fontSize = 11.sp,
+              fontWeight = FontWeight.Medium,
+              color = MaterialTheme.colorScheme.primary,
+              modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+            )
           }
-        },
-        containerColor = Color(0xFF0061A4),
-        contentColor = Color.White,
-        shape = CircleShape
-      ) { Icon(Icons.Default.Send, contentDescription = null) }
+        }
+      }
+
+      // Input Row
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+      ) {
+        OutlinedTextField(
+          value = userPrompt,
+          onValueChange = { userPrompt = it },
+          placeholder = { Text("Ask any formula, theory, or study doubt...", fontSize = 12.sp) },
+          modifier = Modifier.weight(1f),
+          shape = RoundedCornerShape(24.dp),
+          singleLine = true
+        )
+        FloatingActionButton(
+          onClick = {
+            if (userPrompt.isNotBlank() && !isThinking) {
+              val p = userPrompt
+              userPrompt = ""
+              messages.add("You: $p")
+              isThinking = true
+              scope.launch {
+                val ans = AiService.askAssistant(p, student.strongestSubject)
+                isThinking = false
+                messages.add(ans)
+              }
+            }
+          },
+          containerColor = Color(0xFF0061A4),
+          contentColor = Color.White,
+          shape = CircleShape,
+          modifier = Modifier.size(48.dp)
+        ) {
+          Icon(Icons.Default.Send, contentDescription = "Send question", modifier = Modifier.size(20.dp))
+        }
+      }
     }
   }
 }
@@ -574,6 +842,7 @@ fun StudentStudyTrackerTab(studyLogs: List<StudyLogItem>, doubts: List<DoubtItem
 
   var studyHoursInput by remember { mutableStateOf("4.5") }
   var studySubsInput by remember { mutableStateOf("Mathematics, Physics") }
+  val coroutineScope = rememberCoroutineScope()
 
   if (showDoubtForm) {
     AlertDialog(
@@ -774,16 +1043,11 @@ fun StudentStudyTrackerTab(studyLogs: List<StudyLogItem>, doubts: List<DoubtItem
               Button(
                 onClick = {
                   aiLoading = true
-                  val aiResponse = when (db.subject.lowercase()) {
-                    "physics" -> "🤖 AI Tutor: 1. Let's look at the conservation of Angular Momentum: L = I * ω.\n2. When an ice skater pulls their arms in, they bring mass closer to the axis of rotation, thereby decreasing the Moment of Inertia (I).\n3. Since there is no net external torque (τ_ext = 0), the total angular momentum (L) is conserved.\n4. Therefore, as I decreases, the angular velocity (ω) must increase to keep L constant. Consequently, they spin much faster!"
-                    "chemistry" -> "🤖 AI Tutor: 1. Adding an inert gas at constant pressure increases the total volume of the container to keep pressure stable.\n2. This expansion lowers the partial pressures/concentrations of all reacting species.\n3. According to Le Chatelier's Principle, the equilibrium will shift in the direction that produces more moles of gas to counteract the decrease in concentration.\n4. If Δn > 0, shift is forward. If Δn < 0, shift is backward. If Δn = 0, no shift occurs."
-                    else -> "🤖 AI Tutor: Let's break down your question step-by-step:\n1. First, we identify the core formula and physical constants relevant to ${db.chapter}.\n2. We isolate the unknown variable and substitute given constraints.\n3. The step-by-step derivation shows how equilibrium/forces balance out.\n4. Conceptual Check: Always double-check dimensional consistency to avoid calculation errors."
-                  }
-                  
-                  android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                  coroutineScope.launch {
+                    val aiResponse = "🤖 " + AiService.solveAcademicDoubt(db.subject, db.chapter, db.questionText)
                     AppRepository.replyToDoubt(db.id, aiResponse)
                     aiLoading = false
-                  }, 1200)
+                  }
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEFF6FF), contentColor = Color(0xFF0061A4)),
                 shape = RoundedCornerShape(10.dp),

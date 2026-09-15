@@ -95,6 +95,7 @@ object AppRepository {
     appContext = context.applicationContext
     preferences = context.getSharedPreferences("my_tuition_fsi_prefs", android.content.Context.MODE_PRIVATE)
 
+    com.example.security.SecurityEngine.initialize(context.applicationContext)
     NetworkConnectivityManager.initialize(context.applicationContext)
     
     com.example.utils.NotificationHelper.createNotificationChannel(context.applicationContext)
@@ -137,6 +138,7 @@ object AppRepository {
           repo.bulkInsertStudents(demoStudents)
         } else {
           _students.value = list
+          syncBatchStudentCounts(list)
         }
       }
     }
@@ -145,10 +147,24 @@ object AppRepository {
       repo.allBatches.collect { list ->
         if (list.isEmpty()) {
           SeedData.defaultBatches.forEach { b ->
-            repo.insertBatch(b)
+            val count = _students.value.count { it.batch.equals(b.name, ignoreCase = true) }
+            val reconciled = reconcileFacultyName(b.teacherName, b.name)
+            repo.insertBatch(b.copy(studentCount = count, teacherName = reconciled))
           }
         } else {
-          _batches.value = list
+          var needsDbUpdate = false
+          val updated = list.map { b ->
+            val count = _students.value.count { it.batch.equals(b.name, ignoreCase = true) }
+            val reconciled = reconcileFacultyName(b.teacherName, b.name)
+            if (b.teacherName != reconciled) {
+              needsDbUpdate = true
+            }
+            b.copy(studentCount = count, teacherName = reconciled)
+          }
+          _batches.value = updated
+          if (needsDbUpdate) {
+            updated.forEach { repo.insertBatch(it) }
+          }
         }
       }
     }
@@ -156,6 +172,17 @@ object AppRepository {
     CoroutineScope(Dispatchers.IO).launch {
       repo.allEnrollments.collect { list ->
         _batchEnrollments.value = list
+      }
+    }
+
+    CoroutineScope(Dispatchers.IO).launch {
+      repo.allTeachers.collect { list ->
+        if (list.isNotEmpty()) {
+          _teachers.value = list
+        } else {
+          repo.insertTeachers(SeedData.defaultTeachers)
+          _teachers.value = SeedData.defaultTeachers
+        }
       }
     }
 
@@ -181,11 +208,24 @@ object AppRepository {
     CoroutineScope(Dispatchers.IO).launch {
       repo.allTimetableEntries.collect { list ->
         if (list.isEmpty()) {
-          val defaultEntries = SeedData.getDefaultTimetableEntries()
+          val defaultEntries = SeedData.getDefaultTimetableEntries().map {
+            it.copy(teacherName = reconcileFacultyName(it.teacherName, it.batch, it.subject))
+          }
           repo.insertTimetableEntries(defaultEntries)
           _dynamicTimetable.value = defaultEntries
         } else {
-          _dynamicTimetable.value = list
+          var needsDbUpdate = false
+          val updated = list.map { entry ->
+            val reconciled = reconcileFacultyName(entry.teacherName, entry.batch, entry.subject)
+            if (entry.teacherName != reconciled) {
+              needsDbUpdate = true
+            }
+            entry.copy(teacherName = reconciled)
+          }
+          _dynamicTimetable.value = updated
+          if (needsDbUpdate) {
+            repo.insertTimetableEntries(updated)
+          }
         }
       }
     }
@@ -342,8 +382,23 @@ object AppRepository {
   fun addStudent(student: Student) {
     if (!checkOnlineOrBlock("add student record")) return
     _students.update { it + student }
+    syncBatchStudentCounts()
     CoroutineScope(Dispatchers.IO).launch {
       studentBatchRepo?.insertStudent(student)
+    }
+    com.example.security.SecurityEngine.registerUserCredential(
+      identifier = student.email.ifBlank { "${student.id.lowercase()}@mytuition.com" },
+      rawPassword = "Student@123",
+      role = UserRole.STUDENT,
+      fullName = student.name
+    )
+    if (student.id.isNotBlank()) {
+      com.example.security.SecurityEngine.registerUserCredential(
+        identifier = student.id,
+        rawPassword = "Student@123",
+        role = UserRole.STUDENT,
+        fullName = student.name
+      )
     }
     NetworkConnectivityManager.markDataUpdatedOnline()
     addNotification(
@@ -358,6 +413,18 @@ object AppRepository {
     )
   }
 
+  fun updateStudent(student: Student) {
+    if (!checkOnlineOrBlock("update student record")) return
+    _students.update { list ->
+      list.map { if (it.id == student.id) student else it }
+    }
+    syncBatchStudentCounts()
+    CoroutineScope(Dispatchers.IO).launch {
+      studentBatchRepo?.updateStudent(student)
+    }
+    NetworkConnectivityManager.markDataUpdatedOnline()
+  }
+
   fun addStudents(newStudents: List<Student>) {
     if (!checkOnlineOrBlock("import students")) return
     if (newStudents.isEmpty()) return
@@ -366,6 +433,7 @@ object AppRepository {
       newStudents.forEach { currentMap[it.id] = it }
       currentMap.values.toList()
     }
+    syncBatchStudentCounts()
     CoroutineScope(Dispatchers.IO).launch {
       studentBatchRepo?.bulkInsertStudents(newStudents)
     }
@@ -414,6 +482,7 @@ object AppRepository {
     if (!checkOnlineOrBlock("delete student record")) return
     val student = _students.value.find { it.id == studentId }
     _students.update { list -> list.filterNot { it.id == studentId } }
+    syncBatchStudentCounts()
     CoroutineScope(Dispatchers.IO).launch {
       studentBatchRepo?.deleteStudent(studentId)
     }
@@ -435,6 +504,7 @@ object AppRepository {
     if (studentIds.isEmpty()) return
     val idSet = studentIds.toSet()
     _students.update { list -> list.filterNot { idSet.contains(it.id) } }
+    syncBatchStudentCounts()
     CoroutineScope(Dispatchers.IO).launch {
       studentBatchRepo?.deleteStudents(studentIds)
     }
@@ -486,6 +556,82 @@ object AppRepository {
     )
   }
 
+  fun reconcileFacultyName(rawTeacherName: String?, batchName: String? = null, subject: String? = null): String {
+    val clean = (rawTeacherName ?: "").trim()
+    if (clean.equals("Prof. Shrirang Deshmukh", ignoreCase = true) ||
+      clean.equals("Dr. Faisal Patel", ignoreCase = true) ||
+      clean.equals("Prof. Akash Joshi", ignoreCase = true)
+    ) {
+      return clean
+    }
+
+    val lower = clean.lowercase()
+    val batchLower = (batchName ?: "").lowercase()
+    val subjectLower = (subject ?: "").lowercase()
+
+    // 1. Direct match for Patil / Patel -> Dr. Faisal Patel
+    if (lower.contains("patil") || lower.contains("patel")) {
+      return "Dr. Faisal Patel"
+    }
+
+    // 2. Direct match for Kulkarni -> Prof. Akash Joshi
+    if (lower.contains("kulkarni")) {
+      return "Prof. Akash Joshi"
+    }
+
+    // 3. Direct match for Shinde -> Dr. Faisal Patel (NEET/Bio/Chem) or Prof. Shrirang Deshmukh (Foundation/Physics)
+    if (lower.contains("shinde")) {
+      return if (batchLower.contains("neet") || subjectLower.contains("bio") || subjectLower.contains("chem")) {
+        "Dr. Faisal Patel"
+      } else {
+        "Prof. Shrirang Deshmukh"
+      }
+    }
+
+    // 4. Deshmukh variants ("Prof. Deshmukh", "Prof. Deshmukh & Science Faculty")
+    if (lower.contains("deshmukh")) {
+      return "Prof. Shrirang Deshmukh"
+    }
+
+    // 5. Joshi variants ("Prof. Joshi")
+    if (lower.contains("joshi")) {
+      return "Prof. Akash Joshi"
+    }
+
+    // 6. Match by batch if available
+    if (batchLower.isNotBlank()) {
+      if (batchLower.contains("8th") || batchLower.contains("apex") || batchLower.contains("10th - science (b)")) {
+        return "Prof. Akash Joshi"
+      }
+      if (batchLower.contains("11th") || batchLower.contains("neet")) {
+        return "Dr. Faisal Patel"
+      }
+      if (batchLower.contains("10th - science (a)") || batchLower.contains("12th") || batchLower.contains("foundation")) {
+        return "Prof. Shrirang Deshmukh"
+      }
+    }
+
+    // 7. Match by subject if available
+    if (subjectLower.contains("math")) {
+      return "Prof. Akash Joshi"
+    }
+    if (subjectLower.contains("chem") || subjectLower.contains("bio")) {
+      return "Dr. Faisal Patel"
+    }
+    if (subjectLower.contains("phys") || subjectLower.contains("sci")) {
+      return "Prof. Shrirang Deshmukh"
+    }
+
+    return "Prof. Shrirang Deshmukh"
+  }
+
+  fun isSameFaculty(name1: String?, name2: String?): Boolean {
+    if (name1.isNullOrBlank() || name2.isNullOrBlank()) return false
+    val rec1 = reconcileFacultyName(name1)
+    val rec2 = reconcileFacultyName(name2)
+    return rec1.equals(rec2, ignoreCase = true)
+  }
+
   // Teachers
   private val _teachers = MutableStateFlow<List<Teacher>>(SeedData.defaultTeachers)
   val teachers = _teachers.asStateFlow()
@@ -493,11 +639,23 @@ object AppRepository {
   fun addTeacher(t: Teacher) {
     if (!checkOnlineOrBlock("add new faculty")) return
     _teachers.update { it + t }
+    CoroutineScope(Dispatchers.IO).launch {
+      studentBatchRepo?.insertTeacher(t)
+    }
     com.example.security.SecurityEngine.registerUserCredential(
       identifier = t.email,
       rawPassword = "Password@123",
-      role = UserRole.TEACHER
+      role = UserRole.TEACHER,
+      fullName = t.name
     )
+    if (t.id.isNotBlank()) {
+      com.example.security.SecurityEngine.registerUserCredential(
+        identifier = t.id,
+        rawPassword = "Password@123",
+        role = UserRole.TEACHER,
+        fullName = t.name
+      )
+    }
     NetworkConnectivityManager.markDataUpdatedOnline()
     addNotification(
       NotificationItem(
@@ -511,10 +669,36 @@ object AppRepository {
     )
   }
 
+  fun updateTeacher(t: Teacher) {
+    if (!checkOnlineOrBlock("update faculty record")) return
+    _teachers.update { list ->
+      list.map { if (it.id == t.id) t else it }
+    }
+    CoroutineScope(Dispatchers.IO).launch {
+      studentBatchRepo?.updateTeacher(t)
+    }
+    NetworkConnectivityManager.markDataUpdatedOnline()
+  }
+
+  fun deleteTeacher(teacherId: String) {
+    if (!checkOnlineOrBlock("delete faculty record")) return
+    _teachers.update { list -> list.filterNot { it.id == teacherId } }
+    CoroutineScope(Dispatchers.IO).launch {
+      studentBatchRepo?.deleteTeacher(teacherId)
+    }
+    NetworkConnectivityManager.markDataUpdatedOnline()
+  }
+
   fun updateTeacherStatus(teacherId: String, isActivated: Boolean) {
     if (!checkOnlineOrBlock("update teacher status")) return
     _teachers.update { list ->
       list.map { if (it.id == teacherId) it.copy(isActivated = isActivated, status = if (isActivated) "Active" else "Pending") else it }
+    }
+    val updated = _teachers.value.find { it.id == teacherId }
+    if (updated != null) {
+      CoroutineScope(Dispatchers.IO).launch {
+        studentBatchRepo?.updateTeacher(updated)
+      }
     }
     NetworkConnectivityManager.markDataUpdatedOnline()
   }
@@ -711,20 +895,44 @@ object AppRepository {
   }
 
   // Batches
-  private val _batches = MutableStateFlow<List<Batch>>(SeedData.defaultBatches)
+  private val _batches = MutableStateFlow<List<Batch>>(
+    SeedData.defaultBatches.map { b ->
+      val count = SeedData.get15DemoStudents().count { it.batch.equals(b.name, ignoreCase = true) }
+      b.copy(studentCount = count)
+    }
+  )
   val batches = _batches.asStateFlow()
+
+  fun syncBatchStudentCounts(studentsList: List<Student> = _students.value) {
+    _batches.update { currentBatches ->
+      currentBatches.map { b ->
+        val count = studentsList.count { it.batch.equals(b.name, ignoreCase = true) }
+        b.copy(studentCount = count)
+      }
+    }
+  }
+
+  fun getLiveBatchStudentCount(batchName: String): Int {
+    return _students.value.count { it.batch.equals(batchName, ignoreCase = true) }
+  }
 
   fun addBatch(b: Batch) {
     if (!checkOnlineOrBlock("create new batch")) return
-    _batches.update { it + b }
+    val count = _students.value.count { it.batch.equals(b.name, ignoreCase = true) }
+    val newBatch = b.copy(studentCount = count)
+    _batches.update { it + newBatch }
     CoroutineScope(Dispatchers.IO).launch {
-      studentBatchRepo?.insertBatch(b)
+      studentBatchRepo?.insertBatch(newBatch)
     }
     NetworkConnectivityManager.markDataUpdatedOnline()
   }
 
   fun enrollStudentInBatch(student: Student, batch: Batch) {
     if (!checkOnlineOrBlock("enroll student in batch")) return
+    _students.update { list ->
+      list.map { if (it.id == student.id) it.copy(batch = batch.name) else it }
+    }
+    syncBatchStudentCounts()
     CoroutineScope(Dispatchers.IO).launch {
       studentBatchRepo?.enrollStudentInBatch(student, batch)
     }
@@ -772,7 +980,42 @@ object AppRepository {
   }
 
   private fun getDefaultAttendance(): List<AttendanceRecord> {
-    return emptyList()
+    val list = mutableListOf<AttendanceRecord>()
+    val now = System.currentTimeMillis()
+    val today = getCurrentDateStr()
+    val todayParsed = com.example.data.db.AttendanceRecordEntity.parseDateAndTimeString(today, now)
+
+    val studentsList = _students.value.ifEmpty { SeedData.get15DemoStudents() }
+    studentsList.forEachIndexed { index, stu ->
+      val (status, reason) = when (index % 6) {
+        0 -> "Present" to null
+        1 -> "Present" to null
+        2 -> "Present" to null
+        3 -> "Absent" to "Medical - Viral Fever"
+        4 -> "Late" to "Bus transit delay"
+        else -> "Present" to null
+      }
+      list.add(
+        AttendanceRecord(
+          id = "ATT_${stu.id}_${stu.batch.replace(" ", "_")}_${today.replace("/", "_")}",
+          date = today,
+          day = todayParsed.day,
+          month = todayParsed.month,
+          monthName = todayParsed.monthName,
+          year = todayParsed.year,
+          time = "09:00 AM",
+          studentId = stu.id,
+          studentName = stu.name,
+          batchName = stu.batch,
+          status = status,
+          timestamp = now - (index * 60_000L),
+          lastModifiedTimestamp = now,
+          reason = reason,
+          recordedBy = "Institute Administrator"
+        )
+      )
+    }
+    return list
   }
 
   private fun loadAttendanceFromPrefs() {
@@ -789,6 +1032,14 @@ object AppRepository {
         }
       } catch (e: Exception) {
         e.printStackTrace()
+      }
+    }
+    val defaults = getDefaultAttendance()
+    if (defaults.isNotEmpty()) {
+      _attendance.value = defaults
+      saveAttendanceToPrefs()
+      CoroutineScope(Dispatchers.IO).launch {
+        studentBatchRepo?.insertAttendanceList(defaults)
       }
     }
   }
@@ -916,8 +1167,9 @@ object AppRepository {
         }
       } else {
         // Create new record with exact date, day, month, year, time breakdown
+        val recordId = "ATT_${studentId}_${batchName.replace(" ", "_")}_${date.replace("/", "_")}"
         val newRecord = AttendanceRecord(
-          id = "ATT_${now}_$studentId",
+          id = recordId,
           date = date,
           day = parsed.day,
           month = parsed.month,
@@ -1017,9 +1269,16 @@ object AppRepository {
 
   fun saveTestMarks(testId: String, marksMap: Map<String, Int>) {
     if (!checkOnlineOrBlock("submit test marks")) return
+    val classScores = marksMap.values.toList()
+    val avgScore = if (classScores.isNotEmpty()) classScores.average().toInt() else 0
+    val targetTest = _tests.value.find { it.id == testId }
+    val testName = targetTest?.testName ?: "Batch Assessment"
+    val maxMarks = targetTest?.totalMarks ?: 300
+    val dynamicAiSuggestion = AiService.generatePerformanceInsights(testName, avgScore, maxMarks)
+
     _tests.update { list ->
       list.map { test ->
-        if (test.id == testId) test.copy(studentMarks = marksMap) else test
+        if (test.id == testId) test.copy(studentMarks = marksMap, aiSuggestion = dynamicAiSuggestion) else test
       }
     }
     NetworkConnectivityManager.markDataUpdatedOnline()
@@ -1333,6 +1592,11 @@ object AppRepository {
     teacherName: String = "Faculty"
   ) {
     if (!checkOnlineOrBlock("schedule dynamic class")) return
+    val resolvedTeacher = if (teacherName.isBlank() || teacherName.equals("Faculty", ignoreCase = true) || teacherName.equals("Subject Faculty", ignoreCase = true)) {
+      _batches.value.firstOrNull { it.name.equals(batch, ignoreCase = true) }?.teacherName ?: reconcileFacultyName(teacherName, batch, subject)
+    } else {
+      reconcileFacultyName(teacherName, batch, subject)
+    }
     val newEntry = DynamicTimetableEntry(
       id = "DTT_${System.currentTimeMillis()}_${(1000..9999).random()}",
       subject = subject,
@@ -1340,7 +1604,7 @@ object AppRepository {
       startTime = startTime,
       endTime = endTime,
       createdAt = createdAt,
-      teacherName = teacherName
+      teacherName = resolvedTeacher
     )
     _dynamicTimetable.update { current ->
       listOf(newEntry) + current
@@ -1360,7 +1624,17 @@ object AppRepository {
     teacherName: String = "Faculty"
   ) {
     if (!checkOnlineOrBlock("schedule dynamic classes")) return
+    val resolvedTeacher = if (teacherName.isBlank() || teacherName.equals("Faculty", ignoreCase = true) || teacherName.equals("Subject Faculty", ignoreCase = true)) {
+      _batches.value.firstOrNull { it.name.equals(batch, ignoreCase = true) }?.teacherName ?: reconcileFacultyName(teacherName, batch)
+    } else {
+      reconcileFacultyName(teacherName, batch)
+    }
     val newEntries = entries.mapIndexed { idx, item ->
+      val entryTeacher = if (resolvedTeacher.isNotBlank() && !resolvedTeacher.equals("Faculty", ignoreCase = true)) {
+        resolvedTeacher
+      } else {
+        reconcileFacultyName(teacherName, batch, item.first)
+      }
       DynamicTimetableEntry(
         id = "DTT_${System.currentTimeMillis()}_${idx}_${(1000..9999).random()}",
         subject = item.first,
@@ -1368,7 +1642,7 @@ object AppRepository {
         startTime = item.second,
         endTime = item.third,
         createdAt = createdAt,
-        teacherName = teacherName
+        teacherName = entryTeacher
       )
     }
     _dynamicTimetable.update { current ->
@@ -1523,18 +1797,9 @@ object AppRepository {
 
   fun logout() {
     FirebaseAuthService.signOut()
-    val currentId = _currentUserIdentifier.value
-    val updated = _savedAccounts.value.filter { !it.identifier.equals(currentId, true) }
-    _savedAccounts.value = updated
-    saveSavedAccountsToPrefs(updated)
-
-    if (updated.isNotEmpty()) {
-      switchAccount(updated.first())
-    } else {
-      _isLoggedIn.value = false
-      _currentUserIdentifier.value = ""
-      saveSession(false, "", _currentRole.value)
-    }
+    _isLoggedIn.value = false
+    _currentUserIdentifier.value = ""
+    saveSession(false, "", _currentRole.value)
   }
 
   fun logoutAllAccounts() {
@@ -1575,6 +1840,10 @@ object AppRepository {
         recentScores = emptyList()
       )
       _students.update { it + newStudent }
+      syncBatchStudentCounts()
+      CoroutineScope(Dispatchers.IO).launch {
+        studentBatchRepo?.insertStudent(newStudent)
+      }
       com.example.security.SecurityEngine.registerSaltedCredential(
         identifier = email,
         rawPassword = "Student@123",
@@ -1611,8 +1880,17 @@ object AppRepository {
       email = email
     )
     _teachers.update { it + newT }
+    CoroutineScope(Dispatchers.IO).launch {
+      studentBatchRepo?.insertTeacher(newT)
+    }
     com.example.security.SecurityEngine.registerSaltedCredential(
       identifier = email,
+      rawPassword = "Teacher@123",
+      role = UserRole.TEACHER,
+      fullName = name
+    )
+    com.example.security.SecurityEngine.registerSaltedCredential(
+      identifier = newT.id,
       rawPassword = "Teacher@123",
       role = UserRole.TEACHER,
       fullName = name
@@ -1624,6 +1902,12 @@ object AppRepository {
     if (!checkOnlineOrBlock("approve teacher account")) return
     _teachers.update { list ->
       list.map { if (it.id == teacherId) it.copy(status = "Active") else it }
+    }
+    val updated = _teachers.value.find { it.id == teacherId }
+    if (updated != null) {
+      CoroutineScope(Dispatchers.IO).launch {
+        studentBatchRepo?.updateTeacher(updated)
+      }
     }
     NetworkConnectivityManager.markDataUpdatedOnline()
   }
@@ -1849,6 +2133,7 @@ object AppRepository {
 
     if (newStudents.isNotEmpty()) {
       _students.update { it + newStudents }
+      syncBatchStudentCounts()
       CoroutineScope(Dispatchers.IO).launch {
         studentBatchRepo?.bulkInsertStudents(newStudents)
       }

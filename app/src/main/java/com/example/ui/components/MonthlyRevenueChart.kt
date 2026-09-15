@@ -154,7 +154,8 @@ fun calculateMonthlyRevenueFromPayments(payments: List<StudentFeePayment>): List
 fun MonthlyRevenueSummaryChart(
   feePayments: List<StudentFeePayment>,
   modifier: Modifier = Modifier,
-  onRecordPaymentClick: () -> Unit = {}
+  onRecordPaymentClick: () -> Unit = {},
+  onViewLedgerClick: (statusFilter: String) -> Unit = {}
 ) {
   val dataPoints = remember(feePayments) {
     calculateMonthlyRevenueFromPayments(feePayments)
@@ -214,7 +215,11 @@ fun MonthlyRevenueSummaryChart(
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
       ) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        Row(
+          modifier = Modifier.weight(1f),
+          verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
           Box(
             modifier = Modifier
               .size(40.dp)
@@ -228,37 +233,47 @@ fun MonthlyRevenueSummaryChart(
           ) {
             Icon(Icons.Outlined.BarChart, contentDescription = null, tint = Color.White, modifier = Modifier.size(22.dp))
           }
-          Column {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-              Text(
-                text = "Monthly Revenue Summary",
-                fontWeight = FontWeight.Bold,
-                fontSize = 16.sp,
-                color = Color.White
-              )
-              Surface(
-                color = Color(0xFF10B981).copy(alpha = 0.15f),
-                shape = RoundedCornerShape(6.dp)
-              ) {
-                Row(
-                  verticalAlignment = Alignment.CenterVertically,
-                  modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                  horizontalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                  Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(Color(0xFF10B981)))
-                  Text(
-                    text = "Live Trend",
-                    fontSize = 9.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color(0xFF34D399)
-                  )
-                }
-              }
-            }
+          Column(modifier = Modifier.weight(1f, fill = false)) {
+            Text(
+              text = "Monthly Revenue Summary",
+              fontWeight = FontWeight.Bold,
+              fontSize = 16.sp,
+              color = Color.White,
+              maxLines = 1,
+              overflow = TextOverflow.Ellipsis
+            )
             Text(
               text = "${selectedPoint?.monthKey ?: "Active Month"} collections, dues & realization breakdown",
               fontSize = 12.sp,
-              color = Color(0xFF94A3B8)
+              color = Color(0xFF94A3B8),
+              maxLines = 1,
+              overflow = TextOverflow.Ellipsis
+            )
+          }
+        }
+
+        Spacer(modifier = Modifier.width(8.dp))
+
+        // Prominent Live Trend Pill with guaranteed horizontal rendering (Clickable)
+        Surface(
+          color = Color(0xFF10B981).copy(alpha = 0.15f),
+          shape = RoundedCornerShape(8.dp),
+          border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF10B981).copy(alpha = 0.3f)),
+          modifier = Modifier.clickable { onViewLedgerClick("All") }
+        ) {
+          Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+          ) {
+            Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(Color(0xFF10B981)))
+            Text(
+              text = "Live Trend",
+              fontSize = 10.sp,
+              fontWeight = FontWeight.Bold,
+              color = Color(0xFF34D399),
+              maxLines = 1,
+              softWrap = false
             )
           }
         }
@@ -273,7 +288,8 @@ fun MonthlyRevenueSummaryChart(
         Surface(
           modifier = Modifier
             .weight(1f)
-            .height(84.dp),
+            .height(88.dp)
+            .clickable { onViewLedgerClick("Paid") },
           color = Color(0xFF0A1220),
           shape = RoundedCornerShape(12.dp),
           border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E2D42))
@@ -281,23 +297,30 @@ fun MonthlyRevenueSummaryChart(
           Column(
             modifier = Modifier
               .fillMaxSize()
-              .padding(horizontal = 8.dp, vertical = 8.dp),
+              .padding(horizontal = 6.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.SpaceBetween
           ) {
             Row(
               verticalAlignment = Alignment.CenterVertically,
-              horizontalArrangement = Arrangement.spacedBy(4.dp)
+              horizontalArrangement = Arrangement.spacedBy(3.dp)
             ) {
-              Icon(Icons.Outlined.TrendingUp, contentDescription = null, tint = Color(0xFF4ADE80), modifier = Modifier.size(13.dp))
-              MicroLabelText(text = "${selectedPoint?.shortMonth ?: "Month"} Collected", color = Color(0xFFCBD5E1))
+              Icon(Icons.Outlined.TrendingUp, contentDescription = null, tint = Color(0xFF4ADE80), modifier = Modifier.size(12.dp))
+              MicroLabelText(
+                text = "${selectedPoint?.shortMonth ?: "Month"} Collected",
+                color = Color(0xFFCBD5E1),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+              )
             }
             CardStatText(
               text = CurrencyFormatter.formatIndianRupees(selectedPoint?.collectedAmount ?: 0.0),
               color = Color(0xFF4ADE80)
             )
             MicroLabelText(
-              text = "${selectedPoint?.paidCount ?: 0} of ${selectedPoint?.transactionCount ?: 0} Paid",
-              color = Color(0xFF94A3B8)
+              text = "${selectedPoint?.paidCount ?: 0} of ${selectedPoint?.transactionCount ?: 0} Paid ›",
+              color = Color(0xFF94A3B8),
+              maxLines = 1,
+              overflow = TextOverflow.Ellipsis
             )
           }
         }
@@ -306,7 +329,8 @@ fun MonthlyRevenueSummaryChart(
         Surface(
           modifier = Modifier
             .weight(1f)
-            .height(84.dp),
+            .height(88.dp)
+            .clickable { onViewLedgerClick("Pending") },
           color = Color(0xFF0A1220),
           shape = RoundedCornerShape(12.dp),
           border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E2D42))
@@ -314,23 +338,30 @@ fun MonthlyRevenueSummaryChart(
           Column(
             modifier = Modifier
               .fillMaxSize()
-              .padding(horizontal = 8.dp, vertical = 8.dp),
+              .padding(horizontal = 6.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.SpaceBetween
           ) {
             Row(
               verticalAlignment = Alignment.CenterVertically,
-              horizontalArrangement = Arrangement.spacedBy(4.dp)
+              horizontalArrangement = Arrangement.spacedBy(3.dp)
             ) {
-              Icon(Icons.Outlined.HourglassEmpty, contentDescription = null, tint = Color(0xFFFBBF24), modifier = Modifier.size(13.dp))
-              MicroLabelText(text = "${selectedPoint?.shortMonth ?: "Month"} Dues", color = Color(0xFFCBD5E1))
+              Icon(Icons.Outlined.HourglassEmpty, contentDescription = null, tint = Color(0xFFFBBF24), modifier = Modifier.size(12.dp))
+              MicroLabelText(
+                text = "${selectedPoint?.shortMonth ?: "Month"} Dues",
+                color = Color(0xFFCBD5E1),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+              )
             }
             CardStatText(
               text = CurrencyFormatter.formatIndianRupees(selectedPoint?.pendingAmount ?: 0.0),
               color = if ((selectedPoint?.pendingAmount ?: 0.0) > 0) Color(0xFFFBBF24) else Color(0xFF4ADE80)
             )
             MicroLabelText(
-              text = if ((selectedPoint?.pendingAmount ?: 0.0) > 0) "Pending settlement" else "0 Dues Pending",
-              color = Color(0xFF94A3B8)
+              text = if ((selectedPoint?.pendingAmount ?: 0.0) > 0) "Pending settlement ›" else "0 Dues Pending ›",
+              color = Color(0xFF94A3B8),
+              maxLines = 1,
+              overflow = TextOverflow.Ellipsis
             )
           }
         }
@@ -339,7 +370,8 @@ fun MonthlyRevenueSummaryChart(
         Surface(
           modifier = Modifier
             .weight(1f)
-            .height(84.dp),
+            .height(88.dp)
+            .clickable { onViewLedgerClick("All") },
           color = Color(0xFF0A1220),
           shape = RoundedCornerShape(12.dp),
           border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E2D42))
@@ -347,23 +379,30 @@ fun MonthlyRevenueSummaryChart(
           Column(
             modifier = Modifier
               .fillMaxSize()
-              .padding(horizontal = 8.dp, vertical = 8.dp),
+              .padding(horizontal = 6.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.SpaceBetween
           ) {
             Row(
               verticalAlignment = Alignment.CenterVertically,
-              horizontalArrangement = Arrangement.spacedBy(4.dp)
+              horizontalArrangement = Arrangement.spacedBy(3.dp)
             ) {
-              Icon(Icons.Outlined.Assessment, contentDescription = null, tint = Color(0xFF38BDF8), modifier = Modifier.size(13.dp))
-              MicroLabelText(text = "${selectedPoint?.shortMonth ?: "Month"} Target", color = Color(0xFFCBD5E1))
+              Icon(Icons.Outlined.Assessment, contentDescription = null, tint = Color(0xFF38BDF8), modifier = Modifier.size(12.dp))
+              MicroLabelText(
+                text = "${selectedPoint?.shortMonth ?: "Month"} Target",
+                color = Color(0xFFCBD5E1),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+              )
             }
             CardStatText(
               text = CurrencyFormatter.formatIndianRupees(selectedPoint?.totalAmount ?: 0.0),
               color = Color(0xFF38BDF8)
             )
             MicroLabelText(
-              text = "${selectedPoint?.collectionRate?.toInt() ?: 0}% Realized",
-              color = Color(0xFF38BDF8)
+              text = "${selectedPoint?.collectionRate?.toInt() ?: 0}% Realized ›",
+              color = Color(0xFF38BDF8),
+              maxLines = 1,
+              overflow = TextOverflow.Ellipsis
             )
           }
         }

@@ -522,7 +522,15 @@ fun InstituteAdmissionFormDialog(
                         FilterChip(
                           selected = selectedBatch == b.name,
                           onClick = { selectedBatch = b.name },
-                          label = { Text(b.name, fontSize = 11.sp) }
+                          label = {
+                            Text(
+                              text = b.name,
+                              fontSize = 11.sp,
+                              maxLines = 1,
+                              softWrap = false,
+                              overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                            )
+                          }
                         )
                       }
                     }
@@ -548,9 +556,12 @@ fun InstituteAdmissionFormDialog(
                         onClick = { selectedStreamFaculty = st },
                         label = {
                           Text(
-                            st,
+                            text = st,
                             fontSize = 12.sp,
-                            fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal
+                            fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal,
+                            maxLines = 1,
+                            softWrap = false,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                           )
                         }
                       )
@@ -571,7 +582,15 @@ fun InstituteAdmissionFormDialog(
                       FilterChip(
                         selected = isSel,
                         onClick = { selectedCompetitiveExam = ex },
-                        label = { Text(ex, fontSize = 11.sp) }
+                        label = {
+                          Text(
+                            text = ex,
+                            fontSize = 11.sp,
+                            maxLines = 1,
+                            softWrap = false,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                          )
+                        }
                       )
                     }
                   }
@@ -598,7 +617,15 @@ fun InstituteAdmissionFormDialog(
                     FilterChip(
                       selected = parentType == pt,
                       onClick = { parentType = pt },
-                      label = { Text(pt, fontSize = 12.sp) }
+                      label = {
+                        Text(
+                          text = pt,
+                          fontSize = 12.sp,
+                          maxLines = 1,
+                          softWrap = false,
+                          overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                        )
+                      }
                     )
                   }
                 }

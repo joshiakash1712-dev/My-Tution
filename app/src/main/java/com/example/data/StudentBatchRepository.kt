@@ -19,6 +19,7 @@ class StudentBatchRepository(private val context: Context) {
 
   private val database = AppRoomDatabase.getDatabase(context)
   private val studentDao = database.studentDao()
+  private val teacherDao = database.teacherDao()
   private val batchDao = database.batchDao()
   private val enrollmentDao = database.batchEnrollmentDao()
   private val attendanceDao = database.attendanceDao()
@@ -27,6 +28,10 @@ class StudentBatchRepository(private val context: Context) {
   private val scope = CoroutineScope(Dispatchers.IO)
 
   val allStudents: Flow<List<Student>> = studentDao.getAllStudents().map { entities ->
+    entities.map { it.toDomain() }
+  }
+
+  val allTeachers: Flow<List<Teacher>> = teacherDao.getAllTeachers().map { entities ->
     entities.map { it.toDomain() }
   }
 
@@ -137,7 +142,60 @@ class StudentBatchRepository(private val context: Context) {
   }
 
   init {
-    // Database initializes clean and empty for real production users
+    scope.launch {
+      try {
+        if (batchDao.getCount() == 0) {
+          batchDao.insertBatches(SeedData.defaultBatches.map { BatchEntity.fromDomain(it) })
+        }
+        if (studentDao.getCount() == 0) {
+          val initialStudents = SeedData.get15DemoStudents()
+          studentDao.insertStudents(initialStudents.map { StudentEntity.fromDomain(it) })
+          val enrollments = initialStudents.map { stu ->
+            BatchEnrollmentEntity(
+              id = "ENR_${stu.id}_${stu.batch.replace(" ", "_")}",
+              studentId = stu.id,
+              studentName = stu.name,
+              batchId = "BATCH_${stu.batch.replace(" ", "_")}",
+              batchName = stu.batch,
+              className = stu.className,
+              stream = stu.stream,
+              enrollmentDate = stu.admissionDate,
+              feeStatus = "Up-to-Date",
+              status = stu.status
+            )
+          }
+          enrollmentDao.insertEnrollments(enrollments)
+        }
+        if (teacherDao.getCount() == 0) {
+          teacherDao.insertTeachers(SeedData.defaultTeachers.map { com.example.data.db.TeacherEntity.fromDomain(it) })
+        }
+      } catch (e: Exception) {
+        android.util.Log.e("StudentBatchRepository", "Error during DB initialization: ${e.message}")
+      }
+    }
+  }
+
+  suspend fun insertTeacher(teacher: Teacher) {
+    val entity = com.example.data.db.TeacherEntity.fromDomain(teacher)
+    teacherDao.insertTeacher(entity)
+  }
+
+  suspend fun insertTeachers(teachers: List<Teacher>) {
+    val entities = teachers.map { com.example.data.db.TeacherEntity.fromDomain(it) }
+    teacherDao.insertTeachers(entities)
+  }
+
+  suspend fun updateTeacher(teacher: Teacher) {
+    val entity = com.example.data.db.TeacherEntity.fromDomain(teacher)
+    teacherDao.updateTeacher(entity)
+  }
+
+  suspend fun deleteTeacher(teacherId: String) {
+    teacherDao.deleteTeacherById(teacherId)
+  }
+
+  suspend fun deleteAllTeachers() {
+    teacherDao.deleteAllTeachers()
   }
 
   suspend fun insertStudent(student: Student) {
@@ -183,6 +241,7 @@ class StudentBatchRepository(private val context: Context) {
 
   suspend fun clearAllData() {
     studentDao.deleteAllStudents()
+    teacherDao.deleteAllTeachers()
     batchDao.deleteAllBatches()
     enrollmentDao.deleteAllEnrollments()
     attendanceDao.deleteAllAttendance()

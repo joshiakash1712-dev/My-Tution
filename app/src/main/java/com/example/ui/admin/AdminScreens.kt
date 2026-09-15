@@ -60,6 +60,18 @@ import com.example.ui.theme.CardStatText
 import com.example.ui.theme.InlineStatText
 import com.example.ui.theme.MicroLabelText
 
+private data class FeeAggregates(
+  val monthlyFeeTarget: Double,
+  val sessionTotalExpected: Double,
+  val sessionCollected: Double,
+  val sessionOverdueFee: Double,
+  val sessionPending: Double,
+  val sessionInGraceFee: Double,
+  val pctCollected: Float,
+  val pctInGrace: Float,
+  val pctOverdue: Float
+)
+
 @Composable
 fun AdminMainContent(
   currentTab: Int,
@@ -257,6 +269,16 @@ fun AdminDashboardTab(
   var showFeeLedgerDialog by remember { mutableStateOf(false) }
   var feeLedgerInitialFilter by remember { mutableStateOf("All") }
 
+  // Interactive Metric Drill-Down Dialog States
+  var showPresentStudentsDialog by remember { mutableStateOf(false) }
+  var showAbsentStudentsDialog by remember { mutableStateOf(false) }
+  var showTotalStudentsDialog by remember { mutableStateOf(false) }
+  var showTotalBatchesDialog by remember { mutableStateOf(false) }
+  var showLowAttendanceDialog by remember { mutableStateOf(false) }
+  var selectedClassSession by remember {
+    mutableStateOf<Triple<String, Pair<String, String>, Pair<Pair<String, String>, Color>>?>(null)
+  }
+
   if (showRecordPaymentDialog) {
     RecordStudentPaymentDialog(
       onDismiss = { showRecordPaymentDialog = false },
@@ -285,33 +307,167 @@ fun AdminDashboardTab(
   }
   val currentDateStr = AppRepository.getCurrentDateStr()
 
-  // Real attendance metrics
-  val todayAttendance = attendanceRecords.filter { it.date == currentDateStr }
+  // Real attendance metrics & filtered lists for interactive views
+  val todayAttendance = remember(attendanceRecords, currentDateStr) {
+    attendanceRecords.filter { it.date == currentDateStr }
+  }
+  val presentStudentsList = remember(todayAttendance, students) {
+    if (todayAttendance.isNotEmpty()) {
+      val presentIds = todayAttendance.filter { it.status.equals("Present", ignoreCase = true) }.map { it.studentId }.toSet()
+      students.filter { it.id in presentIds }
+    } else {
+      students.filter { it.attendancePercent >= 75 }
+    }
+  }
+
+  val absentStudentsList = remember(todayAttendance, students) {
+    if (todayAttendance.isNotEmpty()) {
+      val absentIds = todayAttendance.filter { it.status.equals("Absent", ignoreCase = true) }.map { it.studentId }.toSet()
+      students.filter { it.id in absentIds }
+    } else {
+      students.filter { it.attendancePercent < 75 }
+    }
+  }
+
+  val lowAttendanceStudentsList = remember(students) {
+    students.filter { it.attendancePercent < 75 }
+  }
+
   val presentCount = if (todayAttendance.isNotEmpty()) {
     todayAttendance.count { it.status == "Present" }
   } else {
-    students.count { it.attendancePercent >= 75 }
+    presentStudentsList.size
   }
   val absentCount = if (todayAttendance.isNotEmpty()) {
     todayAttendance.count { it.status == "Absent" }
   } else {
-    (students.size - presentCount).coerceAtLeast(0)
+    absentStudentsList.size
   }
   val totalCount = (presentCount + absentCount).coerceAtLeast(1)
   val presentPct = (presentCount * 100) / totalCount
   val absentPct = (absentCount * 100) / totalCount
 
-  // Full Session (2026-27) Fee State (10 Academic Months Expected Model)
-  val monthlyFeeTarget = fees.sumOf { it.feeAmount }.toDouble().let { if (it > 0) it else 96000.0 }
-  val sessionTotalExpected = (monthlyFeeTarget * 10.0).coerceAtLeast(960000.0) // 10 academic months * ₹96,000 = ₹9.60 L
-  val sessionCollected = (fees.sumOf { it.paidAmount }.toDouble() * 10.0).let { if (it > 0) it else 736000.0 } // ₹7.36 L realized across session
-  val sessionOverdueFee = fees.filter { it.paymentStatus == "Overdue" }.sumOf { it.pendingAmount }.toDouble() // ₹12,800 Overdue action required
-  val sessionPending = (sessionTotalExpected - sessionCollected).coerceAtLeast(0.0) // ₹2.24 L
-  val sessionInGraceFee = (sessionPending - sessionOverdueFee).coerceAtLeast(0.0) // In Grace
+  // Interactive Metric Drill-Down Dialog Invocations
+  if (showPresentStudentsDialog) {
+    PresentStudentsListDialog(
+      students = presentStudentsList,
+      currentDateFormatted = currentDateFormatted,
+      onDismiss = { showPresentStudentsDialog = false },
+      onTakeAttendanceClick = {
+        showPresentStudentsDialog = false
+        onTabChange(1)
+      }
+    )
+  }
 
-  val pctCollected = if (sessionTotalExpected > 0) ((sessionCollected * 100f) / sessionTotalExpected).toFloat() else 76.7f
-  val pctInGrace = if (sessionTotalExpected > 0) ((sessionInGraceFee * 100f) / sessionTotalExpected).toFloat() else 22.0f
-  val pctOverdue = if (sessionTotalExpected > 0) ((sessionOverdueFee * 100f) / sessionTotalExpected).toFloat() else 1.3f
+  if (showAbsentStudentsDialog) {
+    AbsentStudentsListDialog(
+      students = absentStudentsList,
+      currentDateFormatted = currentDateFormatted,
+      onDismiss = { showAbsentStudentsDialog = false },
+      onTakeAttendanceClick = {
+        showAbsentStudentsDialog = false
+        onTabChange(1)
+      },
+      onMarkPresent = { student ->
+        AppRepository.saveSingleAttendance(
+          studentId = student.id,
+          studentName = student.name,
+          batchName = student.batch.ifBlank { "General" },
+          date = currentDateStr,
+          status = "Present"
+        )
+      }
+    )
+  }
+
+  if (showTotalStudentsDialog) {
+    EnrolledStudentsListDialog(
+      students = students,
+      fees = fees,
+      onDismiss = { showTotalStudentsDialog = false },
+      onAdmitClick = {
+        showTotalStudentsDialog = false
+        onAdmitClick()
+      },
+      onOpenDirectoryClick = {
+        showTotalStudentsDialog = false
+        onTabChange(1)
+      }
+    )
+  }
+
+  if (showTotalBatchesDialog) {
+    ActiveBatchesListDialog(
+      batches = batches,
+      onDismiss = { showTotalBatchesDialog = false },
+      onSetupClick = {
+        showTotalBatchesDialog = false
+        onSetupClick()
+      },
+      onTimetableClick = {
+        showTotalBatchesDialog = false
+        onTabChange(5)
+      },
+      onTakeAttendanceClick = {
+        showTotalBatchesDialog = false
+        onTabChange(1)
+      }
+    )
+  }
+
+  if (showLowAttendanceDialog) {
+    LowAttendanceAlertsDialog(
+      students = lowAttendanceStudentsList,
+      onDismiss = { showLowAttendanceDialog = false },
+      onTakeAttendanceClick = {
+        showLowAttendanceDialog = false
+        onTabChange(1)
+      }
+    )
+  }
+
+  if (selectedClassSession != null) {
+    val session = selectedClassSession!!
+    val timeSlot = session.first
+    val subject = session.second.first
+    val batchName = session.second.second
+    val room = session.third.first.first
+    val teacher = session.third.first.second
+    val batchStudents = students.filter { it.batch.equals(batchName, ignoreCase = true) || batchName.contains(it.batch, ignoreCase = true) }
+
+    ClassSessionDetailDialog(
+      timeSlot = timeSlot,
+      subject = subject,
+      batchName = batchName,
+      room = room,
+      teacher = teacher,
+      batchStudents = if (batchStudents.isNotEmpty()) batchStudents else students.take(6),
+      onDismiss = { selectedClassSession = null },
+      onTakeAttendance = {
+        selectedClassSession = null
+        onTabChange(1)
+      },
+      onOpenTimetable = {
+        selectedClassSession = null
+        onTabChange(5)
+      }
+    )
+  }
+
+  // Full Session (2026-27) Fee State (10 Academic Months Expected Model)
+  val (monthlyFeeTarget, sessionTotalExpected, sessionCollected, sessionOverdueFee, sessionPending, sessionInGraceFee, pctCollected, pctInGrace, pctOverdue) = remember(fees) {
+    val target = fees.sumOf { it.feeAmount }.toDouble().let { if (it > 0) it else 96000.0 }
+    val totalExpected = (target * 10.0).coerceAtLeast(960000.0)
+    val collected = (fees.sumOf { it.paidAmount }.toDouble() * 10.0).let { if (it > 0) it else 736000.0 }
+    val overdue = fees.filter { it.paymentStatus == "Overdue" }.sumOf { it.pendingAmount }.toDouble()
+    val pending = (totalExpected - collected).coerceAtLeast(0.0)
+    val inGrace = (pending - overdue).coerceAtLeast(0.0)
+    val pCollected = if (totalExpected > 0) ((collected * 100f) / totalExpected).toFloat() else 76.7f
+    val pInGrace = if (totalExpected > 0) ((inGrace * 100f) / totalExpected).toFloat() else 22.0f
+    val pOverdue = if (totalExpected > 0) ((overdue * 100f) / totalExpected).toFloat() else 1.3f
+    FeeAggregates(target, totalExpected, collected, overdue, pending, inGrace, pCollected, pInGrace, pOverdue)
+  }
 
   // Scheduled Classes
   val scheduledClasses = remember(batches) {
@@ -492,9 +648,12 @@ fun AdminDashboardTab(
           modifier = Modifier.fillMaxWidth(),
           horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-          // CARD 1: Present Today
+          // CARD 1: Present Today (Interactive)
           Card(
-            modifier = Modifier.weight(1f).pressSpring(0.96f),
+            modifier = Modifier
+              .weight(1f)
+              .pressSpring(0.96f)
+              .clickable { showPresentStudentsDialog = true },
             colors = CardDefaults.cardColors(containerColor = Color(0xFF111C2E)),
             shape = RoundedCornerShape(16.dp),
             border = BorderStroke(1.dp, Color(0xFF24334A)),
@@ -537,21 +696,20 @@ fun AdminDashboardTab(
                 Surface(color = Color(0xFF10B981).copy(alpha = 0.15f), shape = RoundedCornerShape(6.dp)) {
                   MicroLabelText(text = "↑ $presentPct%", color = Color(0xFF4ADE80), modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
                 }
-                Canvas(modifier = Modifier.width(36.dp).height(14.dp)) {
-                  val path = androidx.compose.ui.graphics.Path().apply {
-                    moveTo(0f, size.height * 0.8f)
-                    quadraticTo(size.width * 0.4f, size.height * 0.2f, size.width * 0.7f, size.height * 0.5f)
-                    lineTo(size.width, size.height * 0.1f)
-                  }
-                  drawPath(path, color = Color(0xFF4ADE80), style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2.dp.toPx()))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                  MicroLabelText(text = "View list", color = Color(0xFF4ADE80))
+                  Icon(Icons.Outlined.ChevronRight, contentDescription = null, tint = Color(0xFF4ADE80), modifier = Modifier.size(12.dp))
                 }
               }
             }
           }
 
-          // CARD 2: Absent Today
+          // CARD 2: Absent Today (Interactive)
           Card(
-            modifier = Modifier.weight(1f).pressSpring(0.96f),
+            modifier = Modifier
+              .weight(1f)
+              .pressSpring(0.96f)
+              .clickable { showAbsentStudentsDialog = true },
             colors = CardDefaults.cardColors(containerColor = Color(0xFF111C2E)),
             shape = RoundedCornerShape(16.dp),
             border = BorderStroke(1.dp, Color(0xFF24334A)),
@@ -601,26 +759,11 @@ fun AdminDashboardTab(
                     modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                   )
                 }
-                if (absentCount > 0) {
-                  Canvas(modifier = Modifier.width(36.dp).height(14.dp)) {
-                    val path = androidx.compose.ui.graphics.Path().apply {
-                      moveTo(0f, size.height * 0.3f)
-                      quadraticTo(size.width * 0.3f, size.height * 0.9f, size.width * 0.6f, size.height * 0.4f)
-                      lineTo(size.width, size.height * 0.8f)
-                    }
-                    drawPath(path, color = Color(0xFFF87171), style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2.dp.toPx()))
-                  }
-                } else {
-                  Surface(
-                    color = Color(0xFF10B981).copy(alpha = 0.15f),
-                    shape = RoundedCornerShape(6.dp)
-                  ) {
-                    MicroLabelText(
-                      text = "✓ 100% Present",
-                      color = Color(0xFF4ADE80),
-                      modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
-                    )
-                  }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                  MicroLabelText(
+                    text = if (absentCount > 0) "Alert ›" else "View ›",
+                    color = if (absentCount > 0) Color(0xFFF87171) else Color(0xFF4ADE80)
+                  )
                 }
               }
             }
@@ -632,9 +775,12 @@ fun AdminDashboardTab(
           modifier = Modifier.fillMaxWidth(),
           horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-          // CARD 3: Total Students
+          // CARD 3: Total Students (Interactive)
           Card(
-            modifier = Modifier.weight(1f).pressSpring(0.96f),
+            modifier = Modifier
+              .weight(1f)
+              .pressSpring(0.96f)
+              .clickable { showTotalStudentsDialog = true },
             colors = CardDefaults.cardColors(containerColor = Color(0xFF111C2E)),
             shape = RoundedCornerShape(16.dp),
             border = BorderStroke(1.dp, Color(0xFF24334A)),
@@ -677,14 +823,20 @@ fun AdminDashboardTab(
                 Surface(color = Color(0xFF6366F1).copy(alpha = 0.15f), shape = RoundedCornerShape(6.dp)) {
                   MicroLabelText(text = "Session 2026-27", color = Color(0xFF818CF8), modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
                 }
-                MicroLabelText(text = "Active", color = Color(0xFF818CF8))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                  MicroLabelText(text = "View all", color = Color(0xFF818CF8))
+                  Icon(Icons.Outlined.ChevronRight, contentDescription = null, tint = Color(0xFF818CF8), modifier = Modifier.size(12.dp))
+                }
               }
             }
           }
 
-          // CARD 4: Total Batches
+          // CARD 4: Total Batches (Interactive)
           Card(
-            modifier = Modifier.weight(1f).pressSpring(0.96f),
+            modifier = Modifier
+              .weight(1f)
+              .pressSpring(0.96f)
+              .clickable { showTotalBatchesDialog = true },
             colors = CardDefaults.cardColors(containerColor = Color(0xFF111C2E)),
             shape = RoundedCornerShape(16.dp),
             border = BorderStroke(1.dp, Color(0xFF24334A)),
@@ -727,7 +879,10 @@ fun AdminDashboardTab(
                 Surface(color = Color(0xFF0284C7).copy(alpha = 0.15f), shape = RoundedCornerShape(6.dp)) {
                   MicroLabelText(text = "100% Running", color = Color(0xFF38BDF8), modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
                 }
-                MicroLabelText(text = "Running", color = Color(0xFF38BDF8))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                  MicroLabelText(text = "Batches", color = Color(0xFF38BDF8))
+                  Icon(Icons.Outlined.ChevronRight, contentDescription = null, tint = Color(0xFF38BDF8), modifier = Modifier.size(12.dp))
+                }
               }
             }
           }
@@ -752,7 +907,7 @@ fun AdminDashboardTab(
             verticalAlignment = Alignment.CenterVertically
           ) {
             Row(
-              modifier = Modifier.weight(1f),
+              modifier = Modifier.weight(1f, fill = false),
               verticalAlignment = Alignment.CenterVertically,
               horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
@@ -804,7 +959,8 @@ fun AdminDashboardTab(
                   fontWeight = FontWeight.Bold,
                   color = Color(0xFF38BDF8),
                   maxLines = 1,
-                  softWrap = false
+                  softWrap = false,
+                  overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                 )
               }
             }
@@ -1054,7 +1210,11 @@ fun AdminDashboardTab(
     item {
       MonthlyRevenueSummaryChart(
         feePayments = feePayments,
-        onRecordPaymentClick = { showRecordPaymentDialog = true }
+        onRecordPaymentClick = { showRecordPaymentDialog = true },
+        onViewLedgerClick = { filter ->
+          feeLedgerInitialFilter = filter
+          showFeeLedgerDialog = true
+        }
       )
     }
 
@@ -1106,7 +1266,12 @@ fun AdminDashboardTab(
 
                 Row(
                   verticalAlignment = Alignment.CenterVertically,
-                  modifier = Modifier.fillMaxWidth()
+                  modifier = Modifier
+                    .fillMaxWidth()
+                    .pressSpring(0.98f)
+                    .clickable {
+                      selectedClassSession = Triple(timeStr, names, details)
+                    }
                 ) {
                   Box(
                     modifier = Modifier
@@ -1137,7 +1302,14 @@ fun AdminDashboardTab(
                     modifier = Modifier.weight(1f)
                   ) {
                     Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {
-                      Text(subject, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                      Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                      ) {
+                        Text(subject, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                        Icon(Icons.Outlined.ChevronRight, contentDescription = null, tint = Color(0xFF64748B), modifier = Modifier.size(14.dp))
+                      }
                       Spacer(modifier = Modifier.height(2.dp))
                       Text("Batch: $batchName • Room: $room", fontSize = 11.sp, color = Color(0xFF94A3B8))
                       Spacer(modifier = Modifier.height(2.dp))
@@ -1267,7 +1439,7 @@ fun AdminDashboardTab(
               // 2. Warning Severity: Low Attendance (Amber) - Only when count > 0
               if (lowAttendanceCount > 0) {
                 Surface(
-                  onClick = { onTabChange(1) },
+                  onClick = { showLowAttendanceDialog = true },
                   shape = RoundedCornerShape(12.dp),
                   color = Color(0xFF0A1220),
                   border = BorderStroke(1.dp, Color(0xFFF59E0B).copy(alpha = 0.4f)),
@@ -1329,7 +1501,7 @@ fun AdminDashboardTab(
               // 4. Planned Activity: Scheduled Tests (Indigo) - Only when count > 0
               if (upcomingTestsCount > 0) {
                 Surface(
-                  onClick = { onTabChange(4) },
+                  onClick = { showScheduleTestDialog = true },
                   shape = RoundedCornerShape(12.dp),
                   color = Color(0xFF0A1220),
                   border = BorderStroke(1.dp, Color(0xFF818CF8).copy(alpha = 0.3f)),
@@ -1866,43 +2038,38 @@ fun AdminStudentsTab(
               }
             }
           } else {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-              Column(modifier = Modifier.weight(1f)) {
-                Text("Student Lifecycle Directory", fontWeight = FontWeight.Bold, fontSize = 18.sp, maxLines = 1, color = Color.White)
-                Text(
-                  if (searchQuery.isNotBlank() || selectedBatchFilter != "All")
-                    "Showing ${displayStudents.size} of ${students.size} Enrolled Learners"
-                  else
-                    "${students.size} Enrolled Learners",
-                  fontSize = 12.sp,
-                  color = Color(0xFF94A3B8)
-                )
-              }
-              Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                OutlinedButton(
-                  onClick = {
-                    isMultiSelectMode = true
-                  },
-                  shape = RoundedCornerShape(12.dp),
-                  colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF94A3B8)),
-                  border = BorderStroke(1.dp, Color(0xFF1E2D42)),
-                  contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp)
-                ) {
-                  Icon(Icons.Default.Checklist, contentDescription = null, modifier = Modifier.size(16.dp))
-                  Spacer(Modifier.width(4.dp))
-                  Text("Select", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            Column(
+              modifier = Modifier.fillMaxWidth(),
+              verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+              Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+              ) {
+                Column(modifier = Modifier.weight(1f, fill = false)) {
+                  Text(
+                    text = "Student Directory",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 18.sp,
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                    color = Color.White
+                  )
+                  Text(
+                    text = if (searchQuery.isNotBlank() || selectedBatchFilter != "All")
+                      "Showing ${displayStudents.size} of ${students.size} Enrolled Learners"
+                    else
+                      "${students.size} Enrolled Learners",
+                    fontSize = 12.sp,
+                    color = Color(0xFF94A3B8),
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                  )
                 }
-                OutlinedButton(
-                  onClick = { showCsvImportDialog = true },
-                  shape = RoundedCornerShape(12.dp),
-                  colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF38BDF8)),
-                  border = BorderStroke(1.dp, Color(0xFF0284C7)),
-                  contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp)
-                ) {
-                  Icon(Icons.Default.FileUpload, contentDescription = null, modifier = Modifier.size(16.dp))
-                  Spacer(Modifier.width(4.dp))
-                  Text("Import CSV", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                }
+
+                Spacer(modifier = Modifier.width(8.dp))
+
                 Button(
                   onClick = onAdmitClick,
                   colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7)),
@@ -1911,7 +2078,39 @@ fun AdminStudentsTab(
                 ) {
                   Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
                   Spacer(Modifier.width(4.dp))
-                  Text("+ Add Student", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                  Text("+ Add Student", fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
+                }
+              }
+
+              Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+              ) {
+                OutlinedButton(
+                  onClick = { isMultiSelectMode = true },
+                  shape = RoundedCornerShape(12.dp),
+                  colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF94A3B8)),
+                  border = BorderStroke(1.dp, Color(0xFF1E2D42)),
+                  contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
+                  modifier = Modifier.weight(1f)
+                ) {
+                  Icon(Icons.Default.Checklist, contentDescription = null, modifier = Modifier.size(16.dp))
+                  Spacer(Modifier.width(4.dp))
+                  Text("Select", fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
+                }
+
+                OutlinedButton(
+                  onClick = { showCsvImportDialog = true },
+                  shape = RoundedCornerShape(12.dp),
+                  colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF38BDF8)),
+                  border = BorderStroke(1.dp, Color(0xFF0284C7)),
+                  contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
+                  modifier = Modifier.weight(1f)
+                ) {
+                  Icon(Icons.Default.FileUpload, contentDescription = null, modifier = Modifier.size(16.dp))
+                  Spacer(Modifier.width(4.dp))
+                  Text("Import CSV", fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
                 }
               }
             }
@@ -1969,6 +2168,8 @@ fun AdminStudentsTab(
                   color = if (isSel) Color.White else Color(0xFF94A3B8),
                   fontSize = 11.sp,
                   fontWeight = FontWeight.Bold,
+                  maxLines = 1,
+                  softWrap = false,
                   modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
                 )
               }
@@ -1988,6 +2189,8 @@ fun AdminStudentsTab(
                   color = if (isSel) Color.White else Color(0xFF94A3B8),
                   fontSize = 11.sp,
                   fontWeight = FontWeight.Bold,
+                  maxLines = 1,
+                  softWrap = false,
                   modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
                 )
               }
@@ -2624,10 +2827,24 @@ fun AdminStaffTab(
   ) {
     item {
       Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-        Column {
-          Text("Staff & Educator Directory", fontWeight = FontWeight.Bold, fontSize = 18.sp, color = Color.White)
-          Text("${teachers.size} Registered Staff Members", fontSize = 12.sp, color = Color(0xFF94A3B8))
+        Column(modifier = Modifier.weight(1f, fill = false)) {
+          Text(
+            "Staff & Educator Directory",
+            fontWeight = FontWeight.Bold,
+            fontSize = 18.sp,
+            color = Color.White,
+            maxLines = 1,
+            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+          )
+          Text(
+            "${teachers.size} Registered Staff Members",
+            fontSize = 12.sp,
+            color = Color(0xFF94A3B8),
+            maxLines = 1,
+            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+          )
         }
+        Spacer(Modifier.width(8.dp))
 
         Button(
           onClick = onOnboardStaffClick,
@@ -2739,6 +2956,7 @@ fun AdminBatchesTab(
   subjects: List<Subject>,
   teachers: List<Teacher> = emptyList()
 ) {
+  val students by AppRepository.students.collectAsState()
   var selectedBatch by remember { mutableStateOf<Batch?>(null) }
   var selectedSubject by remember { mutableStateOf<Subject?>(null) }
   var showSyllabusDetails by remember { mutableStateOf(false) }
@@ -2917,7 +3135,45 @@ fun AdminBatchesTab(
       item {
         Column {
           Text("Institute Batches Directory", fontWeight = FontWeight.Bold, fontSize = 18.sp, color = Color.White)
-          Text("Select any batch to view attendance metrics, subjects & faculty", fontSize = 12.sp, color = Color(0xFF94A3B8))
+          Text("Select any batch to view live student roster, attendance metrics & faculty", fontSize = 12.sp, color = Color(0xFF94A3B8))
+        }
+      }
+
+      // Live Batches Telemetry Summary Card
+      item {
+        val totalEnrolledSum = remember(students) { students.size }
+        val batchesWithStudents = remember(batches, students) {
+          batches.count { b -> students.any { it.batch.equals(b.name, ignoreCase = true) } }
+        }
+        Card(
+          colors = CardDefaults.cardColors(containerColor = Color(0xFF111C2E)),
+          shape = RoundedCornerShape(14.dp),
+          border = BorderStroke(1.dp, Color(0xFF1E2D42)),
+          modifier = Modifier.fillMaxWidth()
+        ) {
+          Row(
+            modifier = Modifier.fillMaxWidth().padding(14.dp),
+            horizontalArrangement = Arrangement.SpaceAround,
+            verticalAlignment = Alignment.CenterVertically
+          ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+              Text("Total Batches", fontSize = 11.sp, color = Color(0xFF94A3B8), fontWeight = FontWeight.Medium)
+              Spacer(Modifier.height(4.dp))
+              Text("${batches.size}", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.White)
+            }
+            Box(modifier = Modifier.width(1.dp).height(32.dp).background(Color(0xFF1E2D42)))
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+              Text("Total Students (Live)", fontSize = 11.sp, color = Color(0xFF38BDF8), fontWeight = FontWeight.SemiBold)
+              Spacer(Modifier.height(4.dp))
+              Text("$totalEnrolledSum", fontSize = 18.sp, fontWeight = FontWeight.ExtraBold, color = Color(0xFF38BDF8))
+            }
+            Box(modifier = Modifier.width(1.dp).height(32.dp).background(Color(0xFF1E2D42)))
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+              Text("Active Batches", fontSize = 11.sp, color = Color(0xFF4ADE80), fontWeight = FontWeight.Medium)
+              Spacer(Modifier.height(4.dp))
+              Text("$batchesWithStudents", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color(0xFF4ADE80))
+            }
+          }
         }
       }
 
@@ -2976,6 +3232,9 @@ fun AdminBatchesTab(
       }
 
       items(filteredBatches) { b ->
+        val liveStudentCount = remember(students, b.name) {
+          students.count { it.batch.equals(b.name, ignoreCase = true) }
+        }
         Card(
           modifier = Modifier
             .fillMaxWidth()
@@ -2997,7 +3256,7 @@ fun AdminBatchesTab(
                 shape = RoundedCornerShape(8.dp)
               ) {
                 Text(
-                  text = "${b.studentCount} Students",
+                  text = "$liveStudentCount Students",
                   fontSize = 11.sp,
                   fontWeight = FontWeight.Bold,
                   color = Color(0xFF38BDF8),
@@ -3025,8 +3284,11 @@ fun AdminBatchesTab(
     }
   } else {
     val b = selectedBatch!!
-    val totalStudents = b.studentCount
-    val presentCount = (totalStudents * 0.88).toInt().coerceAtLeast(1)
+    val batchStudents = remember(students, b.name) {
+      students.filter { it.batch.equals(b.name, ignoreCase = true) }
+    }
+    val totalStudents = batchStudents.size
+    val presentCount = (totalStudents * 0.88).toInt().coerceAtLeast(if (totalStudents > 0) 1 else 0)
     val absentCount = (totalStudents - presentCount).coerceAtLeast(0)
 
     LazyColumn(
@@ -3152,6 +3414,97 @@ fun AdminBatchesTab(
                 )
               }
               Icon(Icons.Default.ChevronRight, contentDescription = null, tint = Color(0xFF38BDF8), modifier = Modifier.size(18.dp))
+            }
+          }
+        }
+      }
+
+      item {
+        Row(
+          modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
+          horizontalArrangement = Arrangement.SpaceBetween,
+          verticalAlignment = Alignment.CenterVertically
+        ) {
+          Text("Enrolled Students in ${b.name}", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color.White)
+          Surface(
+            color = Color(0xFF0284C7).copy(alpha = 0.2f),
+            border = BorderStroke(1.dp, Color(0xFF0284C7).copy(alpha = 0.4f)),
+            shape = RoundedCornerShape(6.dp)
+          ) {
+            Text(
+              text = "${batchStudents.size} Enrolled",
+              fontSize = 11.sp,
+              fontWeight = FontWeight.Bold,
+              color = Color(0xFF38BDF8),
+              modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+            )
+          }
+        }
+      }
+
+      if (batchStudents.isEmpty()) {
+        item {
+          Surface(
+            color = Color(0xFF111C2E),
+            shape = RoundedCornerShape(12.dp),
+            border = BorderStroke(1.dp, Color(0xFF1E2D42)),
+            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+          ) {
+            Column(
+              modifier = Modifier.padding(20.dp),
+              horizontalAlignment = Alignment.CenterHorizontally,
+              verticalArrangement = Arrangement.Center
+            ) {
+              Icon(Icons.Default.PeopleOutline, contentDescription = null, tint = Color(0xFF94A3B8), modifier = Modifier.size(32.dp))
+              Spacer(Modifier.height(8.dp))
+              Text("No Students Enrolled", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 14.sp)
+              Text("Assign students to '${b.name}' from the Students directory", color = Color(0xFF94A3B8), fontSize = 12.sp)
+            }
+          }
+        }
+      } else {
+        items(batchStudents, key = { it.id }) { stu ->
+          Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(12.dp),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF111C2E)),
+            border = BorderStroke(1.dp, Color(0xFF1E2D42))
+          ) {
+            Row(
+              modifier = Modifier.fillMaxWidth().padding(12.dp),
+              horizontalArrangement = Arrangement.SpaceBetween,
+              verticalAlignment = Alignment.CenterVertically
+            ) {
+              Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Box(
+                  modifier = Modifier.size(36.dp).clip(CircleShape).background(Color(0xFF0284C7).copy(alpha = 0.2f)),
+                  contentAlignment = Alignment.Center
+                ) {
+                  Text(
+                    text = stu.name.take(1).uppercase(),
+                    color = Color(0xFF38BDF8),
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 14.sp
+                  )
+                }
+                Column {
+                  Text(stu.name, fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color.White)
+                  Text("ID: ${stu.id} • ${stu.mobile.ifBlank { stu.email }}", fontSize = 11.sp, color = Color(0xFF94A3B8))
+                }
+              }
+              Surface(
+                color = Color(0xFF064E3B),
+                shape = RoundedCornerShape(6.dp),
+                border = BorderStroke(1.dp, Color(0xFF059669))
+              ) {
+                Text(
+                  text = "${stu.attendancePercent}% Att.",
+                  fontSize = 10.sp,
+                  fontWeight = FontWeight.Bold,
+                  color = Color(0xFF4ADE80),
+                  modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                )
+              }
             }
           }
         }
@@ -5521,14 +5874,31 @@ fun AdminSecurityCommandCenterTab() {
           FilterChip(
             selected = selectedSeverityFilter == null,
             onClick = { selectedSeverityFilter = null },
-            label = { Text("ALL (${auditLogs.size})", fontSize = 11.sp) }
+            label = {
+              Text(
+                text = "ALL (${auditLogs.size})",
+                fontSize = 11.sp,
+                maxLines = 1,
+                softWrap = false,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+              )
+            }
           )
           SecuritySeverity.entries.forEach { sev ->
             val count = auditLogs.count { it.severity == sev }
             FilterChip(
               selected = selectedSeverityFilter == sev,
               onClick = { selectedSeverityFilter = if (selectedSeverityFilter == sev) null else sev },
-              label = { Text("${sev.name} ($count)", fontSize = 11.sp, fontWeight = FontWeight.Bold) },
+              label = {
+                Text(
+                  text = "${sev.name} ($count)",
+                  fontSize = 11.sp,
+                  fontWeight = FontWeight.Bold,
+                  maxLines = 1,
+                  softWrap = false,
+                  overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                )
+              },
               colors = FilterChipDefaults.filterChipColors(
                 selectedContainerColor = when (sev) {
                   SecuritySeverity.INFO -> Color(0xFF0284C7)

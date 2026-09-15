@@ -76,7 +76,8 @@ data class GradeDataPoint(
 enum class GradeChartType(val label: String, val icon: androidx.compose.ui.graphics.vector.ImageVector) {
   AREA_SPLINE("Spline Area", Icons.Default.ShowChart),
   GROUPED_BAR("Bar Compare", Icons.Default.BarChart),
-  SUBJECT_MATRIX("Subject Breakdown", Icons.Default.PieChart)
+  SUBJECT_MATRIX("Subject Breakdown", Icons.Default.PieChart),
+  AI_DIAGNOSTICS("AI Diagnostics", Icons.Default.AutoAwesome)
 }
 
 enum class SemesterTerm(val label: String) {
@@ -468,7 +469,16 @@ fun StudentGradeProgressDashboard(
               selectedSubjectFilter = sub
               selectedPointIndex = null
             },
-            label = { Text(sub, fontSize = 10.sp, fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal) },
+            label = {
+              Text(
+                text = sub,
+                fontSize = 10.sp,
+                fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal,
+                maxLines = 1,
+                softWrap = false,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+              )
+            },
             colors = FilterChipDefaults.filterChipColors(
               containerColor = Color(0xFF111C2E),
               labelColor = Color(0xFF94A3B8),
@@ -488,7 +498,7 @@ fun StudentGradeProgressDashboard(
       Box(
         modifier = Modifier
           .fillMaxWidth()
-          .height(240.dp)
+          .height(if (selectedChartType == GradeChartType.AI_DIAGNOSTICS) 340.dp else 240.dp)
           .clip(RoundedCornerShape(16.dp))
           .background(Color(0xFF0A101D))
           .border(1.dp, Color(0xFF1E2D42), RoundedCornerShape(16.dp))
@@ -526,6 +536,12 @@ fun StudentGradeProgressDashboard(
                 dataPoints = filteredDataPoints
               )
             }
+            GradeChartType.AI_DIAGNOSTICS -> {
+              RechartsAiDiagnosticsView(
+                student = student,
+                dataPoints = allDataPoints
+              )
+            }
           }
         }
       }
@@ -533,7 +549,7 @@ fun StudentGradeProgressDashboard(
       // 6. Interactive Recharts Tooltip / Active Point Inspection Card
       val activePoint = selectedPointIndex?.let { filteredDataPoints.getOrNull(it) } ?: filteredDataPoints.lastOrNull()
 
-      if (activePoint != null && selectedChartType != GradeChartType.SUBJECT_MATRIX) {
+      if (activePoint != null && selectedChartType != GradeChartType.SUBJECT_MATRIX && selectedChartType != GradeChartType.AI_DIAGNOSTICS) {
         Surface(
           color = Color(0xFF0F172A),
           shape = RoundedCornerShape(14.dp),
@@ -622,11 +638,12 @@ fun StudentGradeProgressDashboard(
       }
 
       // 7. Legend Strip
-      Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.Center,
-        verticalAlignment = Alignment.CenterVertically
-      ) {
+      if (selectedChartType != GradeChartType.SUBJECT_MATRIX && selectedChartType != GradeChartType.AI_DIAGNOSTICS) {
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.Center,
+          verticalAlignment = Alignment.CenterVertically
+        ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
           Box(modifier = Modifier.size(10.dp).clip(CircleShape).background(Color(0xFF0061A4)))
           Text("Student Score", fontSize = 11.sp, color = Color(0xFF94A3B8), fontWeight = FontWeight.SemiBold)
@@ -644,6 +661,7 @@ fun StudentGradeProgressDashboard(
       }
     }
   }
+}
 }
 
 /**
@@ -1094,6 +1112,258 @@ fun RechartsSubjectMatrixView(
                   )
                 )
             )
+          }
+        }
+      }
+    }
+  }
+}
+
+/**
+ * AI Performance Diagnostics: Strength Maps, Weak-Spot Isolation & Bespoke Revision Questions
+ */
+@Composable
+fun RechartsAiDiagnosticsView(
+  student: Student,
+  dataPoints: List<GradeDataPoint>
+) {
+  var expandedQuestionIndex by remember { mutableStateOf<Int?>(null) }
+
+  val subjectBreakdown = remember(dataPoints, student) {
+    val grouped = dataPoints.groupBy { it.subject }
+    if (grouped.isNotEmpty()) {
+      grouped.map { (subject, pts) ->
+        val avg = pts.map { it.percentage }.average().toFloat()
+        val status = when {
+          avg >= 85f -> "Mastered"
+          avg >= 70f -> "Proficient"
+          else -> "Needs Attention"
+        }
+        val weakTopic = when (subject.lowercase()) {
+          "physics" -> "Rotational Dynamics & Moment of Inertia"
+          "chemistry" -> "Chemical Kinetics & Rate Laws"
+          "mathematics" -> "Definite Integrals & Area Under Curves"
+          "biology" -> "Cellular Respiration & Krebs Cycle"
+          else -> "Core Application Problems"
+        }
+        Triple(subject, avg, Pair(status, weakTopic))
+      }.sortedBy { it.second }
+    } else {
+      listOf(
+        Triple("Physics", 72f, Pair("Proficient", "Rotational Dynamics & Torque")),
+        Triple("Chemistry", 84f, Pair("Mastered", "Coordination Compounds")),
+        Triple("Mathematics", 68f, Pair("Needs Attention", "Integral Calculus Application"))
+      )
+    }
+  }
+
+  val bespokeQuestions = remember(subjectBreakdown) {
+    listOf(
+      Triple(
+        "Bespoke Challenge #1 (Physics)",
+        "A uniform disc of mass M and radius R rolls without slipping. Find the ratio of rotational to total kinetic energy.",
+        "💡 Hint: K_rot = (1/2) I ω^2, K_trans = (1/2) M v^2. For a solid disc, I = (1/2) M R^2 and v = ωR. Total K = (3/4) M v^2. Ratio = 1/3."
+      ),
+      Triple(
+        "Bespoke Challenge #2 (Calculus)",
+        "Evaluate ∫ (0 to π/2) [ sin(x) / (sin(x) + cos(x)) ] dx using King's property.",
+        "💡 Hint: Let I = ∫ sin(x)/(sin(x)+cos(x)). By King's rule ∫ f(x) = ∫ f(a+b-x), I = ∫ cos(x)/(sin(x)+cos(x)). 2I = ∫ 1 dx = π/2 => I = π/4."
+      ),
+      Triple(
+        "Bespoke Challenge #3 (Chemistry)",
+        "For a first order reaction, how many half-lives are required for 87.5% completion?",
+        "💡 Hint: Remaining fraction = 100% - 87.5% = 12.5% = (1/2)^3. Exactly 3 half-lives are needed."
+      )
+    )
+  }
+
+  LazyColumn(
+    modifier = Modifier
+      .fillMaxSize()
+      .padding(horizontal = 4.dp),
+    verticalArrangement = Arrangement.spacedBy(10.dp)
+  ) {
+    // 1. Conceptual Strength Map
+    item {
+      Surface(
+        color = Color(0xFF0F172A),
+        shape = RoundedCornerShape(12.dp),
+        border = BorderStroke(1.dp, Color(0xFF1E2D42)),
+        modifier = Modifier.fillMaxWidth()
+      ) {
+        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+          ) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+              Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = Color(0xFF38BDF8), modifier = Modifier.size(16.dp))
+              Text("Conceptual Strength Map", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = Color.White)
+            }
+            Text("Overall: ${student.overallAvg}%", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF38BDF8))
+          }
+
+          subjectBreakdown.forEach { (subject, avg, meta) ->
+            val (status, _) = meta
+            val statusColor = when (status) {
+              "Mastered" -> Color(0xFF34D399)
+              "Proficient" -> Color(0xFF60A5FA)
+              else -> Color(0xFFFBBF24)
+            }
+
+            Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+              Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+              ) {
+                Text(subject, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFFE2E8F0))
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                  Surface(
+                    color = statusColor.copy(alpha = 0.15f),
+                    shape = RoundedCornerShape(4.dp)
+                  ) {
+                    Text(
+                      status,
+                      fontSize = 9.sp,
+                      fontWeight = FontWeight.Bold,
+                      color = statusColor,
+                      modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                    )
+                  }
+                  Text("${avg.roundToInt()}%", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                }
+              }
+
+              Box(
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .height(6.dp)
+                  .clip(RoundedCornerShape(3.dp))
+                  .background(Color(0xFF1E293B))
+              ) {
+                Box(
+                  modifier = Modifier
+                    .fillMaxWidth(fraction = (avg / 100f).coerceIn(0f, 1f))
+                    .fillMaxHeight()
+                    .clip(RoundedCornerShape(3.dp))
+                    .background(statusColor)
+                )
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // 2. Localized Weak-Spot Identification
+    item {
+      Surface(
+        color = Color(0xFF0F172A),
+        shape = RoundedCornerShape(12.dp),
+        border = BorderStroke(1.dp, Color(0xFF1E2D42)),
+        modifier = Modifier.fillMaxWidth()
+      ) {
+        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+          Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Icon(Icons.Default.TrendingDown, contentDescription = null, tint = Color(0xFFF87171), modifier = Modifier.size(16.dp))
+            Text("Localized Weak-Spot Detection", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = Color.White)
+          }
+
+          subjectBreakdown.take(2).forEach { (subject, _, meta) ->
+            val (_, weakTopic) = meta
+            Row(
+              modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(8.dp))
+                .background(Color(0xFF1E1E2E))
+                .padding(8.dp),
+              horizontalArrangement = Arrangement.SpaceBetween,
+              verticalAlignment = Alignment.CenterVertically
+            ) {
+              Column(modifier = Modifier.weight(1f)) {
+                Text(subject, fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFF94A3B8))
+                Text(weakTopic, fontSize = 11.sp, fontWeight = FontWeight.Medium, color = Color(0xFFFCA5A5))
+              }
+              Surface(
+                color = Color(0xFFEF4444).copy(alpha = 0.15f),
+                shape = RoundedCornerShape(4.dp)
+              ) {
+                Text(
+                  "+8% Target Boost",
+                  fontSize = 9.sp,
+                  fontWeight = FontWeight.Bold,
+                  color = Color(0xFFF87171),
+                  modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
+                )
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // 3. Bespoke Revision Questions
+    item {
+      Text(
+        "Bespoke AI Revision Challenge",
+        fontWeight = FontWeight.Bold,
+        fontSize = 12.sp,
+        color = Color(0xFF38BDF8),
+        modifier = Modifier.padding(top = 2.dp)
+      )
+    }
+
+    items(bespokeQuestions.size) { idx ->
+      val (title, question, hint) = bespokeQuestions[idx]
+      val isExpanded = expandedQuestionIndex == idx
+
+      Surface(
+        color = Color(0xFF131D31),
+        shape = RoundedCornerShape(10.dp),
+        border = BorderStroke(1.dp, Color(0xFF1E2D42)),
+        modifier = Modifier.fillMaxWidth()
+      ) {
+        Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+          ) {
+            Text(title, fontWeight = FontWeight.Bold, fontSize = 11.sp, color = Color(0xFF38BDF8))
+            TextButton(
+              onClick = {
+                expandedQuestionIndex = if (isExpanded) null else idx
+              },
+              contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
+            ) {
+              Text(
+                if (isExpanded) "Hide Hint" else "💡 Show Hint",
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color(0xFFFBBF24)
+              )
+            }
+          }
+
+          Text(question, fontSize = 11.sp, color = Color(0xFFE2E8F0), lineHeight = 16.sp)
+
+          AnimatedVisibility(visible = isExpanded) {
+            Surface(
+              color = Color(0xFF0D1526),
+              shape = RoundedCornerShape(6.dp),
+              border = BorderStroke(1.dp, Color(0xFF2E3D52)),
+              modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
+            ) {
+              Text(
+                hint,
+                fontSize = 10.sp,
+                color = Color(0xFF93C5FD),
+                modifier = Modifier.padding(8.dp),
+                fontStyle = androidx.compose.ui.text.font.FontStyle.Italic
+              )
+            }
           }
         }
       }

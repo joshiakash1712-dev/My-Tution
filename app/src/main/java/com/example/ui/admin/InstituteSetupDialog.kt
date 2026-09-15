@@ -460,7 +460,15 @@ fun AdminProfileStep(
             FilterChip(
               selected = gender == g,
               onClick = { onGenderChange(g) },
-              label = { Text(g, fontSize = 11.sp) }
+              label = {
+                Text(
+                  text = g,
+                  fontSize = 11.sp,
+                  maxLines = 1,
+                  softWrap = false,
+                  overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                )
+              }
             )
           }
         }
@@ -723,7 +731,16 @@ fun GradesAndSubjectsStep(
             FilterChip(
               selected = isSelected,
               onClick = { onToggleGrade(g) },
-              label = { Text(g, fontSize = 11.sp, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal) },
+              label = {
+                Text(
+                  text = g,
+                  fontSize = 11.sp,
+                  fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                  maxLines = 1,
+                  softWrap = false,
+                  overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                )
+              },
               leadingIcon = if (isSelected) {
                 { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(14.dp)) }
               } else null,
@@ -760,7 +777,15 @@ fun GradesAndSubjectsStep(
               FilterChip(
                 selected = isSel,
                 onClick = { onToggleStream(st) },
-                label = { Text(st, fontSize = 11.sp) }
+                label = {
+                  Text(
+                    text = st,
+                    fontSize = 11.sp,
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                  )
+                }
               )
             }
           }
@@ -775,7 +800,15 @@ fun GradesAndSubjectsStep(
               FilterChip(
                 selected = isSel,
                 onClick = { onToggleExam(ex) },
-                label = { Text(ex, fontSize = 11.sp) }
+                label = {
+                  Text(
+                    text = ex,
+                    fontSize = 11.sp,
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                  )
+                }
               )
             }
           }

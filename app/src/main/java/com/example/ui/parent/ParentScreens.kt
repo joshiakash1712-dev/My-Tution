@@ -81,8 +81,8 @@ fun ParentMainContent(currentTab: Int, onTabChange: (Int) -> Unit = {}) {
     1 -> ParentAttendanceTab(child)
     2 -> ParentTestPerformanceTab(child, tests)
     3 -> ParentFeeStatusTab(childFee)
-    4 -> ParentMeetingSchedulerTab(meetings)
-    5 -> DynamicTimetableScreen()
+    4 -> DynamicTimetableScreen()
+    else -> ParentDashboardTab(child, childFee, notifications, tests, onTabChange)
   }
 }
 
@@ -164,6 +164,56 @@ fun ParentDashboardTab(
             Text("${recTest.testName} • ${recTest.date}", fontWeight = FontWeight.Bold, fontSize = 14.sp)
             Text("Score: ${child.recentScores.firstOrNull()?.second ?: 88} / 100", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
             Text("AI Faculty Diagnosis: ${recTest.aiSuggestion}", fontSize = 12.sp, fontStyle = androidx.compose.ui.text.font.FontStyle.Italic, color = MaterialTheme.colorScheme.onSurfaceVariant)
+          }
+        }
+      }
+    }
+
+    // 6. Adaptive Academic Milestone Planner
+    item {
+      GeoSectionCard(title = "Adaptive Academic Milestone Planner") {
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+          ) {
+            Column(modifier = Modifier.weight(1f)) {
+              Text("Target: AIR < 100 JEE Advanced", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+              Text("Day-by-Day sync with ${child.batch} schedule", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Surface(color = Color(0xFF0284C7).copy(alpha = 0.15f), shape = RoundedCornerShape(8.dp)) {
+              Text("Active Goal", color = Color(0xFF0284C7), fontSize = 11.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
+            }
+          }
+
+          val milestones = listOf(
+            Triple("Calculus & Vectors Mastery", "Target: 90% in upcoming test", true),
+            Triple("Electrodynamics Numericals", "Practice 25 timed problems/week", true),
+            Triple("Organic Chemistry Reagents", "Complete reaction pathway flashcards", false)
+          )
+
+          milestones.forEach { (title, subtitle, completed) ->
+            Row(
+              modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(10.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                .padding(10.dp),
+              verticalAlignment = Alignment.CenterVertically,
+              horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+              Icon(
+                if (completed) Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked,
+                contentDescription = null,
+                tint = if (completed) Color(0xFF16A34A) else Color(0xFF94A3B8),
+                modifier = Modifier.size(18.dp)
+              )
+              Column(modifier = Modifier.weight(1f)) {
+                Text(title, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                Text(subtitle, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+              }
+            }
           }
         }
       }

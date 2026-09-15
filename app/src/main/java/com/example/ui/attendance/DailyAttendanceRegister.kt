@@ -15,6 +15,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.ui.platform.testTag
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
@@ -405,16 +407,23 @@ fun DailyAttendanceRegister(
         }
         val isAllMarked = studentsInBatch.isNotEmpty() && markedInBatch == studentsInBatch.size
 
+        val hasStudents = studentsInBatch.isNotEmpty()
+
         Card(
           shape = RoundedCornerShape(14.dp),
-          colors = CardDefaults.cardColors(containerColor = Color(0xFF0D1526)),
-          border = BorderStroke(1.dp, if (isAllMarked) Color(0xFF065F46) else Color(0xFF1E2D42)),
+          colors = CardDefaults.cardColors(containerColor = if (hasStudents) Color(0xFF0D1526) else Color(0xFF0B101D)),
+          border = BorderStroke(1.dp, if (isAllMarked) Color(0xFF065F46) else if (!hasStudents) Color(0xFF1E2638) else Color(0xFF1E2D42)),
           modifier = Modifier
             .fillMaxWidth()
-            .clickable {
-              selectedBatchName = batch.name
-              selectedStatusTabFilter = "All"
-            }
+            .then(
+              if (hasStudents) {
+                Modifier.clickable {
+                  selectedBatchName = batch.name
+                  selectedStatusTabFilter = "All"
+                }
+              } else Modifier
+            )
+            .testTag("daily_register_batch_card_${batch.id}")
         ) {
           Row(
             modifier = Modifier
@@ -424,6 +433,7 @@ fun DailyAttendanceRegister(
             verticalAlignment = Alignment.CenterVertically
           ) {
             Row(
+              modifier = Modifier.weight(1f, fill = false),
               verticalAlignment = Alignment.CenterVertically,
               horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
@@ -431,13 +441,13 @@ fun DailyAttendanceRegister(
                 modifier = Modifier
                   .size(42.dp)
                   .clip(CircleShape)
-                  .background(if (isAllMarked) Color(0xFF064E3B) else Color(0xFF1E2D42)),
+                  .background(if (isAllMarked) Color(0xFF064E3B) else if (!hasStudents) Color(0xFF1E293B) else Color(0xFF1E2D42)),
                 contentAlignment = Alignment.Center
               ) {
                 Icon(
-                  imageVector = if (isAllMarked) Icons.Default.CheckCircle else Icons.Default.Groups,
+                  imageVector = if (!hasStudents) Icons.Default.Block else if (isAllMarked) Icons.Default.CheckCircle else Icons.Default.Groups,
                   contentDescription = null,
-                  tint = if (isAllMarked) Color(0xFF4ADE80) else Color(0xFF38BDF8),
+                  tint = if (!hasStudents) Color(0xFF64748B) else if (isAllMarked) Color(0xFF4ADE80) else Color(0xFF38BDF8),
                   modifier = Modifier.size(22.dp)
                 )
               }
@@ -447,46 +457,57 @@ fun DailyAttendanceRegister(
                   batch.name,
                   fontWeight = FontWeight.Bold,
                   fontSize = 14.sp,
-                  color = Color.White
+                  color = if (hasStudents) Color.White else Color(0xFF94A3B8)
                 )
                 Text(
                   "${batch.schedule} • ${batch.teacherName}",
                   fontSize = 11.sp,
-                  color = Color(0xFF94A3B8)
+                  color = Color(0xFF64748B)
                 )
                 Row(
                   horizontalArrangement = Arrangement.spacedBy(8.dp),
                   verticalAlignment = Alignment.CenterVertically
                 ) {
                   Text(
-                    "${studentsInBatch.size} Students Enrolled",
+                    if (hasStudents) "${studentsInBatch.size} Students Enrolled" else "0 Students Enrolled",
                     fontSize = 11.sp,
                     fontWeight = FontWeight.SemiBold,
-                    color = Color(0xFF38BDF8)
+                    color = if (hasStudents) Color(0xFF38BDF8) else Color(0xFF64748B)
                   )
                   Text("•", fontSize = 10.sp, color = Color(0xFF475569))
                   Text(
-                    if (isAllMarked) "All Marked" else if (markedInBatch > 0) "$markedInBatch/${studentsInBatch.size} Marked" else "Not Marked Yet",
+                    if (!hasStudents) "No Students" else if (isAllMarked) "All Marked" else if (markedInBatch > 0) "$markedInBatch/${studentsInBatch.size} Marked" else "Not Marked Yet",
                     fontSize = 10.sp,
                     fontWeight = FontWeight.Bold,
-                    color = if (isAllMarked) Color(0xFF4ADE80) else if (markedInBatch > 0) Color(0xFFFBBF24) else Color(0xFF94A3B8)
+                    color = if (!hasStudents) Color(0xFF64748B) else if (isAllMarked) Color(0xFF4ADE80) else if (markedInBatch > 0) Color(0xFFFBBF24) else Color(0xFF94A3B8)
                   )
                 }
               }
             }
 
+            Spacer(Modifier.width(8.dp))
+
             Button(
               onClick = {
-                selectedBatchName = batch.name
-                selectedStatusTabFilter = "All"
+                if (hasStudents) {
+                  selectedBatchName = batch.name
+                  selectedStatusTabFilter = "All"
+                }
               },
+              enabled = hasStudents,
               shape = RoundedCornerShape(8.dp),
-              colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7)),
-              contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+              colors = ButtonDefaults.buttonColors(
+                containerColor = Color(0xFF0284C7),
+                contentColor = Color.White,
+                disabledContainerColor = Color(0xFF1E293B),
+                disabledContentColor = Color(0xFF475569)
+              ),
+              contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+              modifier = Modifier.testTag("select_batch_button_${batch.id}")
             ) {
               Text("Select", fontSize = 11.sp, fontWeight = FontWeight.Bold)
               Spacer(Modifier.width(4.dp))
-              Icon(Icons.Default.ArrowForward, contentDescription = null, modifier = Modifier.size(14.dp))
+              Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, modifier = Modifier.size(14.dp))
             }
           }
         }
@@ -720,15 +741,21 @@ fun DailyAttendanceRegister(
                 horizontalAlignment = Alignment.CenterHorizontally
               ) {
                 Text(
-                  st,
+                  text = st,
                   fontSize = 10.sp,
                   fontWeight = if (isSel) FontWeight.Bold else FontWeight.SemiBold,
-                  color = if (isSel) Color.White else Color(0xFF94A3B8)
+                  color = if (isSel) Color.White else Color(0xFF94A3B8),
+                  maxLines = 1,
+                  softWrap = false,
+                  overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                 )
                 Text(
-                  "($count)",
+                  text = "($count)",
                   fontSize = 9.sp,
-                  color = if (isSel) Color(0xFFE0F2FE) else Color(0xFF64748B)
+                  color = if (isSel) Color(0xFFE0F2FE) else Color(0xFF64748B),
+                  maxLines = 1,
+                  softWrap = false,
+                  overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                 )
               }
             }
