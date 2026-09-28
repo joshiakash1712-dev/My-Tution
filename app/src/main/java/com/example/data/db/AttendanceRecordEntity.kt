@@ -24,7 +24,9 @@ data class AttendanceRecordEntity(
   val timestamp: Long = System.currentTimeMillis(),
   val lastModifiedTimestamp: Long = System.currentTimeMillis(),
   val reason: String? = null,
-  val recordedBy: String? = null
+  val recordedBy: String? = null,
+  val batchId: String = "",
+  val instituteId: String = "FSI_MAIN"
 ) {
   fun toDomain(): AttendanceRecord {
     return AttendanceRecord(
@@ -42,15 +44,28 @@ data class AttendanceRecordEntity(
       timestamp = timestamp,
       lastModifiedTimestamp = lastModifiedTimestamp,
       reason = reason,
-      recordedBy = recordedBy
+      recordedBy = recordedBy,
+      batchId = batchId,
+      instituteId = instituteId
     )
   }
 
   companion object {
+    fun buildDeterministicId(dateStr: String, batchName: String, studentId: String): String {
+      val cleanDate = dateStr.replace("/", "").replace("-", "").trim()
+      val cleanBatch = batchName.replace(Regex("[^A-Za-z0-9]"), "").uppercase()
+      return "ATT_${cleanDate}_${cleanBatch}_${studentId.trim()}"
+    }
+
     fun fromDomain(record: AttendanceRecord): AttendanceRecordEntity {
       val (d, m, mName, y, t) = parseDateAndTimeString(record.date, record.timestamp)
+      val deterministicId = if (record.id.startsWith("ATT_") && record.id.count { it == '_' } >= 3) {
+        record.id
+      } else {
+        buildDeterministicId(record.date, record.batchName, record.studentId)
+      }
       return AttendanceRecordEntity(
-        id = record.id,
+        id = deterministicId,
         date = record.date,
         day = if (record.day > 0) record.day else d,
         month = if (record.month > 0) record.month else m,
@@ -64,7 +79,9 @@ data class AttendanceRecordEntity(
         timestamp = record.timestamp,
         lastModifiedTimestamp = record.lastModifiedTimestamp,
         reason = record.reason,
-        recordedBy = record.recordedBy
+        recordedBy = record.recordedBy,
+        batchId = record.batchId,
+        instituteId = record.instituteId
       )
     }
 

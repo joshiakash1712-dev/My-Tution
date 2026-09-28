@@ -215,6 +215,9 @@ fun PresentStudentsListDialog(
                     fontSize = 11.sp,
                     fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                     color = if (isSelected) Color.Black else Color(0xFFCBD5E1),
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
                   )
                 }
@@ -301,7 +304,8 @@ fun PresentStudentsListDialog(
                         fontSize = 13.sp,
                         color = Color.White,
                         maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false)
                       )
                       Surface(
                         shape = RoundedCornerShape(4.dp),
@@ -312,6 +316,9 @@ fun PresentStudentsListDialog(
                           fontSize = 9.sp,
                           fontWeight = FontWeight.Bold,
                           color = Color(0xFF4ADE80),
+                          maxLines = 1,
+                          softWrap = false,
+                          overflow = TextOverflow.Ellipsis,
                           modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
                         )
                       }
@@ -558,7 +565,7 @@ fun AbsentStudentsListDialog(
                   contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
                   modifier = Modifier.height(30.dp)
                 ) {
-                  Text("Send All", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                  Text("Send All", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
                 }
               }
             }
@@ -620,6 +627,9 @@ fun AbsentStudentsListDialog(
                     fontSize = 11.sp,
                     fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                     color = if (isSelected) Color.White else Color(0xFFCBD5E1),
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
                   )
                 }
@@ -706,7 +716,8 @@ fun AbsentStudentsListDialog(
                         fontSize = 13.sp,
                         color = Color.White,
                         maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false)
                       )
                       Surface(
                         shape = RoundedCornerShape(4.dp),
@@ -717,6 +728,9 @@ fun AbsentStudentsListDialog(
                           fontSize = 9.sp,
                           fontWeight = FontWeight.Bold,
                           color = Color(0xFFF87171),
+                          maxLines = 1,
+                          softWrap = false,
+                          overflow = TextOverflow.Ellipsis,
                           modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
                         )
                       }
@@ -982,6 +996,9 @@ fun EnrolledStudentsListDialog(
                     fontSize = 11.sp,
                     fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                     color = if (isSelected) Color.White else Color(0xFFCBD5E1),
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
                   )
                 }
@@ -1046,7 +1063,8 @@ fun EnrolledStudentsListDialog(
                       fontSize = 13.sp,
                       color = Color.White,
                       maxLines = 1,
-                      overflow = TextOverflow.Ellipsis
+                      overflow = TextOverflow.Ellipsis,
+                      modifier = Modifier.weight(1f, fill = false)
                     )
                     Surface(
                       shape = RoundedCornerShape(4.dp),
@@ -1065,6 +1083,9 @@ fun EnrolledStudentsListDialog(
                           "Pending" -> Color(0xFFFBBF24)
                           else -> Color(0xFF4ADE80)
                         },
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
                       )
                     }
@@ -1266,7 +1287,7 @@ fun ActiveBatchesListDialog(
                   horizontalArrangement = Arrangement.SpaceBetween,
                   verticalAlignment = Alignment.CenterVertically
                 ) {
-                  Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                  Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.weight(1f).padding(end = 8.dp)) {
                     Box(
                       modifier = Modifier
                         .size(36.dp)
@@ -1277,8 +1298,8 @@ fun ActiveBatchesListDialog(
                       Icon(Icons.Default.Class, contentDescription = null, tint = Color(0xFF38BDF8), modifier = Modifier.size(18.dp))
                     }
                     Column {
-                      Text(batch.name, fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color.White)
-                      Text("Timing: ${batch.schedule}", fontSize = 11.sp, color = Color(0xFF94A3B8))
+                      Text(batch.name, fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                      Text("Timing: ${batch.schedule}", fontSize = 11.sp, color = Color(0xFF94A3B8), maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                   }
 
@@ -1291,6 +1312,9 @@ fun ActiveBatchesListDialog(
                       fontSize = 11.sp,
                       fontWeight = FontWeight.Bold,
                       color = Color(0xFF38BDF8),
+                      maxLines = 1,
+                      softWrap = false,
+                      overflow = TextOverflow.Ellipsis,
                       modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
                     )
                   }
@@ -1307,7 +1331,10 @@ fun ActiveBatchesListDialog(
                     text = "Faculty: ${batch.teacherName}",
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Medium,
-                    color = Color(0xFFCBD5E1)
+                    color = Color(0xFFCBD5E1),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f).padding(end = 8.dp)
                   )
 
                   Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -1321,7 +1348,7 @@ fun ActiveBatchesListDialog(
                       contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
                       modifier = Modifier.height(30.dp)
                     ) {
-                      Text("Attendance", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.Black)
+                      Text("Attendance", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.Black, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
                     }
 
                     OutlinedButton(
@@ -1334,7 +1361,7 @@ fun ActiveBatchesListDialog(
                       contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
                       modifier = Modifier.height(30.dp)
                     ) {
-                      Text("Schedule", fontSize = 11.sp, color = Color(0xFF38BDF8))
+                      Text("Schedule", fontSize = 11.sp, color = Color(0xFF38BDF8), maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
                     }
                   }
                 }
@@ -1511,7 +1538,7 @@ fun LowAttendanceAlertsDialog(
                 contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
                 modifier = Modifier.height(30.dp)
               ) {
-                Text("Warn All", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.Black)
+                Text("Warn All", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.Black, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
               }
             }
           }
@@ -1550,7 +1577,9 @@ fun LowAttendanceAlertsDialog(
                     text = "${student.attendancePercent}%",
                     fontWeight = FontWeight.ExtraBold,
                     fontSize = 11.sp,
-                    color = Color(0xFFF87171)
+                    color = Color(0xFFF87171),
+                    maxLines = 1,
+                    softWrap = false
                   )
                 }
 
@@ -1560,17 +1589,23 @@ fun LowAttendanceAlertsDialog(
                     text = student.name,
                     fontWeight = FontWeight.Bold,
                     fontSize = 13.sp,
-                    color = Color.White
+                    color = Color.White,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                   )
                   Text(
                     text = "Batch: ${student.batch.ifBlank { "General" }} • Roll: ${student.id}",
                     fontSize = 11.sp,
-                    color = Color(0xFF94A3B8)
+                    color = Color(0xFF94A3B8),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                   )
                   Text(
                     text = "Parent: ${student.parentName.ifBlank { "Guardian" }} (${student.parentContact.ifBlank { student.mobile }})",
                     fontSize = 10.sp,
-                    color = Color(0xFF64748B)
+                    color = Color(0xFF64748B),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                   )
                 }
 
@@ -1747,9 +1782,9 @@ fun ClassSessionDetailDialog(
               modifier = Modifier.weight(1f)
             ) {
               Column(modifier = Modifier.padding(10.dp)) {
-                Text("TIME SLOT", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Color(0xFF94A3B8))
+                Text("TIME SLOT", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Color(0xFF94A3B8), maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
                 Spacer(modifier = Modifier.height(2.dp))
-                Text(timeSlot, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF38BDF8))
+                Text(timeSlot, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF38BDF8), maxLines = 1, overflow = TextOverflow.Ellipsis)
               }
             }
 
@@ -1761,9 +1796,9 @@ fun ClassSessionDetailDialog(
               modifier = Modifier.weight(1f)
             ) {
               Column(modifier = Modifier.padding(10.dp)) {
-                Text("CLASSROOM", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Color(0xFF94A3B8))
+                Text("CLASSROOM", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Color(0xFF94A3B8), maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
                 Spacer(modifier = Modifier.height(2.dp))
-                Text(room, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF4ADE80))
+                Text(room, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF4ADE80), maxLines = 1, overflow = TextOverflow.Ellipsis)
               }
             }
           }
@@ -1780,9 +1815,9 @@ fun ClassSessionDetailDialog(
               modifier = Modifier.weight(1f)
             ) {
               Column(modifier = Modifier.padding(10.dp)) {
-                Text("MENTOR FACULTY", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Color(0xFF94A3B8))
+                Text("MENTOR FACULTY", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Color(0xFF94A3B8), maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
                 Spacer(modifier = Modifier.height(2.dp))
-                Text(teacher, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                Text(teacher, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis)
               }
             }
 
@@ -1794,9 +1829,9 @@ fun ClassSessionDetailDialog(
               modifier = Modifier.weight(1f)
             ) {
               Column(modifier = Modifier.padding(10.dp)) {
-                Text("BATCH ROSTER", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Color(0xFF94A3B8))
+                Text("BATCH ROSTER", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Color(0xFF94A3B8), maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
                 Spacer(modifier = Modifier.height(2.dp))
-                Text("${batchStudents.size} Learners", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFFC084FC))
+                Text("${batchStudents.size} Learners", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFFC084FC), maxLines = 1, overflow = TextOverflow.Ellipsis)
               }
             }
           }
@@ -1835,7 +1870,7 @@ fun ClassSessionDetailDialog(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
               ) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.weight(1f).padding(end = 8.dp)) {
                   Box(
                     modifier = Modifier
                       .size(28.dp)
@@ -1851,8 +1886,8 @@ fun ClassSessionDetailDialog(
                     )
                   }
                   Column {
-                    Text(student.name, fontWeight = FontWeight.SemiBold, fontSize = 12.sp, color = Color.White)
-                    Text("Roll: ${student.id}", fontSize = 10.sp, color = Color(0xFF94A3B8))
+                    Text(student.name, fontWeight = FontWeight.SemiBold, fontSize = 12.sp, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text("Roll: ${student.id}", fontSize = 10.sp, color = Color(0xFF94A3B8), maxLines = 1, softWrap = false)
                   }
                 }
 
@@ -1866,6 +1901,8 @@ fun ClassSessionDetailDialog(
                       fontSize = 10.sp,
                       fontWeight = FontWeight.Bold,
                       color = if (student.attendancePercent >= 75) Color(0xFF4ADE80) else Color(0xFFF87171),
+                      maxLines = 1,
+                      softWrap = false,
                       modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
                     )
                   }

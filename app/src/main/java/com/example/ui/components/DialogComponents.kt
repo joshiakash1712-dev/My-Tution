@@ -55,8 +55,8 @@ fun DigitalIdCardDialog(student: Student, onDismiss: () -> Unit) {
         horizontalAlignment = Alignment.CenterHorizontally
       ) {
         // Institute Header
-        Text("MY TUITION INSTITUTE", color = Color(0xFFAAC7FF), fontWeight = FontWeight.Bold, fontSize = 14.sp, letterSpacing = 2.sp)
-        Text("Student Identity Card", color = Color.White.copy(0.7f), fontSize = 11.sp)
+        Text("MY TUITION INSTITUTE", color = Color(0xFFAAC7FF), fontWeight = FontWeight.Bold, fontSize = 14.sp, letterSpacing = 2.sp, maxLines = 1, softWrap = false, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+        Text("Student Identity Card", color = Color.White.copy(0.7f), fontSize = 11.sp, maxLines = 1, softWrap = false, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
         Spacer(Modifier.height(16.dp))
 
         // Student Avatar
@@ -81,9 +81,9 @@ fun DigitalIdCardDialog(student: Student, onDismiss: () -> Unit) {
         }
         Spacer(Modifier.height(12.dp))
 
-        Text(student.name, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 20.sp)
+        Text(student.name, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 20.sp, maxLines = 1, softWrap = false, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
         Surface(color = Color(0xFF0061A4), shape = RoundedCornerShape(8.dp), modifier = Modifier.padding(top = 4.dp)) {
-          Text(student.id, color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 10.dp, vertical = 2.dp))
+          Text(student.id, color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, modifier = Modifier.padding(horizontal = 10.dp, vertical = 2.dp))
         }
 
         HorizontalDivider(color = Color.White.copy(0.15f), modifier = Modifier.padding(vertical = 12.dp))
@@ -107,7 +107,7 @@ fun DigitalIdCardDialog(student: Student, onDismiss: () -> Unit) {
         ) {
           Icon(Icons.Default.QrCode2, contentDescription = "QR Code", modifier = Modifier.fillMaxSize(), tint = Color(0xFF001D36))
         }
-        Text("Verified Digital Pass", color = Color(0xFFAAC7FF), fontSize = 9.sp, modifier = Modifier.padding(top = 4.dp))
+        Text("Verified Digital Pass", color = Color(0xFFAAC7FF), fontSize = 9.sp, maxLines = 1, softWrap = false, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, modifier = Modifier.padding(top = 4.dp))
       }
     },
     containerColor = MaterialTheme.colorScheme.surface,
@@ -117,9 +117,10 @@ fun DigitalIdCardDialog(student: Student, onDismiss: () -> Unit) {
 
 @Composable
 private fun IdCardRow(label: String, valText: String) {
-  Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-    Text(label, color = Color.White.copy(0.6f), fontSize = 12.sp)
-    Text(valText, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+  Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+    Text(label, color = Color.White.copy(0.6f), fontSize = 12.sp, maxLines = 1, softWrap = false, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+    Spacer(Modifier.width(8.dp))
+    Text(valText, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Medium, maxLines = 1, softWrap = false, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, textAlign = TextAlign.End, modifier = Modifier.weight(1f))
   }
 }
 
@@ -182,21 +183,21 @@ fun ReportCardDialog(student: Student, onDismiss: () -> Unit) {
               }
             }
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-              Text(student.name, fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color.White)
-              Text("ID: ${student.id} • Batch: ${student.batch}", fontSize = 12.sp, color = Color(0xFF94A3B8))
-              Text("Overall Attendance: ${student.attendancePercent}%", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF38BDF8))
+              Text(student.name, fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color.White, maxLines = 1, softWrap = false, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+              Text("ID: ${student.id} • Batch: ${student.batch}", fontSize = 12.sp, color = Color(0xFF94A3B8), maxLines = 1, softWrap = false, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+              Text("Overall Attendance: ${student.attendancePercent}%", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF38BDF8), maxLines = 1, softWrap = false, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
             }
           }
         }
 
-        Text("Academic Performance Summary", fontWeight = FontWeight.SemiBold, fontSize = 14.sp, color = Color.White)
+        Text("Academic Performance Summary", fontWeight = FontWeight.SemiBold, fontSize = 14.sp, color = Color.White, maxLines = 1, softWrap = false, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
         
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
           StatMiniCard("Overall Avg", "${student.overallAvg}%", Color(0xFF0284C7).copy(alpha = 0.2f), Color(0xFF38BDF8), Modifier.weight(1f))
           StatMiniCard("Batch Rank", "#${student.rank}", Color(0xFFA855F7).copy(alpha = 0.2f), Color(0xFFC084FC), Modifier.weight(1f))
         }
 
-        Text("Recent Test Breakdown", fontWeight = FontWeight.SemiBold, fontSize = 13.sp, color = Color(0xFF94A3B8))
+        Text("Recent Test Breakdown", fontWeight = FontWeight.SemiBold, fontSize = 13.sp, color = Color(0xFF94A3B8), maxLines = 1, softWrap = false, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
           student.recentScores.forEach { (tName, score) ->
             Row(
@@ -209,8 +210,9 @@ fun ReportCardDialog(student: Student, onDismiss: () -> Unit) {
               horizontalArrangement = Arrangement.SpaceBetween,
               verticalAlignment = Alignment.CenterVertically
             ) {
-              Text(tName, fontSize = 13.sp, fontWeight = FontWeight.Medium, color = Color.White)
-              Text("$score / 100", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFF38BDF8))
+              Text(tName, fontSize = 13.sp, fontWeight = FontWeight.Medium, color = Color.White, maxLines = 1, softWrap = false, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+              Spacer(Modifier.width(8.dp))
+              Text("$score / 100", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFF38BDF8), maxLines = 1, softWrap = false, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
             }
           }
         }
@@ -234,8 +236,8 @@ fun ReportCardDialog(student: Student, onDismiss: () -> Unit) {
 fun StatMiniCard(title: String, valStr: String, bg: Color, tx: Color, modifier: Modifier = Modifier) {
   Box(modifier = modifier.clip(RoundedCornerShape(16.dp)).background(bg).padding(12.dp)) {
     Column {
-      Text(title, fontSize = 11.sp, color = tx.copy(0.7f))
-      Text(valStr, fontSize = 18.sp, fontWeight = FontWeight.Bold, color = tx)
+      Text(title, fontSize = 11.sp, color = tx.copy(0.7f), maxLines = 1, softWrap = false, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+      Text(valStr, fontSize = 18.sp, fontWeight = FontWeight.Bold, color = tx, maxLines = 1, softWrap = false, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
     }
   }
 }

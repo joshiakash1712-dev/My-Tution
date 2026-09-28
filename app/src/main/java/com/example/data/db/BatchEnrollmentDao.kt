@@ -27,6 +27,9 @@ interface BatchEnrollmentDao {
   @Query("DELETE FROM batch_enrollments WHERE studentId = :studentId AND batchId = :batchId")
   suspend fun deleteEnrollment(studentId: String, batchId: String)
 
+  @Query("DELETE FROM batch_enrollments WHERE studentId = :studentId")
+  suspend fun deleteEnrollmentsByStudent(studentId: String)
+
   @Query("DELETE FROM batch_enrollments")
   suspend fun deleteAllEnrollments()
 

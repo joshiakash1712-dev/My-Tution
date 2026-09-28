@@ -38,6 +38,32 @@ data class FirestorePaginationState<T>(
   val error: String? = null
 )
 
+data class FirestoreSyncEnvelope(
+  val collection: String,
+  val documentId: String,
+  val instituteId: String = "FSI_MAIN",
+  val ownership: String = "ADMIN",
+  val createdAt: Long = System.currentTimeMillis(),
+  val updatedAt: Long = System.currentTimeMillis(),
+  val syncStatus: String = "PENDING_SYNC", // "PENDING_SYNC", "SYNCED", "SYNC_FAILED"
+  val conflictStrategy: String = "LAST_WRITE_WINS_BY_UPDATED_AT",
+  val operation: String = "UPSERT", // "UPSERT", "DELETE"
+  val payload: Map<String, Any> = emptyMap()
+) {
+  fun toMap(): Map<String, Any> = mapOf(
+    "collection" to collection,
+    "documentId" to documentId,
+    "instituteId" to instituteId,
+    "ownership" to ownership,
+    "createdAt" to createdAt,
+    "updatedAt" to updatedAt,
+    "syncStatus" to syncStatus,
+    "conflictStrategy" to conflictStrategy,
+    "operation" to operation,
+    "payload" to payload
+  )
+}
+
 data class FirestoreStudent(
   val id: String = "",
   val name: String = "",
@@ -45,9 +71,31 @@ data class FirestoreStudent(
   val subjectsEnrolled: List<String> = emptyList(),
   val contactInfo: String = "",
   val parentName: String = "",
-  val parentContact: String = ""
+  val parentContact: String = "",
+  val email: String = "",
+  val dob: String = "",
+  val gender: String = "",
+  val address: String = "",
+  val school: String = "",
+  val className: String = "Class 12",
+  val batch: String = "",
+  val batchId: String = "",
+  val stream: String = "Science",
+  val admissionDate: String = "",
+  val status: String = "Active",
+  val attendancePercent: Int = 85,
+  val overallAvg: Int = 80,
+  val rank: Int = 1,
+  val parentId: String = "",
+  val parentEmail: String = "",
+  val feeStatus: String = "Pending",
+  val instituteId: String = "FSI_MAIN",
+  val createdAt: Long = System.currentTimeMillis(),
+  val updatedAt: Long = System.currentTimeMillis(),
+  val syncStatus: String = "SYNCED",
+  val conflictStrategy: String = "LAST_WRITE_WINS_BY_UPDATED_AT"
 ) {
-  // Convert to Map for Firestore upload
+  // Convert to Map for Firestore upload without dropping important fields
   fun toMap(): Map<String, Any> {
     return mapOf(
       "id" to id,
@@ -56,11 +104,103 @@ data class FirestoreStudent(
       "subjectsEnrolled" to subjectsEnrolled,
       "contactInfo" to contactInfo,
       "parentName" to parentName,
-      "parentContact" to parentContact
+      "parentContact" to parentContact,
+      "email" to email,
+      "dob" to dob,
+      "gender" to gender,
+      "address" to address,
+      "school" to school,
+      "className" to className,
+      "batch" to batch,
+      "batchId" to batchId,
+      "stream" to stream,
+      "admissionDate" to admissionDate,
+      "status" to status,
+      "attendancePercent" to attendancePercent,
+      "overallAvg" to overallAvg,
+      "rank" to rank,
+      "parentId" to parentId,
+      "parentEmail" to parentEmail,
+      "feeStatus" to feeStatus,
+      "instituteId" to instituteId,
+      "createdAt" to createdAt,
+      "updatedAt" to updatedAt,
+      "syncStatus" to syncStatus,
+      "conflictStrategy" to conflictStrategy
     )
   }
 
+  fun toDomainStudent(existing: Student? = null): Student {
+    return Student(
+      id = id,
+      name = name,
+      photo = existing?.photo ?: "",
+      mobile = contactInfo.ifBlank { existing?.mobile ?: "" },
+      parentName = parentName.ifBlank { existing?.parentName ?: "" },
+      parentContact = parentContact.ifBlank { existing?.parentContact ?: "" },
+      email = email.ifBlank { existing?.email ?: "${id.lowercase()}@mytuition.com" },
+      dob = dob.ifBlank { existing?.dob ?: "" },
+      gender = gender.ifBlank { existing?.gender ?: "" },
+      address = address.ifBlank { existing?.address ?: "" },
+      school = school.ifBlank { existing?.school ?: "" },
+      className = className.ifBlank { existing?.className ?: "Class 12" },
+      batch = batch.ifBlank { existing?.batch ?: "12th Science" },
+      stream = stream.ifBlank { existing?.stream ?: "Science" },
+      admissionDate = admissionDate.ifBlank { existing?.admissionDate ?: "" },
+      status = status.ifBlank { existing?.status ?: "Active" },
+      attendancePercent = attendancePercent,
+      overallAvg = overallAvg,
+      rank = rank,
+      strongestSubject = existing?.strongestSubject ?: "Physics",
+      weakestSubject = existing?.weakestSubject ?: "Mathematics",
+      recentScores = existing?.recentScores ?: emptyList(),
+      batchId = batchId.ifBlank { existing?.batchId ?: "BATCH_${batch.replace(" ", "_")}" },
+      parentId = parentId.ifBlank { existing?.parentId ?: "PAR_$id" },
+      parentEmail = parentEmail.ifBlank { existing?.parentEmail ?: "parent_${id.lowercase()}@mytuition.com" },
+      feeStatus = feeStatus.ifBlank { existing?.feeStatus ?: "Pending" },
+      instituteId = instituteId.ifBlank { existing?.instituteId ?: "FSI_MAIN" }
+    )
+  }
+
+  fun toDomain(existing: Student? = null): Student = toDomainStudent(existing)
+
   companion object {
+    fun fromDomain(student: Student, updatedAt: Long = System.currentTimeMillis(), syncStatus: String = "SYNCED"): FirestoreStudent =
+      fromDomainStudent(student, updatedAt, syncStatus)
+
+    fun fromDomainStudent(student: Student, updatedAt: Long = System.currentTimeMillis(), syncStatus: String = "SYNCED"): FirestoreStudent {
+      return FirestoreStudent(
+        id = student.id,
+        name = student.name,
+        grade = "${student.className} (${student.stream})",
+        subjectsEnrolled = listOf("Physics", "Chemistry", "Mathematics"),
+        contactInfo = student.mobile,
+        parentName = student.parentName,
+        parentContact = student.parentContact,
+        email = student.email,
+        dob = student.dob,
+        gender = student.gender,
+        address = student.address,
+        school = student.school,
+        className = student.className,
+        batch = student.batch,
+        batchId = student.batchId,
+        stream = student.stream,
+        admissionDate = student.admissionDate,
+        status = student.status,
+        attendancePercent = student.attendancePercent,
+        overallAvg = student.overallAvg,
+        rank = student.rank,
+        parentId = student.parentId,
+        parentEmail = student.parentEmail,
+        feeStatus = student.feeStatus,
+        instituteId = student.instituteId.ifBlank { "FSI_MAIN" },
+        createdAt = updatedAt,
+        updatedAt = updatedAt,
+        syncStatus = syncStatus
+      )
+    }
+
     // Helper to construct from Firestore document map
     fun fromMap(id: String, map: Map<String, Any>): FirestoreStudent {
       return FirestoreStudent(
@@ -70,7 +210,29 @@ data class FirestoreStudent(
         subjectsEnrolled = (map["subjectsEnrolled"] as? List<*>)?.mapNotNull { it as? String } ?: emptyList(),
         contactInfo = map["contactInfo"] as? String ?: "",
         parentName = map["parentName"] as? String ?: "",
-        parentContact = map["parentContact"] as? String ?: ""
+        parentContact = map["parentContact"] as? String ?: "",
+        email = map["email"] as? String ?: "",
+        dob = map["dob"] as? String ?: "",
+        gender = map["gender"] as? String ?: "",
+        address = map["address"] as? String ?: "",
+        school = map["school"] as? String ?: "",
+        className = map["className"] as? String ?: "Class 12",
+        batch = map["batch"] as? String ?: "",
+        batchId = map["batchId"] as? String ?: "",
+        stream = map["stream"] as? String ?: "Science",
+        admissionDate = map["admissionDate"] as? String ?: "",
+        status = map["status"] as? String ?: "Active",
+        attendancePercent = (map["attendancePercent"] as? Number)?.toInt() ?: 85,
+        overallAvg = (map["overallAvg"] as? Number)?.toInt() ?: 80,
+        rank = (map["rank"] as? Number)?.toInt() ?: 1,
+        parentId = map["parentId"] as? String ?: "",
+        parentEmail = map["parentEmail"] as? String ?: "",
+        feeStatus = map["feeStatus"] as? String ?: "Pending",
+        instituteId = map["instituteId"] as? String ?: "FSI_MAIN",
+        createdAt = (map["createdAt"] as? Number)?.toLong() ?: System.currentTimeMillis(),
+        updatedAt = (map["updatedAt"] as? Number)?.toLong() ?: System.currentTimeMillis(),
+        syncStatus = map["syncStatus"] as? String ?: "SYNCED",
+        conflictStrategy = map["conflictStrategy"] as? String ?: "LAST_WRITE_WINS_BY_UPDATED_AT"
       )
     }
   }
@@ -356,6 +518,7 @@ object FirestoreService {
             _remoteProfiles.value = list
             studentsCache = CachedResource(list, System.currentTimeMillis(), "server")
             _lastSyncTimestamp.value = System.currentTimeMillis()
+            AppRepository.reconcileRemoteStudentsToRoom(list)
           }
           _syncStatus.value = "Fetched ${list.size} profiles (${if (result.metadata.isFromCache) "Native Cache" else "Cloud Server"})"
           _isLoading.value = false
@@ -371,6 +534,7 @@ object FirestoreService {
                 if (list.isNotEmpty()) {
                   _remoteProfiles.value = list
                   studentsCache = CachedResource(list, System.currentTimeMillis(), "server")
+                  AppRepository.reconcileRemoteStudentsToRoom(list)
                 }
                 _isLoading.value = false
                 onComplete?.invoke(_remoteProfiles.value)
@@ -974,11 +1138,189 @@ object FirestoreService {
     _announcementsPaginationState.value = FirestorePaginationState()
   }
 
+  private var studentsListenerRegistration: com.google.firebase.firestore.ListenerRegistration? = null
+  private var announcementsListenerRegistration: com.google.firebase.firestore.ListenerRegistration? = null
+  private val activeListenerKeys = ConcurrentHashMap.newKeySet<String>()
+
+  // Pending synchronization queue (Section 26 & 27: Room -> Firestore with stable IDs and metadata)
+  private val pendingSyncEnvelopes = ConcurrentHashMap<String, FirestoreSyncEnvelope>()
+  private val _pendingSyncList = MutableStateFlow<List<FirestoreSyncEnvelope>>(emptyList())
+  val pendingSyncList = _pendingSyncList.asStateFlow()
+
+  fun getPendingSyncEnvelopes(): List<FirestoreSyncEnvelope> = pendingSyncEnvelopes.values.toList()
+
+  fun getPendingSyncCount(): Int = pendingSyncEnvelopes.size
+
+  fun clearPendingSyncQueue() {
+    pendingSyncEnvelopes.clear()
+    _pendingSyncList.value = emptyList()
+  }
+
+  fun enqueueOrSyncEnvelope(
+    envelope: FirestoreSyncEnvelope,
+    onComplete: ((Boolean) -> Unit)? = null
+  ) {
+    if (envelope.documentId.isBlank()) {
+      onComplete?.invoke(false)
+      return
+    }
+    val key = "${envelope.collection}:${envelope.documentId}"
+    val pendingEnv = envelope.copy(syncStatus = "PENDING_SYNC", updatedAt = System.currentTimeMillis())
+    pendingSyncEnvelopes[key] = pendingEnv
+    _pendingSyncList.value = pendingSyncEnvelopes.values.sortedByDescending { it.updatedAt }
+
+    // Also keep local remoteProfiles in sync if this is a student_profiles document
+    if (envelope.collection == COLLECTION_NAME) {
+      val fsStudent = FirestoreStudent.fromMap(envelope.documentId, envelope.payload)
+      val updated = _remoteProfiles.value.filterNot { it.id == fsStudent.id } + fsStudent
+      _remoteProfiles.value = updated
+      studentsCache = CachedResource(updated, System.currentTimeMillis(), "local_pending")
+    }
+
+    if (!NetworkConnectivityManager.isOnline.value) {
+      NetworkConnectivityManager.recordLocalMutation()
+      _syncStatus.value = "Saved locally (Pending Cloud Sync: ${pendingSyncEnvelopes.size} item(s))"
+      onComplete?.invoke(false)
+      return
+    }
+
+    if (!NetworkConnectivityManager.isFirebaseReachable.value) {
+      NetworkConnectivityManager.recordLocalMutation()
+      NetworkConnectivityManager.recordServiceUnavailable("Firebase service unreachable")
+      _syncStatus.value = "Saved locally (Cloud Service Unavailable — Sync Pending)"
+      onComplete?.invoke(false)
+      return
+    }
+
+    val database = db
+    if (database == null) {
+      // No live Firebase configured: keep in pending state, never falsely claim cloud sync succeeded
+      NetworkConnectivityManager.recordLocalMutation()
+      _syncStatus.value = "Saved locally to Room (Pending Cloud Sync — Firebase unconfigured)"
+      onComplete?.invoke(false)
+      return
+    }
+
+    database.collection(envelope.collection)
+      .document(envelope.documentId)
+      .set(pendingEnv.copy(syncStatus = "SYNCED").toMap())
+      .addOnSuccessListener {
+        pendingSyncEnvelopes.remove(key)
+        _pendingSyncList.value = pendingSyncEnvelopes.values.sortedByDescending { it.updatedAt }
+        _lastSyncTimestamp.value = System.currentTimeMillis()
+        if (pendingSyncEnvelopes.isEmpty()) {
+          NetworkConnectivityManager.recordSyncSuccess()
+          _syncStatus.value = "Cloud Sync Complete (${envelope.collection}/${envelope.documentId})"
+        } else {
+          _syncStatus.value = "Synced ${envelope.collection}/${envelope.documentId} (${pendingSyncEnvelopes.size} remaining)"
+        }
+        onComplete?.invoke(true)
+      }
+      .addOnFailureListener { e ->
+        val failedEnv = pendingEnv.copy(syncStatus = "SYNC_FAILED")
+        pendingSyncEnvelopes[key] = failedEnv
+        _pendingSyncList.value = pendingSyncEnvelopes.values.sortedByDescending { it.updatedAt }
+        NetworkConnectivityManager.recordSyncFailure(e.message ?: "Firestore write error")
+        _syncStatus.value = "Cloud Sync Failed: ${e.message ?: "Temporary network error"}"
+        onComplete?.invoke(false)
+      }
+  }
+
+  fun syncStudentToCloud(student: Student, createdBy: String = "SYSTEM", onComplete: ((Boolean) -> Unit)? = null) {
+    if (student.id.isBlank()) {
+      onComplete?.invoke(false)
+      return
+    }
+    val fsStudent = FirestoreStudent.fromDomain(student)
+    val envelope = FirestoreSyncEnvelope(
+      collection = COLLECTION_NAME,
+      documentId = student.id,
+      instituteId = student.instituteId.ifBlank { "FSI_MAIN" },
+      ownership = createdBy.ifBlank { student.id },
+      createdAt = student.admissionTimestamp,
+      updatedAt = System.currentTimeMillis(),
+      syncStatus = "PENDING_SYNC",
+      conflictStrategy = "LAST_WRITE_WINS",
+      payload = fsStudent.toMap()
+    )
+    enqueueOrSyncEnvelope(envelope, onComplete)
+  }
+
+  fun flushPendingSyncQueue(onComplete: ((Int) -> Unit)? = null): Boolean {
+    if (!NetworkConnectivityManager.isOnline.value || !NetworkConnectivityManager.isFirebaseReachable.value) {
+      onComplete?.invoke(0)
+      return false
+    }
+    val items = pendingSyncEnvelopes.values.toList()
+    if (items.isEmpty()) {
+      onComplete?.invoke(0)
+      return true
+    }
+    val database = db
+    if (database == null) {
+      // In local test environment when explicitly flushing while online & reachable, mark synced if simulated
+      onComplete?.invoke(0)
+      return false
+    }
+    var syncedCount = 0
+    var processed = 0
+    items.forEach { env ->
+      enqueueOrSyncEnvelope(env) { ok ->
+        if (ok) syncedCount++
+        processed++
+        if (processed == items.size) {
+          onComplete?.invoke(syncedCount)
+        }
+      }
+    }
+    return true
+  }
+
+  // REALTIME LISTENER for Student Profiles (Section 27 & 32: controlled lifecycle ownership, no duplicates)
+  fun listenToChanges() {
+    if (!activeListenerKeys.add(COLLECTION_NAME)) {
+      return // Already listening — idempotent!
+    }
+    val database = db ?: return
+    if (studentsListenerRegistration != null) return
+    try {
+      studentsListenerRegistration = database.collection(COLLECTION_NAME)
+        .addSnapshotListener { snapshot, error ->
+          if (error != null) {
+            Log.e(TAG, "Realtime students listener error: ${error.message}")
+            NetworkConnectivityManager.recordSyncFailure(error.message ?: "Listener error")
+            return@addSnapshotListener
+          }
+          if (snapshot != null && !snapshot.isEmpty) {
+            val list = snapshot.documents.map { doc ->
+              FirestoreStudent.fromMap(doc.id, doc.data ?: emptyMap())
+            }
+            _remoteProfiles.value = list
+            studentsCache = CachedResource(list, System.currentTimeMillis(), "server")
+            // Synchronize Firestore -> Room using stable IDs
+            AppRepository.reconcileRemoteStudentsToRoom(list)
+          }
+        }
+    } catch (e: Exception) {
+      Log.e(TAG, "Error setting snapshot listener for students", e)
+    }
+  }
+
+  fun stopListeningToChanges() {
+    studentsListenerRegistration?.remove()
+    studentsListenerRegistration = null
+    activeListenerKeys.remove(COLLECTION_NAME)
+  }
+
   // REALTIME LISTENER for centralized Announcements collection
   fun listenToAnnouncements() {
+    if (!activeListenerKeys.add(ANNOUNCEMENTS_COLLECTION)) {
+      return // Already listening — idempotent!
+    }
+    if (announcementsListenerRegistration != null) return
     val database = db ?: return
     try {
-      database.collection(ANNOUNCEMENTS_COLLECTION)
+      announcementsListenerRegistration = database.collection(ANNOUNCEMENTS_COLLECTION)
         .addSnapshotListener { snapshot, error ->
           if (error != null) {
             Log.e(TAG, "Realtime announcements listener error: ${error.message}")
@@ -999,6 +1341,20 @@ object FirestoreService {
     }
   }
 
+  fun stopListeningToAnnouncements() {
+    announcementsListenerRegistration?.remove()
+    announcementsListenerRegistration = null
+    activeListenerKeys.remove(ANNOUNCEMENTS_COLLECTION)
+  }
+
+  fun stopAllListeners() {
+    stopListeningToChanges()
+    stopListeningToAnnouncements()
+    activeListenerKeys.clear()
+  }
+
+  fun getActiveListenerCount(): Int = activeListenerKeys.size
+
   // --- INSTITUTE CONFIGURATION FIRESTORE PERSISTENCE ---
   private const val INSTITUTE_CONFIG_COLLECTION = "institute_config"
   private const val INSTITUTE_CONFIG_DOC_ID = "primary_institute"
@@ -1009,7 +1365,9 @@ object FirestoreService {
     onFailure: ((Exception) -> Unit)? = null
   ) {
     if (!NetworkConnectivityManager.isOnline.value) {
-      val ex = IllegalStateException("Cannot sync configuration in Offline Mode.")
+      NetworkConnectivityManager.recordLocalMutation()
+      val ex = IllegalStateException("Saved locally; cloud sync pending while offline.")
+      _syncStatus.value = "Institute config saved locally (Cloud Sync Pending)"
       onFailure?.invoke(ex)
       return
     }
@@ -1017,6 +1375,7 @@ object FirestoreService {
     val database = db
     if (database == null) {
       Log.w(TAG, "Firestore not initialized - caching InstituteConfig locally.")
+      _syncStatus.value = "Institute config saved locally (Firebase unconfigured)"
       onSuccess?.invoke()
       return
     }
@@ -1051,10 +1410,12 @@ object FirestoreService {
       .addOnSuccessListener {
         Log.d(TAG, "Institute configuration successfully synced to Firestore document '$INSTITUTE_CONFIG_DOC_ID'")
         _syncStatus.value = "Institute setup synced to Cloud Firestore"
+        NetworkConnectivityManager.recordSyncSuccess()
         onSuccess?.invoke()
       }
       .addOnFailureListener { e ->
         Log.e(TAG, "Failed to sync institute config to Firestore", e)
+        NetworkConnectivityManager.recordSyncFailure(e.message ?: "Institute config sync failed")
         onFailure?.invoke(e)
       }
   }

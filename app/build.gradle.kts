@@ -77,6 +77,44 @@ googleServices {
   missingGoogleServicesStrategy = MissingGoogleServicesStrategy.WARN
 }
 
+// Ensure headless AWT mode and guard against KSP2 post-disposal AWT-EventQueue-0 race condition
+fun installKspHeadlessAndAwtGuard() {
+  System.setProperty("java.awt.headless", "true")
+  System.setProperty("idea.awt.headless", "true")
+  Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
+    val isKspAwtDisposalRace = thread.name.startsWith("AWT-EventQueue") &&
+      throwable is NullPointerException &&
+      (throwable.message?.contains("ksp.com.intellij.openapi.application.ApplicationManager.getApplication()") == true ||
+        throwable.stackTrace.any { it.className.startsWith("ksp.com.intellij.") })
+    if (!isKspAwtDisposalRace) {
+      System.err.print("Exception in thread \"${thread.name}\" ")
+      throwable.printStackTrace(System.err)
+    }
+  }
+}
+
+installKspHeadlessAndAwtGuard()
+
+tasks.matching { it.name.startsWith("ksp") }.configureEach {
+  if (name.contains("UnitTest") || name.contains("AndroidTest")) {
+    enabled = false
+  }
+  doFirst {
+    System.setProperty("java.awt.headless", "true")
+    System.setProperty("idea.awt.headless", "true")
+    Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
+      val isKspAwtDisposalRace = thread.name.startsWith("AWT-EventQueue") &&
+        throwable is NullPointerException &&
+        (throwable.message?.contains("ksp.com.intellij.openapi.application.ApplicationManager.getApplication()") == true ||
+          throwable.stackTrace.any { it.className.startsWith("ksp.com.intellij.") })
+      if (!isKspAwtDisposalRace) {
+        System.err.print("Exception in thread \"${thread.name}\" ")
+        throwable.printStackTrace(System.err)
+      }
+    }
+  }
+}
+
 
 // Some unused dependencies are commented out below instead of being removed.
 // This makes it easy to add them back in the future if needed.
@@ -137,5 +175,5 @@ dependencies {
   debugImplementation(libs.androidx.compose.ui.test.manifest)
   debugImplementation(libs.androidx.compose.ui.tooling)
   "ksp"(libs.androidx.room.compiler)
-  "ksp"(libs.moshi.kotlin.codegen)
+  // "ksp"(libs.moshi.kotlin.codegen)
 }

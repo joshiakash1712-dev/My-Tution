@@ -18,7 +18,10 @@ data class FeePaymentEntity(
   val month: String,
   val remarks: String,
   val recordedBy: String,
-  val timestamp: Long = System.currentTimeMillis()
+  val timestamp: Long = System.currentTimeMillis(),
+  val invoiceId: String = "",
+  val instituteId: String = "FSI_MAIN",
+  val transactionId: String = ""
 ) {
   fun toDomain(): StudentFeePayment {
     return StudentFeePayment(
@@ -34,7 +37,10 @@ data class FeePaymentEntity(
       month = month,
       remarks = remarks,
       recordedBy = recordedBy,
-      timestamp = timestamp
+      timestamp = timestamp,
+      invoiceId = invoiceId,
+      instituteId = instituteId,
+      transactionId = transactionId.ifBlank { receiptNo }
     )
   }
 
@@ -58,7 +64,10 @@ data class FeePaymentEntity(
         month = payment.month,
         remarks = payment.remarks,
         recordedBy = payment.recordedBy,
-        timestamp = payment.timestamp
+        timestamp = payment.timestamp,
+        invoiceId = payment.invoiceId,
+        instituteId = payment.instituteId,
+        transactionId = payment.transactionId.ifBlank { finalReceipt }
       )
     }
   }

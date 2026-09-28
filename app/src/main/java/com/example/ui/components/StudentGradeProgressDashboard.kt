@@ -293,7 +293,8 @@ fun StudentGradeProgressDashboard(
       ) {
         Row(
           verticalAlignment = Alignment.CenterVertically,
-          horizontalArrangement = Arrangement.spacedBy(12.dp)
+          horizontalArrangement = Arrangement.spacedBy(12.dp),
+          modifier = Modifier.weight(1f)
         ) {
           Box(
             modifier = Modifier
@@ -309,13 +310,17 @@ fun StudentGradeProgressDashboard(
             Icon(Icons.Default.TrendingUp, contentDescription = null, tint = Color.White, modifier = Modifier.size(24.dp))
           }
 
-          Column {
+          Column(modifier = Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
               Text(
                 "Grade Progress Analytics",
                 fontWeight = FontWeight.ExtraBold,
                 fontSize = 17.sp,
-                color = Color.White
+                color = Color.White,
+                maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false)
               )
               Surface(
                 color = Color(0xFF1E293B),
@@ -327,6 +332,9 @@ fun StudentGradeProgressDashboard(
                   fontSize = 8.sp,
                   fontWeight = FontWeight.ExtraBold,
                   color = Color(0xFF38BDF8),
+                  maxLines = 1,
+                  softWrap = false,
+                  overflow = TextOverflow.Ellipsis,
                   modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
                 )
               }
@@ -334,7 +342,10 @@ fun StudentGradeProgressDashboard(
             Text(
               "${student.name} • ${student.className} • ${student.batch}",
               fontSize = 12.sp,
-              color = Color(0xFF94A3B8)
+              color = Color(0xFF94A3B8),
+              maxLines = 1,
+              softWrap = false,
+              overflow = TextOverflow.Ellipsis
             )
           }
         }
@@ -446,7 +457,10 @@ fun StudentGradeProgressDashboard(
                   chartType.label,
                   fontSize = 11.sp,
                   fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                  color = if (isSelected) Color.White else Color(0xFF94A3B8)
+                  color = if (isSelected) Color.White else Color(0xFF94A3B8),
+                  maxLines = 1,
+                  softWrap = false,
+                  overflow = TextOverflow.Ellipsis
                 )
               }
             }
@@ -567,7 +581,7 @@ fun StudentGradeProgressDashboard(
               horizontalArrangement = Arrangement.SpaceBetween,
               verticalAlignment = Alignment.CenterVertically
             ) {
-              Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+              Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.weight(1f)) {
                 Box(
                   modifier = Modifier
                     .size(28.dp)
@@ -575,13 +589,15 @@ fun StudentGradeProgressDashboard(
                     .background(Color(0xFF2563EB)),
                   contentAlignment = Alignment.Center
                 ) {
-                  Text("${activePoint.rankInTest}", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                  Text("${activePoint.rankInTest}", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp, maxLines = 1, softWrap = false)
                 }
-                Column {
-                  Text(activePoint.testName, fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color.White)
-                  Text("${activePoint.subject} • ${activePoint.date}", fontSize = 10.sp, color = Color(0xFF94A3B8))
+                Column(modifier = Modifier.weight(1f)) {
+                  Text(activePoint.testName, fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color.White, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
+                  Text("${activePoint.subject} • ${activePoint.date}", fontSize = 10.sp, color = Color(0xFF94A3B8), maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
                 }
               }
+
+              Spacer(modifier = Modifier.width(8.dp))
 
               Surface(
                 color = Color(0xFF1E293B),
@@ -593,12 +609,15 @@ fun StudentGradeProgressDashboard(
                   verticalAlignment = Alignment.CenterVertically,
                   horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                  Text("Score:", fontSize = 11.sp, color = Color(0xFF94A3B8))
+                  Text("Score:", fontSize = 11.sp, color = Color(0xFF94A3B8), maxLines = 1, softWrap = false)
                   Text(
                     "${activePoint.score}/${activePoint.totalMarks} (${activePoint.percentage.roundToInt()}%)",
                     fontWeight = FontWeight.ExtraBold,
                     fontSize = 12.sp,
-                    color = Color(0xFF38BDF8)
+                    color = Color(0xFF38BDF8),
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Ellipsis
                   )
                 }
               }
@@ -620,6 +639,9 @@ fun StudentGradeProgressDashboard(
                   fontSize = 10.sp,
                   fontWeight = FontWeight.Bold,
                   color = if (diffFromAvg >= 0) Color(0xFF6EE7B7) else Color(0xFFFCA5A5),
+                  maxLines = 1,
+                  softWrap = false,
+                  overflow = TextOverflow.Ellipsis,
                   modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
                 )
               }
@@ -629,6 +651,7 @@ fun StudentGradeProgressDashboard(
                 fontSize = 11.sp,
                 color = Color(0xFFCBD5E1),
                 maxLines = 1,
+                softWrap = false,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f)
               )
@@ -646,17 +669,17 @@ fun StudentGradeProgressDashboard(
         ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
           Box(modifier = Modifier.size(10.dp).clip(CircleShape).background(Color(0xFF0061A4)))
-          Text("Student Score", fontSize = 11.sp, color = Color(0xFF94A3B8), fontWeight = FontWeight.SemiBold)
+          Text("Student Score", fontSize = 11.sp, color = Color(0xFF94A3B8), fontWeight = FontWeight.SemiBold, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
         }
         Spacer(Modifier.width(16.dp))
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
           Box(modifier = Modifier.size(10.dp).clip(CircleShape).background(Color(0xFF64748B)))
-          Text("Class Average", fontSize = 11.sp, color = Color(0xFF94A3B8), fontWeight = FontWeight.SemiBold)
+          Text("Class Average", fontSize = 11.sp, color = Color(0xFF94A3B8), fontWeight = FontWeight.SemiBold, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
         }
         Spacer(Modifier.width(16.dp))
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
           Box(modifier = Modifier.size(10.dp, 2.dp).background(Color(0xFFE11D48)))
-          Text("Target (75%)", fontSize = 11.sp, color = Color(0xFF94A3B8), fontWeight = FontWeight.SemiBold)
+          Text("Target (75%)", fontSize = 11.sp, color = Color(0xFF94A3B8), fontWeight = FontWeight.SemiBold, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
         }
       }
     }
@@ -1068,7 +1091,7 @@ fun RechartsSubjectMatrixView(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
           ) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.weight(1f)) {
               Box(
                 modifier = Modifier
                   .size(8.dp)
@@ -1082,14 +1105,19 @@ fun RechartsSubjectMatrixView(
                     }
                   )
               )
-              Text(subject, fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color(0xFF0F172A))
+              Text(subject, fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color(0xFF0F172A), maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
             }
+
+            Spacer(modifier = Modifier.width(8.dp))
 
             Text(
               "Average: ${avg.roundToInt()}% • Latest: ${latest.roundToInt()}%",
               fontWeight = FontWeight.SemiBold,
               fontSize = 11.sp,
-              color = Color(0xFF475569)
+              color = Color(0xFF475569),
+              maxLines = 1,
+              softWrap = false,
+              overflow = TextOverflow.Ellipsis
             )
           }
 
@@ -1197,11 +1225,12 @@ fun RechartsAiDiagnosticsView(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
           ) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.weight(1f)) {
               Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = Color(0xFF38BDF8), modifier = Modifier.size(16.dp))
-              Text("Conceptual Strength Map", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = Color.White)
+              Text("Conceptual Strength Map", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = Color.White, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
             }
-            Text("Overall: ${student.overallAvg}%", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF38BDF8))
+            Spacer(modifier = Modifier.width(8.dp))
+            Text("Overall: ${student.overallAvg}%", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF38BDF8), maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
           }
 
           subjectBreakdown.forEach { (subject, avg, meta) ->
@@ -1218,7 +1247,8 @@ fun RechartsAiDiagnosticsView(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
               ) {
-                Text(subject, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFFE2E8F0))
+                Text(subject, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFFE2E8F0), maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                Spacer(modifier = Modifier.width(8.dp))
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                   Surface(
                     color = statusColor.copy(alpha = 0.15f),
@@ -1229,10 +1259,13 @@ fun RechartsAiDiagnosticsView(
                       fontSize = 9.sp,
                       fontWeight = FontWeight.Bold,
                       color = statusColor,
+                      maxLines = 1,
+                      softWrap = false,
+                      overflow = TextOverflow.Ellipsis,
                       modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
                     )
                   }
-                  Text("${avg.roundToInt()}%", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                  Text("${avg.roundToInt()}%", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White, maxLines = 1, softWrap = false)
                 }
               }
 
@@ -1268,7 +1301,7 @@ fun RechartsAiDiagnosticsView(
         Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
           Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             Icon(Icons.Default.TrendingDown, contentDescription = null, tint = Color(0xFFF87171), modifier = Modifier.size(16.dp))
-            Text("Localized Weak-Spot Detection", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = Color.White)
+            Text("Localized Weak-Spot Detection", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = Color.White, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
           }
 
           subjectBreakdown.take(2).forEach { (subject, _, meta) ->
@@ -1283,9 +1316,10 @@ fun RechartsAiDiagnosticsView(
               verticalAlignment = Alignment.CenterVertically
             ) {
               Column(modifier = Modifier.weight(1f)) {
-                Text(subject, fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFF94A3B8))
-                Text(weakTopic, fontSize = 11.sp, fontWeight = FontWeight.Medium, color = Color(0xFFFCA5A5))
+                Text(subject, fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFF94A3B8), maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
+                Text(weakTopic, fontSize = 11.sp, fontWeight = FontWeight.Medium, color = Color(0xFFFCA5A5), maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
               }
+              Spacer(modifier = Modifier.width(8.dp))
               Surface(
                 color = Color(0xFFEF4444).copy(alpha = 0.15f),
                 shape = RoundedCornerShape(4.dp)
@@ -1295,6 +1329,9 @@ fun RechartsAiDiagnosticsView(
                   fontSize = 9.sp,
                   fontWeight = FontWeight.Bold,
                   color = Color(0xFFF87171),
+                  maxLines = 1,
+                  softWrap = false,
+                  overflow = TextOverflow.Ellipsis,
                   modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
                 )
               }
@@ -1311,6 +1348,9 @@ fun RechartsAiDiagnosticsView(
         fontWeight = FontWeight.Bold,
         fontSize = 12.sp,
         color = Color(0xFF38BDF8),
+        maxLines = 1,
+        softWrap = false,
+        overflow = TextOverflow.Ellipsis,
         modifier = Modifier.padding(top = 2.dp)
       )
     }
@@ -1331,7 +1371,7 @@ fun RechartsAiDiagnosticsView(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
           ) {
-            Text(title, fontWeight = FontWeight.Bold, fontSize = 11.sp, color = Color(0xFF38BDF8))
+            Text(title, fontWeight = FontWeight.Bold, fontSize = 11.sp, color = Color(0xFF38BDF8), maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
             TextButton(
               onClick = {
                 expandedQuestionIndex = if (isExpanded) null else idx
@@ -1342,7 +1382,10 @@ fun RechartsAiDiagnosticsView(
                 if (isExpanded) "Hide Hint" else "💡 Show Hint",
                 fontSize = 10.sp,
                 fontWeight = FontWeight.Bold,
-                color = Color(0xFFFBBF24)
+                color = Color(0xFFFBBF24),
+                maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Ellipsis
               )
             }
           }

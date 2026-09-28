@@ -7,26 +7,32 @@ object SeedData {
     name = "10th - Science (A)",
     schedule = "08:00 AM – 09:30 AM",
     studentCount = 4,
-    teacherName = "Prof. Shrirang Deshmukh"
+    teacherName = "Prof. Shrirang Deshmukh",
+    teacherId = "FAC_01",
+    instituteId = "FSI_MAIN"
   )
 
   val defaultBatches = listOf(
-    Batch("BATCH_8TH", "8th Standard", "07:30 AM – 09:00 AM", 0, "Prof. Akash Joshi"),
+    Batch("BATCH_8TH", "8th Standard", "07:30 AM – 09:00 AM", 0, "Prof. Akash Joshi", "FAC_03", "FSI_MAIN"),
     batch10thSciA,
-    Batch("BATCH_11_SCI_B", "11th - Science (B)", "09:45 AM – 11:15 AM", 2, "Dr. Faisal Patel"),
-    Batch("BATCH_JEE_APEX_M", "JEE Apex Morning", "11:30 AM – 01:00 PM", 2, "Prof. Akash Joshi"),
-    Batch("BATCH_FOUNDATION_T", "Foundation Target", "04:00 PM – 05:30 PM", 2, "Prof. Shrirang Deshmukh"),
-    Batch("BATCH_10_SCI_B", "10th - Science (B)", "05:45 PM – 07:15 PM", 2, "Prof. Akash Joshi"),
-    Batch("BATCH_12_SCI", "12th Science", "08:00 AM – 01:30 PM", 2, "Prof. Shrirang Deshmukh"),
-    Batch("BATCH_11_SCI", "11th Science", "02:00 PM – 06:30 PM", 0, "Dr. Faisal Patel"),
-    Batch("BATCH_NEET", "NEET Zenith", "08:00 AM – 02:00 PM", 1, "Dr. Faisal Patel")
+    Batch("BATCH_11_SCI_B", "11th - Science (B)", "09:45 AM – 11:15 AM", 2, "Dr. Faisal Patel", "FAC_02", "FSI_MAIN"),
+    Batch("BATCH_JEE_APEX_M", "JEE Apex Morning", "11:30 AM – 01:00 PM", 2, "Prof. Akash Joshi", "FAC_03", "FSI_MAIN"),
+    Batch("BATCH_FOUNDATION_T", "Foundation Target", "04:00 PM – 05:30 PM", 2, "Prof. Shrirang Deshmukh", "FAC_01", "FSI_MAIN"),
+    Batch("BATCH_10_SCI_B", "10th - Science (B)", "05:45 PM – 07:15 PM", 2, "Prof. Akash Joshi", "FAC_03", "FSI_MAIN"),
+    Batch("BATCH_12_SCI", "12th Science", "08:00 AM – 01:30 PM", 2, "Prof. Shrirang Deshmukh", "FAC_01", "FSI_MAIN"),
+    Batch("BATCH_11_SCI", "11th Science", "02:00 PM – 06:30 PM", 0, "Dr. Faisal Patel", "FAC_02", "FSI_MAIN"),
+    Batch("BATCH_NEET", "NEET Zenith", "08:00 AM – 02:00 PM", 1, "Dr. Faisal Patel", "FAC_02", "FSI_MAIN")
   )
 
+  fun batchIdForName(batchName: String): String {
+    return defaultBatches.find { it.name.equals(batchName.trim(), ignoreCase = true) }?.id ?: "BATCH_12_SCI"
+  }
+
   val defaultSubjects = listOf(
-    Subject("SUB_PHY_12", "12th Physics", 75, listOf("Electrostatics", "Current Electricity", "Magnetism", "Optics"), listOf("Wave Optics", "Dual Nature", "Atoms & Nuclei", "Semiconductors")),
-    Subject("SUB_CHEM_12", "12th Chemistry", 80, listOf("Solid State", "Solutions", "Electrochemistry", "Chemical Kinetics"), listOf("Surface Chemistry", "p-Block Elements", "Coordination Compounds")),
-    Subject("SUB_MATH_12", "12th Mathematics", 70, listOf("Matrices", "Determinants", "Continuity & Differentiability", "Application of Derivatives"), listOf("Integrals", "Differential Equations", "Vectors", "3D Geometry")),
-    Subject("SUB_BIO_12", "12th Biology", 85, listOf("Reproduction in Organisms", "Genetics & Evolution", "Human Welfare"), listOf("Biotechnology", "Ecology & Environment"))
+    Subject("SUB_PHY_12", "12th Physics", 75, listOf("Electrostatics", "Current Electricity", "Magnetism", "Optics"), listOf("Wave Optics", "Dual Nature", "Atoms & Nuclei", "Semiconductors"), batchId = "BATCH_12_SCI", batchName = "12th Science", teacherId = "FAC_01", instituteId = "FSI_MAIN"),
+    Subject("SUB_CHEM_12", "12th Chemistry", 80, listOf("Solid State", "Solutions", "Electrochemistry", "Chemical Kinetics"), listOf("Surface Chemistry", "p-Block Elements", "Coordination Compounds"), batchId = "BATCH_11_SCI_B", batchName = "11th - Science (B)", teacherId = "FAC_02", instituteId = "FSI_MAIN"),
+    Subject("SUB_MATH_12", "12th Mathematics", 70, listOf("Matrices", "Determinants", "Continuity & Differentiability", "Application of Derivatives"), listOf("Integrals", "Differential Equations", "Vectors", "3D Geometry"), batchId = "BATCH_JEE_APEX_M", batchName = "JEE Apex Morning", teacherId = "FAC_03", instituteId = "FSI_MAIN"),
+    Subject("SUB_BIO_12", "12th Biology", 85, listOf("Reproduction in Organisms", "Genetics & Evolution", "Human Welfare"), listOf("Biotechnology", "Ecology & Environment"), batchId = "BATCH_NEET", batchName = "NEET Zenith", teacherId = "FAC_02", instituteId = "FSI_MAIN")
   )
 
   val defaultTeachers = listOf(
@@ -38,6 +44,7 @@ object SeedData {
       qualification = "M.Sc. Physics (IIT Bombay)",
       experience = "12 Years",
       assignedBatches = listOf("10th - Science (A)", "12th Science", "Foundation Target"),
+      assignedBatchIds = listOf("BATCH_10_SCI_A", "BATCH_12_SCI", "BATCH_FOUNDATION_T"),
       classesTaken = 142,
       attendancePercent = 98,
       feedbackRating = 4.9f,
@@ -45,7 +52,8 @@ object SeedData {
       incentives = 10000,
       deductions = 0,
       status = "Active",
-      email = "deshmukh.physics@mytuition.com"
+      email = "deshmukh.physics@mytuition.com",
+      instituteId = "FSI_MAIN"
     ),
     Teacher(
       id = "FAC_02",
@@ -55,6 +63,7 @@ object SeedData {
       qualification = "Ph.D. Organic Chemistry",
       experience = "10 Years",
       assignedBatches = listOf("11th - Science (B)", "11th Science", "NEET Zenith"),
+      assignedBatchIds = listOf("BATCH_11_SCI_B", "BATCH_11_SCI", "BATCH_NEET"),
       classesTaken = 128,
       attendancePercent = 96,
       feedbackRating = 4.8f,
@@ -62,7 +71,8 @@ object SeedData {
       incentives = 8000,
       deductions = 0,
       status = "Active",
-      email = "patel.chem@mytuition.com"
+      email = "patel.chem@mytuition.com",
+      instituteId = "FSI_MAIN"
     ),
     Teacher(
       id = "FAC_03",
@@ -72,6 +82,7 @@ object SeedData {
       qualification = "M.Tech Mathematics & Computing",
       experience = "9 Years",
       assignedBatches = listOf("8th Standard", "10th - Science (B)", "JEE Apex Morning"),
+      assignedBatchIds = listOf("BATCH_8TH", "BATCH_10_SCI_B", "BATCH_JEE_APEX_M"),
       classesTaken = 135,
       attendancePercent = 99,
       feedbackRating = 5.0f,
@@ -79,7 +90,8 @@ object SeedData {
       incentives = 9000,
       deductions = 0,
       status = "Active",
-      email = "joshi.maths@mytuition.com"
+      email = "joshi.maths@mytuition.com",
+      instituteId = "FSI_MAIN"
     )
   )
 
@@ -486,66 +498,102 @@ object SeedData {
         weakestSubject = "Physics",
         recentScores = listOf("Physics" to 88, "Chemistry" to 92, "Biology" to 96)
       )
-    )
-  }
-
-  fun get12thScienceStudents(): List<Student> {
-    return rawStudentNames.mapIndexed { index, name ->
-      val srNo = index + 1
-      val stuId = "STU12S" + String.format("%02d", srNo)
-      val nameParts = name.trim().split(" ")
-      val firstName = nameParts.firstOrNull() ?: "Student"
-      val surname = nameParts.lastOrNull() ?: "Parent"
-      val emailFormatted = "${firstName.lowercase()}.${surname.lowercase()}@mytuition.com"
-
-      val parentName = "Mr. ${surname} (Parent)"
-      val parentMobile = "+91 98220 " + String.format("%04d", 3000 + srNo)
-      val studentMobile = "+91 98230 " + String.format("%04d", 4000 + srNo)
-
-      val attPct = 82 + ((srNo * 7) % 18)
-      val overallAvg = 72 + ((srNo * 11) % 25)
-
-      val strongSub = when (srNo % 3) {
-        0 -> "Physics"
-        1 -> "Chemistry"
-        else -> "Mathematics"
-      }
-      val weakSub = when (srNo % 3) {
-        0 -> "Mathematics"
-        1 -> "Physics"
-        else -> "Chemistry"
-      }
-
-      Student(
-        id = stuId,
-        name = name,
-        photo = "",
-        mobile = studentMobile,
-        parentName = parentName,
-        parentContact = parentMobile,
-        email = emailFormatted,
-        dob = "15/06/2007",
-        gender = "Male",
-        address = "Chhatrapati Sambhajinagar, Maharashtra",
-        school = "FSI Junior College of Science",
-        className = "Class 12",
-        batch = "12th Science",
-        stream = "Science",
-        admissionDate = "01/06/2026",
-        status = "Active",
-        attendancePercent = attPct,
-        overallAvg = overallAvg,
-        rank = srNo,
-        strongestSubject = strongSub,
-        weakestSubject = weakSub,
-        recentScores = listOf(
-          "Physics" to (overallAvg - 4).coerceAtLeast(60),
-          "Chemistry" to overallAvg,
-          "Mathematics" to (overallAvg + 3).coerceAtMost(100)
-        )
+    ).map { stu ->
+      stu.copy(
+        batchId = stu.batchId.ifBlank { batchIdForName(stu.batch) },
+        parentId = stu.parentId.ifBlank { "USR_PAR_${stu.id}" },
+        parentEmail = stu.parentEmail.ifBlank { "parent.${stu.id.lowercase()}@mytuition.com" },
+        instituteId = "FSI_MAIN"
       )
     }
   }
+
+  fun get12thScienceStudents(): List<Student> {
+    return get15DemoStudents().filter { it.batch == "12th Science" || it.className == "Class 12" }
+  }
+
+  fun getDefaultQuestions(): List<QuestionItem> = listOf(
+    QuestionItem(
+      id = "Q_101",
+      subject = "Physics",
+      chapter = "Electrostatics",
+      topic = "Gauss's Law",
+      difficulty = "Medium",
+      type = "MCQ",
+      questionText = "A point charge +q is placed at the center of a cube of side L. The electric flux emerging through one face of the cube is:",
+      options = listOf("q / ε₀", "q / 6ε₀", "6q / ε₀", "q / 4πε₀L²"),
+      correctOption = 1,
+      solution = "By Gauss's Law, total flux through all 6 symmetrical faces is q/ε₀. Therefore, flux through 1 face is q/(6ε₀).",
+      tags = listOf("JEE Main", "NEET", "12th Board"),
+      subjectId = "SUB_PHY_12",
+      testId = "TST_12S_01",
+      instituteId = "FSI_MAIN"
+    ),
+    QuestionItem(
+      id = "Q_102",
+      subject = "Chemistry",
+      chapter = "Electrochemistry",
+      topic = "Nernst Equation",
+      difficulty = "Hard",
+      type = "MCQ",
+      questionText = "For a cell reaction involving a two-electron change, the standard EMF of the cell is found to be 0.295 V at 25°C. The equilibrium constant of the reaction at 25°C will be:",
+      options = listOf("1 × 10⁻¹⁰", "29.5 × 10⁻²", "10", "1 × 10¹⁰"),
+      correctOption = 3,
+      solution = "E°cell = (0.059 / n) log K => 0.295 = (0.059 / 2) log K => log K = 10 => K = 1 × 10¹⁰.",
+      tags = listOf("JEE Advanced", "NEET"),
+      subjectId = "SUB_CHEM_12",
+      testId = "TST_12S_01",
+      instituteId = "FSI_MAIN"
+    ),
+    QuestionItem(
+      id = "Q_103",
+      subject = "Mathematics",
+      chapter = "Application of Derivatives",
+      topic = "Maxima and Minima",
+      difficulty = "Medium",
+      type = "MCQ",
+      questionText = "The minimum value of f(x) = x² + (250 / x) for x > 0 is:",
+      options = listOf("75", "50", "25", "100"),
+      correctOption = 0,
+      solution = "f'(x) = 2x - 250/x² = 0 => 2x³ = 250 => x = 5. Minimum value = 5² + 250/5 = 25 + 50 = 75.",
+      tags = listOf("JEE Main", "CET"),
+      subjectId = "SUB_MATH_12",
+      testId = "TST_12S_01",
+      instituteId = "FSI_MAIN"
+    ),
+    QuestionItem(
+      id = "Q_104",
+      subject = "Physics",
+      chapter = "Current Electricity",
+      topic = "Kirchhoff's Laws & Wheatstone Bridge",
+      difficulty = "Easy",
+      type = "MCQ",
+      questionText = "In a balanced Wheatstone bridge, if the positions of the cell and galvanometer are interchanged, the null point:",
+      options = listOf("Shifts towards left", "Shifts towards right", "Remains unchanged", "Becomes zero resistance"),
+      correctOption = 2,
+      solution = "In a balanced Wheatstone bridge (P/Q = R/S), interchanging the battery and galvanometer arms preserves the conjugate condition P/R = Q/S, so the balance point remains unchanged.",
+      tags = listOf("CET", "NEET", "12th Board"),
+      subjectId = "SUB_PHY_12",
+      testId = "TST_12S_01",
+      instituteId = "FSI_MAIN"
+    ),
+    QuestionItem(
+      id = "Q_105",
+      subject = "Biology",
+      chapter = "Genetics & Evolution",
+      topic = "Molecular Basis of Inheritance",
+      difficulty = "Medium",
+      type = "MCQ",
+      questionText = "Which enzyme is responsible for the transcription of hnRNA (precursor of mRNA) in eukaryotes?",
+      options = listOf("RNA Polymerase I", "RNA Polymerase II", "RNA Polymerase III", "DNA Ligase"),
+      correctOption = 1,
+      solution = "In eukaryotes, RNA Polymerase II transcribes the precursor of mRNA, which is heterogeneous nuclear RNA (hnRNA).",
+      tags = listOf("NEET", "12th Board"),
+      subjectId = "SUB_BIO_12",
+      testId = "TST_12S_01",
+      instituteId = "FSI_MAIN"
+    )
+  )
 
   fun getDefaultFeeRecords(): List<FeeRecord> {
     val demoStudents = get15DemoStudents()
@@ -565,10 +613,176 @@ object SeedData {
         paidAmount = paid,
         pendingAmount = pending,
         paymentStatus = status,
-        month = "August 2026"
+        month = "August 2026",
+        studentId = stu.id,
+        batchName = stu.batch,
+        batchId = stu.batchId,
+        instituteId = "FSI_MAIN"
       )
     }
   }
+
+  fun getDefaultHomeworks(): List<HomeworkItem> = listOf(
+    HomeworkItem(
+      id = "HW_01",
+      title = "Electrostatics Numericals Sheet #4",
+      subject = "Physics",
+      dueDate = "Tomorrow, 05:00 PM",
+      description = "Complete problems 1 to 25 from Gauss Law & Electric Potential module.",
+      status = "Pending",
+      batchName = "12th Science",
+      assignedBy = "Prof. Shrirang Deshmukh",
+      completedByStudentIds = emptyList(),
+      batchId = "BATCH_12_SCI",
+      subjectId = "SUB_PHY_12",
+      teacherId = "FAC_01",
+      instituteId = "FSI_MAIN"
+    ),
+    HomeworkItem(
+      id = "HW_02",
+      title = "Organic Nomenclature & Isomerism Drill",
+      subject = "Chemistry",
+      dueDate = "Friday, 06:00 PM",
+      description = "Solve IUPAC naming exercises and stereoisomerism practice questions.",
+      status = "Pending",
+      batchName = "11th - Science (B)",
+      assignedBy = "Dr. Faisal Patel",
+      completedByStudentIds = emptyList(),
+      batchId = "BATCH_11_SCI_B",
+      subjectId = "SUB_CHEM_12",
+      teacherId = "FAC_02",
+      instituteId = "FSI_MAIN"
+    ),
+    HomeworkItem(
+      id = "HW_03",
+      title = "Definite Integration PYQ Bank",
+      subject = "Mathematics",
+      dueDate = "Saturday, 04:00 PM",
+      description = "Solve last 5 years JEE Main & Advanced definite integral questions.",
+      status = "Pending",
+      batchName = "JEE Apex Morning",
+      assignedBy = "Prof. Akash Joshi",
+      completedByStudentIds = emptyList(),
+      batchId = "BATCH_JEE_APEX_M",
+      subjectId = "SUB_MATH_12",
+      teacherId = "FAC_03",
+      instituteId = "FSI_MAIN"
+    ),
+    HomeworkItem(
+      id = "HW_04",
+      title = "Light Reflection & Refraction NCERT Drill",
+      subject = "Science",
+      dueDate = "Monday, 05:00 PM",
+      description = "Complete all ray diagrams and mirror formula problems from Chapter 10.",
+      status = "Pending",
+      batchName = "10th - Science (A)",
+      assignedBy = "Prof. Shrirang Deshmukh",
+      completedByStudentIds = emptyList(),
+      batchId = "BATCH_10_SCI_A",
+      subjectId = "SUB_PHY_12",
+      teacherId = "FAC_01",
+      instituteId = "FSI_MAIN"
+    )
+  )
+
+  fun getDefaultDoubts(): List<DoubtItem> = listOf(
+    DoubtItem(
+      id = "DB_SEED_01",
+      studentName = "Shrirang Deshmukh",
+      subject = "Physics",
+      chapter = "Electrostatics",
+      questionText = "How do we apply Gauss's Law when the charge distribution is non-uniformly varying with radius r?",
+      date = "Yesterday",
+      reply = null,
+      status = "Pending",
+      resolutionTime = null,
+      photoUrl = null,
+      studentId = "STU1201",
+      batchName = "12th Science",
+      repliedBy = "",
+      instituteId = "FSI_MAIN",
+      subjectId = "SUB_PHY_12",
+      batchId = "BATCH_12_SCI"
+    ),
+    DoubtItem(
+      id = "DB_SEED_02",
+      studentName = "Akash Joshi",
+      subject = "Mathematics",
+      chapter = "Definite Integration",
+      questionText = "When applying King's Property, how do we handle periodic trigonometric functions if the upper limit is 2π?",
+      date = "2 days ago",
+      reply = "Split the integral from 0 to π and π to 2π using the reduction property f(2a - x) = f(x) before applying King's Rule.",
+      status = "Resolved",
+      resolutionTime = "14 Mins",
+      photoUrl = null,
+      studentId = "STU1301",
+      batchName = "JEE Apex Morning",
+      repliedBy = "Prof. Akash Joshi",
+      instituteId = "FSI_MAIN",
+      subjectId = "SUB_MATH_12",
+      batchId = "BATCH_JEE_APEX_M"
+    )
+  )
+
+  fun getDefaultLeads(): List<LeadRecord> = listOf(
+    LeadRecord(
+      id = "LD_2026_01",
+      name = "Rohan Kulkarni",
+      mobile = "+91 98231 44110",
+      className = "Class 11",
+      stream = "Science (PCM)",
+      source = "Walk-in Inquiry",
+      inquiryDate = "12/08/2026",
+      assignedCounselor = "Prof. Akash Joshi",
+      status = "Follow-Up",
+      instituteId = "FSI_MAIN"
+    ),
+    LeadRecord(
+      id = "LD_2026_02",
+      name = "Snehal Deshpande",
+      mobile = "+91 98231 44112",
+      className = "Class 12",
+      stream = "Science (PCB - NEET)",
+      source = "Parent Referral",
+      inquiryDate = "14/08/2026",
+      assignedCounselor = "Dr. Faisal Patel",
+      status = "New",
+      instituteId = "FSI_MAIN"
+    )
+  )
+
+  fun getDefaultOnlineForms(): List<OnlineFormSubmission> = listOf(
+    OnlineFormSubmission(
+      id = "FORM_2026_01",
+      name = "Siddharth Chavan",
+      mobile = "+91 97650 11223",
+      email = "siddharth.chavan@mytuition.com",
+      school = "Deogiri Junior College",
+      className = "Class 11",
+      stream = "Science",
+      preferredBatch = "11th - Science (B)",
+      submissionDate = "15/08/2026",
+      status = "Pending Review",
+      instituteId = "FSI_MAIN"
+    )
+  )
+
+  fun getDefaultWeeklyTimetable(): List<TimetableItem> = listOf(
+    TimetableItem("TT_01", "Monday", "08:00 AM", "09:30 AM", "Physics • Electrostatics", "12th Science", "Hall A-101", "Prof. Shrirang Deshmukh", batchId = "BATCH_12_SCI", teacherId = "FAC_01", subjectId = "SUB_PHY_12", instituteId = "FSI_MAIN"),
+    TimetableItem("TT_02", "Monday", "11:30 AM", "01:00 PM", "Mathematics • Calculus", "JEE Apex Morning", "Hall B-202", "Prof. Akash Joshi", batchId = "BATCH_JEE_APEX_M", teacherId = "FAC_03", subjectId = "SUB_MATH_12", instituteId = "FSI_MAIN"),
+    TimetableItem("TT_03", "Tuesday", "02:00 PM", "03:30 PM", "Chemistry • Organic Mechanisms", "11th - Science (B)", "Lab C-104", "Dr. Faisal Patel", batchId = "BATCH_11_SCI_B", teacherId = "FAC_02", subjectId = "SUB_CHEM_12", instituteId = "FSI_MAIN"),
+    TimetableItem("TT_04", "Wednesday", "08:00 AM", "09:30 AM", "Physics • Current Electricity", "12th Science", "Hall A-101", "Prof. Shrirang Deshmukh", batchId = "BATCH_12_SCI", teacherId = "FAC_01", subjectId = "SUB_PHY_12", instituteId = "FSI_MAIN"),
+    TimetableItem("TT_05", "Thursday", "11:30 AM", "01:00 PM", "Mathematics • Vectors & 3D", "JEE Apex Morning", "Hall B-202", "Prof. Akash Joshi", batchId = "BATCH_JEE_APEX_M", teacherId = "FAC_03", subjectId = "SUB_MATH_12", instituteId = "FSI_MAIN"),
+    TimetableItem("TT_06", "Friday", "08:00 AM", "09:30 AM", "Biology • Molecular Inheritance", "NEET Zenith", "Hall A-103", "Dr. Faisal Patel", batchId = "BATCH_NEET", teacherId = "FAC_02", subjectId = "SUB_BIO_12", instituteId = "FSI_MAIN"),
+    TimetableItem("TT_07", "Saturday", "09:00 AM", "12:00 PM", "Weekly Cumulative Assessment", "12th Science", "Exam Hall", "Prof. Shrirang Deshmukh", batchId = "BATCH_12_SCI", teacherId = "FAC_01", subjectId = "SUB_PHY_12", instituteId = "FSI_MAIN"),
+    TimetableItem("TT_08", "Monday", "09:45 AM", "11:15 AM", "Science • Light & Optics", "10th - Science (A)", "Hall A-102", "Prof. Shrirang Deshmukh", batchId = "BATCH_10_SCI_A", teacherId = "FAC_01", subjectId = "SUB_PHY_12", instituteId = "FSI_MAIN")
+  )
+
+  fun getDefaultBadges(): List<BadgeItem> = listOf(
+    BadgeItem("BDG_1", "7-Day Streak", "Consistent daily self-study logged", "local_fire_department", true),
+    BadgeItem("BDG_2", "Batch Topper", "Top 5 rank in monthly assessment", "emoji_events", true),
+    BadgeItem("BDG_3", "Doubt Solver", "Active conceptual curiosity in class", "school", true)
+  )
 
   fun getDefaultFeePayments(): List<StudentFeePayment> {
     val monthsData = listOf(
@@ -597,11 +811,11 @@ object SeedData {
         Triple("31/07/2026", 8000.0, "Pending")
       ),
       "August 2026" to listOf(
-        Triple("04/08/2026", 34000.0, "Paid"),
-        Triple("12/08/2026", 26000.0, "Paid"),
-        Triple("20/08/2026", 13600.0, "Paid"),
-        Triple("22/08/2026", 9600.0, "Pending"),
-        Triple("25/08/2026", 12800.0, "Overdue")
+        Triple("04/08/2026", 6400.0, "Paid"),
+        Triple("12/08/2026", 6400.0, "Paid"),
+        Triple("20/08/2026", 6400.0, "Paid"),
+        Triple("22/08/2026", 3200.0, "Pending"),
+        Triple("25/08/2026", 0.0, "Overdue")
       )
     )
     val modes = listOf("UPI", "Cash", "Net Banking", "UPI", "Card")
@@ -628,7 +842,10 @@ object SeedData {
             month = mth,
             remarks = "Session 2026-27 tuition installment",
             recordedBy = "Admin",
-            timestamp = System.currentTimeMillis() - ((4 - mIdx) * 30L * 86400000L) - (dIdx * 86400000L * 2)
+            timestamp = System.currentTimeMillis() - ((4 - mIdx) * 30L * 86400000L) - (dIdx * 86400000L * 2),
+            invoiceId = "F_2026_AUG_${(pIdx % students.size) + 1}",
+            instituteId = "FSI_MAIN",
+            transactionId = "TXN-2026-${1001 + pIdx}"
           )
         )
         pIdx++
@@ -638,8 +855,11 @@ object SeedData {
   }
 
   fun getDefaultTestRecords(): List<TestRecord> {
-    val students = get12thScienceStudents()
-    val marksMap = students.associate { it.id to (120 + (it.rank * 3) % 80) }
+    val allStudents = get15DemoStudents()
+    val sci12Students = allStudents.filter { it.batch == "12th Science" }
+    val sci10Students = allStudents.filter { it.batch == "10th - Science (A)" }
+    val marks12 = sci12Students.associate { it.id to (it.overallAvg * 2).coerceIn(100, 198) }
+    val marks10 = sci10Students.associate { it.id to it.overallAvg.coerceIn(50, 99) }
     return listOf(
       TestRecord(
         id = "TST_12S_01",
@@ -648,11 +868,34 @@ object SeedData {
         date = "20/07/2026",
         batch = "12th Science",
         totalMarks = 200,
-        studentMarks = marksMap,
+        studentMarks = marks12,
         remarks = "Overall excellent batch performance in Electrostatics",
         aiAnalysisStrong = listOf("Electrostatics Field Calculations", "Nomenclature & Isomerism"),
         aiAnalysisWeak = listOf("Capacitance Edge Cases", "Reaction Mechanisms"),
-        aiSuggestion = "Schedule 2 dedicated doubt clearance sessions on Capacitance for 12th Science batch."
+        aiSuggestion = "Schedule 2 dedicated doubt clearance sessions on Capacitance for 12th Science batch.",
+        batchId = "BATCH_12_SCI",
+        subjectId = "SUB_PHY_12",
+        questionIds = listOf("Q_101", "Q_102", "Q_103", "Q_104", "Q_105"),
+        durationMinutes = 15,
+        instituteId = "FSI_MAIN"
+      ),
+      TestRecord(
+        id = "TST_10S_01",
+        testName = "10th Science - Unit Assessment 1 (Optics & Polynomials)",
+        subject = "Science & Mathematics",
+        date = "25/07/2026",
+        batch = "10th - Science (A)",
+        totalMarks = 100,
+        studentMarks = marks10,
+        remarks = "Consistent conceptual clarity across 10th Science (A)",
+        aiAnalysisStrong = listOf("Mirror & Lens Formulae", "Quadratic Equations"),
+        aiAnalysisWeak = listOf("Sign Convention Numericals"),
+        aiSuggestion = "Practice 15 numerical problems on sign conventions for spherical lenses.",
+        batchId = "BATCH_10_SCI_A",
+        subjectId = "SUB_PHY_12",
+        questionIds = listOf("Q_101", "Q_103", "Q_104"),
+        durationMinutes = 15,
+        instituteId = "FSI_MAIN"
       )
     )
   }
@@ -668,7 +911,11 @@ object SeedData {
         startTime = "02:00 PM",
         endTime = "03:30 PM",
         createdAt = now - (2 * 60 * 60 * 1000L), // 2 hours ago -> 21 hours left
-        teacherName = "Prof. Shrirang Deshmukh"
+        teacherName = "Prof. Shrirang Deshmukh",
+        batchId = "BATCH_11_SCI",
+        teacherId = "FAC_01",
+        subjectId = "SUB_PHY_12",
+        instituteId = "FSI_MAIN"
       ),
       DynamicTimetableEntry(
         id = "DTT_SEED_02",
@@ -677,7 +924,11 @@ object SeedData {
         startTime = "03:45 PM",
         endTime = "05:15 PM",
         createdAt = now - (2 * 60 * 60 * 1000L),
-        teacherName = "Dr. Faisal Patel"
+        teacherName = "Dr. Faisal Patel",
+        batchId = "BATCH_11_SCI",
+        teacherId = "FAC_02",
+        subjectId = "SUB_CHEM_12",
+        instituteId = "FSI_MAIN"
       ),
       DynamicTimetableEntry(
         id = "DTT_SEED_03",
@@ -686,7 +937,11 @@ object SeedData {
         startTime = "11:30 AM",
         endTime = "01:00 PM",
         createdAt = now - (4 * 60 * 60 * 1000L), // 4 hours ago -> 19 hours left
-        teacherName = "Prof. Akash Joshi"
+        teacherName = "Prof. Akash Joshi",
+        batchId = "BATCH_JEE_APEX_M",
+        teacherId = "FAC_03",
+        subjectId = "SUB_MATH_12",
+        instituteId = "FSI_MAIN"
       ),
       DynamicTimetableEntry(
         id = "DTT_SEED_04",
@@ -695,7 +950,11 @@ object SeedData {
         startTime = "08:00 AM",
         endTime = "09:30 AM",
         createdAt = now - (6 * 60 * 60 * 1000L), // 6 hours ago -> 17 hours left
-        teacherName = "Prof. Shrirang Deshmukh"
+        teacherName = "Prof. Shrirang Deshmukh",
+        batchId = "BATCH_12_SCI",
+        teacherId = "FAC_01",
+        subjectId = "SUB_PHY_12",
+        instituteId = "FSI_MAIN"
       ),
       DynamicTimetableEntry(
         id = "DTT_SEED_05",
@@ -704,7 +963,11 @@ object SeedData {
         startTime = "07:30 AM",
         endTime = "09:00 AM",
         createdAt = now - (3 * 60 * 60 * 1000L), // 3 hours ago -> 20 hours left
-        teacherName = "Prof. Akash Joshi"
+        teacherName = "Prof. Akash Joshi",
+        batchId = "BATCH_8TH",
+        teacherId = "FAC_03",
+        subjectId = "SUB_MATH_12",
+        instituteId = "FSI_MAIN"
       ),
       DynamicTimetableEntry(
         id = "DTT_SEED_06",
@@ -713,7 +976,11 @@ object SeedData {
         startTime = "08:00 AM",
         endTime = "09:30 AM",
         createdAt = now - (5 * 60 * 60 * 1000L), // 5 hours ago -> 18 hours left
-        teacherName = "Dr. Faisal Patel"
+        teacherName = "Dr. Faisal Patel",
+        batchId = "BATCH_NEET",
+        teacherId = "FAC_02",
+        subjectId = "SUB_BIO_12",
+        instituteId = "FSI_MAIN"
       ),
       // Archived entries (strictly > 23 hours ago, permanently stored in database)
       DynamicTimetableEntry(
@@ -723,7 +990,11 @@ object SeedData {
         startTime = "08:00 AM",
         endTime = "09:30 AM",
         createdAt = now - (26 * 60 * 60 * 1000L), // 26 hours ago -> Archived
-        teacherName = "Prof. Shrirang Deshmukh"
+        teacherName = "Prof. Shrirang Deshmukh",
+        batchId = "BATCH_12_SCI",
+        teacherId = "FAC_01",
+        subjectId = "SUB_PHY_12",
+        instituteId = "FSI_MAIN"
       ),
       DynamicTimetableEntry(
         id = "DTT_SEED_ARCHIVE_02",
@@ -732,7 +1003,11 @@ object SeedData {
         startTime = "11:30 AM",
         endTime = "01:00 PM",
         createdAt = now - (28 * 60 * 60 * 1000L), // 28 hours ago -> Archived
-        teacherName = "Prof. Akash Joshi"
+        teacherName = "Prof. Akash Joshi",
+        batchId = "BATCH_JEE_APEX_M",
+        teacherId = "FAC_03",
+        subjectId = "SUB_MATH_12",
+        instituteId = "FSI_MAIN"
       ),
       DynamicTimetableEntry(
         id = "DTT_SEED_ARCHIVE_03",
@@ -741,7 +1016,11 @@ object SeedData {
         startTime = "07:30 AM",
         endTime = "09:00 AM",
         createdAt = now - (48 * 60 * 60 * 1000L), // 48 hours ago -> Archived
-        teacherName = "Prof. Shrirang Deshmukh"
+        teacherName = "Prof. Shrirang Deshmukh",
+        batchId = "BATCH_8TH",
+        teacherId = "FAC_01",
+        subjectId = "SUB_PHY_12",
+        instituteId = "FSI_MAIN"
       )
     )
   }

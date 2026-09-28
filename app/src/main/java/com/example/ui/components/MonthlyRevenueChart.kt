@@ -240,6 +240,7 @@ fun MonthlyRevenueSummaryChart(
               fontSize = 16.sp,
               color = Color.White,
               maxLines = 1,
+              softWrap = false,
               overflow = TextOverflow.Ellipsis
             )
             Text(
@@ -247,6 +248,7 @@ fun MonthlyRevenueSummaryChart(
               fontSize = 12.sp,
               color = Color(0xFF94A3B8),
               maxLines = 1,
+              softWrap = false,
               overflow = TextOverflow.Ellipsis
             )
           }
@@ -273,7 +275,8 @@ fun MonthlyRevenueSummaryChart(
               fontWeight = FontWeight.Bold,
               color = Color(0xFF34D399),
               maxLines = 1,
-              softWrap = false
+              softWrap = false,
+              overflow = TextOverflow.Ellipsis
             )
           }
         }
@@ -440,7 +443,10 @@ fun MonthlyRevenueSummaryChart(
                 text = label,
                 fontSize = 10.sp,
                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                color = if (isSelected) Color.White else Color(0xFF94A3B8)
+                color = if (isSelected) Color.White else Color(0xFF94A3B8),
+                maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Ellipsis
               )
             }
           }
@@ -466,6 +472,9 @@ fun MonthlyRevenueSummaryChart(
                 fontSize = 10.sp,
                 fontWeight = FontWeight.Bold,
                 color = if (isSel) Color(0xFF0A1220) else Color(0xFFCBD5E1),
+                maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
               )
             }
@@ -512,7 +521,11 @@ fun MonthlyRevenueSummaryChart(
               Text(
                 text = "Tap on any bar to inspect month details",
                 fontSize = 10.sp,
-                color = Color(0xFF94A3B8)
+                color = Color(0xFF94A3B8),
+                maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f)
               )
 
               Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -520,24 +533,24 @@ fun MonthlyRevenueSummaryChart(
                   0 -> {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
                       Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(Color(0xFF38BDF8)))
-                      Text("Collected", fontSize = 9.sp, color = Color(0xFFCBD5E1))
+                      Text("Collected", fontSize = 9.sp, color = Color(0xFFCBD5E1), maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
                     }
                   }
                   1 -> {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
                       Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(Color(0xFF4ADE80)))
-                      Text("Paid", fontSize = 9.sp, color = Color(0xFFCBD5E1))
+                      Text("Paid", fontSize = 9.sp, color = Color(0xFFCBD5E1), maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
                     }
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
                       Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(Color(0xFFF59E0B)))
-                      Text("Pending", fontSize = 9.sp, color = Color(0xFFCBD5E1))
+                      Text("Pending", fontSize = 9.sp, color = Color(0xFFCBD5E1), maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
                     }
                   }
                   2 -> {
                     listOf("UPI" to Color(0xFF38BDF8), "Cash" to Color(0xFF4ADE80), "Bank/Card" to Color(0xFFA78BFA)).forEach { (m, c) ->
                       Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
                         Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(c))
-                        Text(m, fontSize = 9.sp, color = Color(0xFFCBD5E1))
+                        Text(m, fontSize = 9.sp, color = Color(0xFFCBD5E1), maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
                       }
                     }
                   }
@@ -615,6 +628,9 @@ fun MonthlyRevenueSummaryChart(
                     text = point.shortMonth,
                     fontSize = 10.sp,
                     fontWeight = if (isSelected) FontWeight.ExtraBold else FontWeight.Medium,
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Ellipsis,
                     color = if (isSelected) Color(0xFF38BDF8) else if (isCurrent) Color.White else Color(0xFF94A3B8)
                   )
                   if (isCurrent) {
@@ -650,15 +666,19 @@ fun MonthlyRevenueSummaryChart(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
               ) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.weight(1f)) {
                   Icon(Icons.Outlined.Insights, contentDescription = null, tint = Color(0xFF38BDF8), modifier = Modifier.size(16.dp))
                   Text(
                     text = "${sp.monthKey} Breakdown",
                     fontWeight = FontWeight.Bold,
                     fontSize = 13.sp,
-                    color = Color.White
+                    color = Color.White,
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Ellipsis
                   )
                 }
+                Spacer(modifier = Modifier.width(8.dp))
 
                 Surface(
                   color = if (sp.collectionRate >= 70f) Color(0xFF16A34A).copy(alpha = 0.2f) else Color(0xFFF59E0B).copy(alpha = 0.2f),
@@ -669,6 +689,9 @@ fun MonthlyRevenueSummaryChart(
                     fontSize = 10.sp,
                     fontWeight = FontWeight.Bold,
                     color = if (sp.collectionRate >= 70f) Color(0xFF4ADE80) else Color(0xFFFCD34D),
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                   )
                 }
@@ -707,6 +730,9 @@ fun MonthlyRevenueSummaryChart(
                     fontSize = 10.sp,
                     color = Color(0xFF94A3B8),
                     fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.align(Alignment.CenterVertically)
                   )
                   sp.modeBreakdown.entries.forEachIndexed { index, (mode, amt) ->
@@ -718,13 +744,19 @@ fun MonthlyRevenueSummaryChart(
                         text = mode,
                         fontSize = 10.sp,
                         color = Color(0xFF94A3B8),
-                        fontWeight = FontWeight.Medium
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis
                       )
                       Text(
                         text = CurrencyFormatter.formatIndianRupees(amt),
                         fontSize = 10.sp,
                         fontWeight = FontWeight.SemiBold,
-                        color = Color(0xFFCBD5E1)
+                        color = Color(0xFFCBD5E1),
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis
                       )
                       if (index < sp.modeBreakdown.size - 1) {
                         Text(
@@ -796,6 +828,8 @@ private fun ComposeBarItem(
       fontWeight = if (isSelected) FontWeight.ExtraBold else FontWeight.Bold,
       color = if (isSelected) Color(0xFF38BDF8) else Color(0xFF94A3B8),
       maxLines = 1,
+      softWrap = false,
+      overflow = TextOverflow.Ellipsis,
       modifier = Modifier.padding(bottom = 6.dp) // Programmatic 6dp padding above the bar
     )
 

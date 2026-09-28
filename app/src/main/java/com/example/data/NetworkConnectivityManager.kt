@@ -31,6 +31,14 @@ import java.util.Locale
  *    entry, edits, or remote modifications while offline.
  * 3. Includes an on-demand Offline Mode Simulator for testing and evaluation.
  */
+enum class CloudSyncState {
+  OFFLINE,
+  ONLINE_SYNCED,
+  SERVICE_UNAVAILABLE,
+  SYNC_PENDING,
+  SYNC_FAILED
+}
+
 object NetworkConnectivityManager {
   private const val TAG = "NetworkConnectivity"
   private const val PREFS_NAME = "fsi_network_prefs"
@@ -40,20 +48,36 @@ object NetworkConnectivityManager {
   private var appContext: Context? = null
   private var prefs: SharedPreferences? = null
   private var connectivityManager: ConnectivityManager? = null
+  private var activeNetworkCallback: ConnectivityManager.NetworkCallback? = null
+  private var registeredCallbackCount: Int = 0
 
   // Physical network state
   private val _isNetworkConnected = MutableStateFlow(true)
   val isNetworkConnected = _isNetworkConnected.asStateFlow()
 
-  // Simulated offline mode (for UI testing or deliberate offline lock)
+  // Simulated offline mode (for UI testing or deliberate offline simulation)
   private val _isSimulatedOffline = MutableStateFlow(false)
   val isSimulatedOffline = _isSimulatedOffline.asStateFlow()
+
+  // Whether Firebase/Cloud backend is reachable (interface connectivity != service reachability)
+  private val _isServiceReachable = MutableStateFlow(true)
+  val isServiceReachable = _isServiceReachable.asStateFlow()
+  val isFirebaseReachable = _isServiceReachable.asStateFlow()
 
   // Effective Online state: True only if physical network is present AND not simulated offline
   private val _isOnline = MutableStateFlow(true)
   val isOnline = _isOnline.asStateFlow()
 
-  // Timestamp of the last time data was updated before internet turned off
+  private val _cloudSyncState = MutableStateFlow(CloudSyncState.ONLINE_SYNCED)
+  val cloudSyncState = _cloudSyncState.asStateFlow()
+
+  private val _pendingSyncCount = MutableStateFlow(0)
+  val pendingSyncCount = _pendingSyncCount.asStateFlow()
+
+  private val _lastSyncError = MutableStateFlow<String?>(null)
+  val lastSyncError = _lastSyncError.asStateFlow()
+
+  // Timestamp of the last time data was confirmed synced to cloud
   private val _lastSyncTimestamp = MutableStateFlow<Long>(System.currentTimeMillis())
   val lastSyncTimestamp = _lastSyncTimestamp.asStateFlow()
 
@@ -68,6 +92,7 @@ object NetworkConnectivityManager {
 
   private val networkScope = CoroutineScope(Dispatchers.IO)
 
+  @Synchronized
   fun initialize(context: Context) {
     appContext = context.applicationContext
     prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -86,11 +111,13 @@ object NetworkConnectivityManager {
     _isNetworkConnected.value = initialConnected
     recomputeEffectiveOnline()
 
-    registerNetworkCallback()
+    registerNetworkCallbackOnce()
   }
 
+  fun getRegisteredCallbackCount(): Int = registeredCallbackCount
+
   private fun checkCurrentHardwareConnection(): Boolean {
-    val cm = connectivityManager ?: return false
+    val cm = connectivityManager ?: return true
     return try {
       val activeNetwork = cm.activeNetwork ?: return false
       val caps = cm.getNetworkCapabilities(activeNetwork) ?: return false
@@ -101,14 +128,18 @@ object NetworkConnectivityManager {
     }
   }
 
-  private fun registerNetworkCallback() {
+  @Synchronized
+  private fun registerNetworkCallbackOnce() {
+    if (activeNetworkCallback != null) {
+      return
+    }
     val cm = connectivityManager ?: return
     try {
       val request = NetworkRequest.Builder()
         .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
         .build()
 
-      cm.registerNetworkCallback(request, object : ConnectivityManager.NetworkCallback() {
+      val callback = object : ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: Network) {
           super.onAvailable(network)
           Log.d(TAG, "Network became available")
@@ -118,7 +149,6 @@ object NetworkConnectivityManager {
             recomputeEffectiveOnline()
 
             if (wasOffline && _isOnline.value) {
-              // Trigger automatic live sync when reconnected
               performLiveSync(isAutoReconnect = true)
             }
           }
@@ -128,7 +158,6 @@ object NetworkConnectivityManager {
           super.onLost(network)
           Log.d(TAG, "Network connection lost")
           networkScope.launch {
-            // Re-verify if any other active network remains
             val stillConnected = checkCurrentHardwareConnection()
             _isNetworkConnected.value = stillConnected
             recomputeEffectiveOnline()
@@ -143,47 +172,125 @@ object NetworkConnectivityManager {
             recomputeEffectiveOnline()
           }
         }
-      })
+      }
+      cm.registerNetworkCallback(request, callback)
+      activeNetworkCallback = callback
+      registeredCallbackCount = 1
     } catch (e: Exception) {
       Log.e(TAG, "Failed to register network callback", e)
+    }
+  }
+
+  @Synchronized
+  fun unregisterNetworkCallback() {
+    val callback = activeNetworkCallback ?: return
+    try {
+      connectivityManager?.unregisterNetworkCallback(callback)
+    } catch (e: Exception) {
+      Log.w(TAG, "Error unregistering network callback: ${e.message}")
+    } finally {
+      activeNetworkCallback = null
+      registeredCallbackCount = 0
     }
   }
 
   private fun recomputeEffectiveOnline() {
     val online = _isNetworkConnected.value && !_isSimulatedOffline.value
     _isOnline.value = online
-    if (online) {
-      _syncStatusText.value = "Online • Live Sync"
+    val pending = _pendingSyncCount.value
+    if (!online) {
+      _cloudSyncState.value = if (pending > 0) CloudSyncState.SYNC_PENDING else CloudSyncState.OFFLINE
+      _syncStatusText.value = if (pending > 0) {
+        "Offline • Pending Sync ($pending)"
+      } else {
+        "Offline • Local Room Mode"
+      }
+    } else if (!_isServiceReachable.value) {
+      _cloudSyncState.value = CloudSyncState.SERVICE_UNAVAILABLE
+      _syncStatusText.value = if (pending > 0) {
+        "Connected • Cloud Service Unavailable ($pending Pending)"
+      } else {
+        "Connected • Cloud Service Unavailable"
+      }
+    } else if (_lastSyncError.value != null) {
+      _cloudSyncState.value = CloudSyncState.SYNC_FAILED
+      _syncStatusText.value = "Sync Failed • Retry Pending"
+    } else if (pending > 0) {
+      _cloudSyncState.value = CloudSyncState.SYNC_PENDING
+      _syncStatusText.value = "Online • Sync Pending ($pending)"
     } else {
-      _syncStatusText.value = "Offline • Read-Only"
+      _cloudSyncState.value = CloudSyncState.ONLINE_SYNCED
+      _syncStatusText.value = "Online • Live Sync"
     }
   }
 
-  /**
-   * Toggles simulated offline mode to easily test and demonstrate offline behavior
-   */
   fun setSimulatedOffline(enabled: Boolean) {
     _isSimulatedOffline.value = enabled
     prefs?.edit()?.putBoolean(KEY_SIMULATED_OFFLINE, enabled)?.apply()
     recomputeEffectiveOnline()
 
     if (!enabled && _isNetworkConnected.value) {
-      // Reconnected
       performLiveSync(isAutoReconnect = true)
     } else if (enabled) {
-      // Transitioned to offline - record current snapshot timestamp as last updated
       _lastSyncFormatted.value = formatTimestamp(_lastSyncTimestamp.value)
     }
   }
 
-  /**
-   * Performs live sync when online: updates announcements, profiles, and refreshes timestamp.
-   */
+  fun setSimulatedServiceUnavailable(unavailable: Boolean) {
+    _isServiceReachable.value = !unavailable
+    recomputeEffectiveOnline()
+  }
+
+  fun markPendingSync(pendingDelta: Int = 1) {
+    _pendingSyncCount.update { (it + pendingDelta).coerceAtLeast(0) }
+    recomputeEffectiveOnline()
+  }
+
+  fun recordLocalMutation() {
+    markPendingSync(1)
+  }
+
+  fun recordServiceUnavailable(reason: String = "Firebase service unreachable") {
+    reportCloudSyncFailure(reason, isServiceUnavailable = true)
+  }
+
+  fun recordSyncSuccess(syncedItemsCount: Int = 1) {
+    reportCloudSyncSuccess(syncedItemsCount)
+  }
+
+  fun recordSyncFailure(errorMessage: String) {
+    reportCloudSyncFailure(errorMessage, isServiceUnavailable = false)
+  }
+
+  fun reportCloudSyncSuccess(syncedItemsCount: Int = 1) {
+    _lastSyncError.value = null
+    _isServiceReachable.value = true
+    _pendingSyncCount.update { (it - syncedItemsCount).coerceAtLeast(0) }
+    val now = System.currentTimeMillis()
+    _lastSyncTimestamp.value = now
+    _lastSyncFormatted.value = formatTimestamp(now)
+    prefs?.edit()?.putLong(KEY_LAST_SYNC, now)?.apply()
+    recomputeEffectiveOnline()
+  }
+
+  fun reportCloudSyncFailure(errorMessage: String, isServiceUnavailable: Boolean = false) {
+    _lastSyncError.value = errorMessage
+    if (isServiceUnavailable) {
+      _isServiceReachable.value = false
+      _cloudSyncState.value = CloudSyncState.SERVICE_UNAVAILABLE
+      _syncStatusText.value = "Connected • Cloud Service Unavailable"
+    } else {
+      _cloudSyncState.value = CloudSyncState.SYNC_FAILED
+      _syncStatusText.value = "Sync Failed: $errorMessage"
+    }
+  }
+
   fun performLiveSync(
     isAutoReconnect: Boolean = false,
     onComplete: ((Boolean) -> Unit)? = null
   ) {
     if (!_isOnline.value) {
+      recomputeEffectiveOnline()
       onComplete?.invoke(false)
       return
     }
@@ -193,49 +300,40 @@ object NetworkConnectivityManager {
       _syncStatusText.value = "Syncing live updates..."
 
       try {
-        // Fast ping check to verify true internet reachability
-        val reachable = verifyInternetReachability()
+        val reachable = verifyInternetReachability() && _isServiceReachable.value
         if (reachable) {
-          // Update last sync timestamp to now
-          val now = System.currentTimeMillis()
-          _lastSyncTimestamp.value = now
-          _lastSyncFormatted.value = formatTimestamp(now)
-          prefs?.edit()?.putLong(KEY_LAST_SYNC, now)?.apply()
+          val flushed = FirestoreService.flushPendingSyncQueue()
+          if (flushed) {
+            val now = System.currentTimeMillis()
+            _lastSyncTimestamp.value = now
+            _lastSyncFormatted.value = formatTimestamp(now)
+            prefs?.edit()?.putLong(KEY_LAST_SYNC, now)?.apply()
+            _lastSyncError.value = null
+            _pendingSyncCount.value = FirestoreService.getPendingSyncCount()
 
-          // Trigger live Firestore fetching and real-time listeners
-          FirestoreService.fetchAnnouncements()
-          FirestoreService.listenToAnnouncements()
-          FirestoreService.fetchStudentProfiles()
+            FirestoreService.fetchAnnouncements()
+            FirestoreService.listenToAnnouncements()
+            FirestoreService.fetchStudentProfiles()
 
-          _syncStatusText.value = "Online • Synced"
-
-          if (isAutoReconnect) {
-            appContext?.let { ctx ->
-              AppRepository.addNotification(
-                NotificationItem(
-                  id = "NOT_ONLINE_${System.currentTimeMillis()}",
-                  title = "🌐 Internet Connection Restored",
-                  message = "App is online and synchronized with live institute data. All features and data entry are fully unlocked.",
-                  time = AppRepository.getCurrentTimeStr(),
-                  type = "System",
-                  recipientRole = "All",
-                  isRead = false
-                )
-              )
+            recomputeEffectiveOnline()
+            withContext(Dispatchers.Main) {
+              onComplete?.invoke(true)
+            }
+          } else {
+            reportCloudSyncFailure("Firestore sync incomplete", isServiceUnavailable = !FirestoreService.isAvailable())
+            withContext(Dispatchers.Main) {
+              onComplete?.invoke(false)
             }
           }
-          withContext(Dispatchers.Main) {
-            onComplete?.invoke(true)
-          }
         } else {
-          _syncStatusText.value = "Limited Connectivity"
+          reportCloudSyncFailure("Firebase service unreachable", isServiceUnavailable = true)
           withContext(Dispatchers.Main) {
             onComplete?.invoke(false)
           }
         }
       } catch (e: Exception) {
         Log.e(TAG, "Sync error", e)
-        _syncStatusText.value = "Sync Error (Offline View Active)"
+        reportCloudSyncFailure(e.message ?: "Temporary network error", isServiceUnavailable = false)
         withContext(Dispatchers.Main) {
           onComplete?.invoke(false)
         }
@@ -245,35 +343,46 @@ object NetworkConnectivityManager {
     }
   }
 
-  /**
-   * Verifies actual internet reachability with a lightweight timeout
-   */
   private fun verifyInternetReachability(): Boolean {
+    if (!_isServiceReachable.value) return false
     return try {
       val url = URL("https://clients3.google.com/generate_204")
       val connection = url.openConnection() as HttpURLConnection
-      connection.connectTimeout = 3000
-      connection.readTimeout = 3000
+      connection.connectTimeout = 2000
+      connection.readTimeout = 2000
       connection.requestMethod = "HEAD"
       val responseCode = connection.responseCode
       connection.disconnect()
       responseCode in 200..399
     } catch (e: Exception) {
-      // In local container or firewall fallback, if hardware claims connected, return true
-      _isNetworkConnected.value
+      _isNetworkConnected.value && _isServiceReachable.value
     }
   }
 
   /**
-   * Call whenever an online data mutation succeeds to refresh the last sync timestamp
+   * Called after a local Room write completes.
+   * Never claims cloud sync succeeded while offline or when Firebase is unavailable.
    */
   fun markDataUpdatedOnline() {
-    if (_isOnline.value) {
-      val now = System.currentTimeMillis()
-      _lastSyncTimestamp.value = now
-      _lastSyncFormatted.value = formatTimestamp(now)
-      prefs?.edit()?.putLong(KEY_LAST_SYNC, now)?.apply()
+    if (!_isOnline.value) {
+      markPendingSync(1)
+      return
     }
+    if (!_isServiceReachable.value || !FirestoreService.isAvailable()) {
+      markPendingSync(1)
+      _cloudSyncState.value = if (!_isServiceReachable.value) {
+        CloudSyncState.SERVICE_UNAVAILABLE
+      } else {
+        CloudSyncState.SYNC_PENDING
+      }
+      _syncStatusText.value = if (!_isServiceReachable.value) {
+        "Connected • Cloud Service Unavailable (${_pendingSyncCount.value} Pending)"
+      } else {
+        "Local Room Saved • Cloud Sync Pending (${_pendingSyncCount.value})"
+      }
+      return
+    }
+    reportCloudSyncSuccess(0)
   }
 
   private fun formatTimestamp(timestamp: Long): String {

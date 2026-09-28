@@ -85,20 +85,21 @@ fun DynamicTimetableScreen() {
     }
   }
 
-  // Strict 23-hour auto-archive rule: Active entries are < 23 hours old
+  // Archive status determined from scheduled session end time & archive flag (NOT createdAt)
   val activeEntries = remember(entriesFilteredByBatch, ticks) {
     entriesFilteredByBatch.filter { item ->
-      val elapsed = System.currentTimeMillis() - item.createdAt
-      elapsed in 0L until twentyThreeHoursInMillis
-    }.sortedBy { it.createdAt }
+      !AppRepository.isDynamicEntryArchived(item)
+    }.sortedBy {
+      it.scheduledStartMillis.takeIf { ms -> ms > 0L } ?: it.createdAt
+    }
   }
 
-  // Strict 23-hour auto-archive rule: Entries >= 23 hours old automatically move to History Archive
   val historyEntries = remember(entriesFilteredByBatch, ticks) {
     entriesFilteredByBatch.filter { item ->
-      val elapsed = System.currentTimeMillis() - item.createdAt
-      elapsed >= twentyThreeHoursInMillis || elapsed < 0L
-    }.sortedByDescending { it.createdAt }
+      AppRepository.isDynamicEntryArchived(item)
+    }.sortedByDescending {
+      it.scheduledEndMillis.takeIf { ms -> ms > 0L } ?: it.createdAt
+    }
   }
 
   if (showAddDialog) {
@@ -117,12 +118,17 @@ fun DynamicTimetableScreen() {
       initialBatch = defaultBatchForModal,
       onDismiss = { showAddDialog = false },
       onSave = { batch, entries ->
-        val assignedTeacher = AppRepository.batches.value.firstOrNull { it.name.equals(batch, ignoreCase = true) }?.teacherName ?: "Subject Faculty"
+        val matchedBatch = AppRepository.batches.value.firstOrNull { it.name.equals(batch, ignoreCase = true) }
+        val assignedTeacherName = matchedBatch?.teacherName ?: "Subject Faculty"
+        val assignedTeacherId = matchedBatch?.teacherId ?: ""
         AppRepository.addDynamicTimetableEntries(
-          batch = batch,
+          batch = matchedBatch?.name ?: batch,
           entries = entries.map { Triple(it.subject, it.startTime, it.endTime) },
           createdAt = System.currentTimeMillis(),
-          teacherName = assignedTeacher
+          teacherName = assignedTeacherName,
+          batchId = matchedBatch?.id ?: "",
+          teacherId = assignedTeacherId,
+          dateStr = AppRepository.getCurrentDateStr()
         )
         showAddDialog = false
       }
@@ -177,6 +183,9 @@ fun DynamicTimetableScreen() {
               fontSize = 11.sp,
               fontWeight = FontWeight.Bold,
               color = Color(0xFF94A3B8),
+              maxLines = 1,
+              softWrap = false,
+              overflow = TextOverflow.Ellipsis,
               letterSpacing = 0.5.sp
             )
           }
@@ -187,6 +196,9 @@ fun DynamicTimetableScreen() {
               fontSize = 11.sp,
               fontWeight = FontWeight.SemiBold,
               color = Color(0xFF38BDF8),
+              maxLines = 1,
+              softWrap = false,
+              overflow = TextOverflow.Ellipsis,
               modifier = Modifier
                 .clickable { selectedBatchFilter = "All Batches" }
                 .padding(vertical = 2.dp, horizontal = 4.dp)
@@ -230,7 +242,8 @@ fun DynamicTimetableScreen() {
                   fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                   color = if (isSelected) MaterialTheme.colorScheme.onPrimary else Color(0xFFCBD5E1),
                   maxLines = 1,
-                  softWrap = false
+                  softWrap = false,
+                  overflow = TextOverflow.Ellipsis
                 )
                 Surface(
                   shape = CircleShape,
@@ -243,6 +256,7 @@ fun DynamicTimetableScreen() {
                     color = if (isSelected) MaterialTheme.colorScheme.onPrimary else Color(0xFF94A3B8),
                     maxLines = 1,
                     softWrap = false,
+                    overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp)
                   )
                 }
@@ -303,7 +317,8 @@ fun DynamicTimetableScreen() {
               fontSize = 12.sp,
               fontWeight = FontWeight.Bold,
               maxLines = 1,
-              softWrap = false
+              softWrap = false,
+              overflow = TextOverflow.Ellipsis
             )
           }
         }
@@ -335,8 +350,9 @@ fun DynamicTimetableScreen() {
       }
     } else {
       items(displayList, key = { it.id }) { item ->
-        val elapsed = System.currentTimeMillis() - item.createdAt
-        val remainingMillis = twentyThreeHoursInMillis - elapsed
+        val endMillis = item.scheduledEndMillis.takeIf { it > 0L }
+          ?: AppRepository.computeScheduledEndMillis(item.dateStr, item.endTime, item.createdAt)
+        val remainingMillis = (endMillis - System.currentTimeMillis()).coerceAtLeast(0L)
 
         DynamicTimetableCard(
           entry = item,
@@ -365,7 +381,8 @@ fun TabButton(text: String, isSelected: Boolean, onClick: () -> Unit) {
       fontSize = 12.sp,
       fontWeight = FontWeight.Bold,
       maxLines = 1,
-      softWrap = false
+      softWrap = false,
+      overflow = TextOverflow.Ellipsis
     )
   }
 }
@@ -419,6 +436,7 @@ fun DynamicTimetableCard(
             fontSize = 11.sp,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             maxLines = 1,
+            softWrap = false,
             overflow = TextOverflow.Ellipsis
           )
         }
@@ -468,6 +486,7 @@ fun DynamicTimetableCard(
               fontWeight = FontWeight.Bold,
               color = MaterialTheme.colorScheme.onSecondaryContainer,
               maxLines = 1,
+              softWrap = false,
               overflow = TextOverflow.Ellipsis
             )
           }
@@ -495,6 +514,7 @@ fun DynamicTimetableCard(
               fontWeight = FontWeight.Bold,
               color = MaterialTheme.colorScheme.onPrimaryContainer,
               maxLines = 1,
+              softWrap = false,
               overflow = TextOverflow.Ellipsis
             )
           }
@@ -509,17 +529,23 @@ fun DynamicTimetableCard(
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
       ) {
-        Column {
+        Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
           Text(
             text = "Posted At",
             fontSize = 9.sp,
             fontWeight = FontWeight.Bold,
+            maxLines = 1,
+            softWrap = false,
+            overflow = TextOverflow.Ellipsis,
             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
           )
           Text(
             text = formattedDate,
             fontSize = 11.sp,
             fontWeight = FontWeight.Medium,
+            maxLines = 1,
+            softWrap = false,
+            overflow = TextOverflow.Ellipsis,
             color = MaterialTheme.colorScheme.onSurfaceVariant
           )
         }
@@ -545,6 +571,9 @@ fun DynamicTimetableCard(
                 text = "Archived History",
                 fontSize = 9.sp,
                 fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Ellipsis,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
               )
             }
@@ -576,7 +605,8 @@ fun DynamicTimetableCard(
                 fontWeight = FontWeight.Bold,
                 color = if (hours < 2) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onPrimaryContainer,
                 maxLines = 1,
-                softWrap = false
+                softWrap = false,
+                overflow = TextOverflow.Ellipsis
               )
             }
           }
@@ -721,12 +751,18 @@ fun AddTimetableDialog(
             text = "Class Schedule Entries (${timeSlots.size})",
             fontSize = 13.sp,
             fontWeight = FontWeight.Bold,
+            maxLines = 1,
+            softWrap = false,
+            overflow = TextOverflow.Ellipsis,
             color = MaterialTheme.colorScheme.onSurface
           )
+          Spacer(modifier = Modifier.width(8.dp))
           Text(
             text = "Batch: $selectedBatch",
             fontSize = 11.sp,
             fontWeight = FontWeight.Medium,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
             color = Color(0xFF38BDF8)
           )
         }
@@ -758,6 +794,9 @@ fun AddTimetableDialog(
                     text = "Lecture Entry #${index + 1}",
                     fontSize = 10.sp,
                     fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Ellipsis,
                     color = MaterialTheme.colorScheme.onPrimaryContainer,
                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
                   )
@@ -928,21 +967,26 @@ fun calculateNextEndTime(startTimeStr: String): String {
 fun parseTimeTextToMinutes(timeStr: String): Int {
   try {
     val clean = timeStr.trim().uppercase()
+    if (clean.isEmpty() || !clean.contains(":")) return -1
     val isPm = clean.endsWith("PM")
     val isAm = clean.endsWith("AM")
-    val content = clean.replace("AM", "").replace("PM", "").trim()
+    val content = clean.removeSuffix("AM").removeSuffix("PM").trim()
     val parts = content.split(":")
-    if (parts.isNotEmpty()) {
-      var hour = parts[0].toIntOrNull() ?: 0
-      val minute = if (parts.size > 1) parts[1].toIntOrNull() ?: 0 else 0
+    if (parts.size != 2) return -1
+    var hour = parts[0].trim().toIntOrNull() ?: return -1
+    val minute = parts[1].trim().toIntOrNull() ?: return -1
+    if (minute !in 0..59) return -1
+    if (isAm || isPm) {
+      if (hour !in 1..12) return -1
       if (isPm && hour < 12) hour += 12
       if (isAm && hour == 12) hour = 0
-      return hour * 60 + minute
+    } else {
+      if (hour !in 0..23) return -1
     }
+    return hour * 60 + minute
   } catch (e: Exception) {
-    // Return fallback
+    return -1
   }
-  return -1
 }
 
 fun checkScheduleConflictMulti(
@@ -950,21 +994,31 @@ fun checkScheduleConflictMulti(
   batch: String,
   slots: List<TimetableTimeSlotInput>
 ): String? {
-  val twentyThreeHoursInMillis = 23 * 60 * 60 * 1000L
   val validSlots = slots.filter { it.subject.isNotBlank() }
+
+  // 0. Validate every slot's start and end times strictly — never silently skip invalid entries
+  for (i in validSlots.indices) {
+    val slot = validSlots[i]
+    val startMin = parseTimeTextToMinutes(slot.startTime)
+    val endMin = parseTimeTextToMinutes(slot.endTime)
+    if (startMin == -1 || endMin == -1) {
+      return "⚠️ Invalid time format for '${slot.subject}' (${slot.startTime} - ${slot.endTime}). Use HH:MM AM/PM."
+    }
+    if (startMin >= endMin) {
+      return "⚠️ Invalid time range for '${slot.subject}': End time (${slot.endTime}) must be after start time (${slot.startTime})."
+    }
+  }
 
   // 1. Check internal conflicts between entries within the current submission
   for (i in validSlots.indices) {
     val s1 = validSlots[i]
     val start1 = parseTimeTextToMinutes(s1.startTime)
     val end1 = parseTimeTextToMinutes(s1.endTime)
-    if (start1 == -1 || end1 == -1 || start1 >= end1) continue
 
     for (j in i + 1 until validSlots.size) {
       val s2 = validSlots[j]
       val start2 = parseTimeTextToMinutes(s2.startTime)
       val end2 = parseTimeTextToMinutes(s2.endTime)
-      if (start2 == -1 || end2 == -1 || start2 >= end2) continue
 
       if (start1 < end2 && end1 > start2) {
         return "⚠️ Slot Conflict: '${s1.subject}' (${s1.startTime} - ${s1.endTime}) overlaps with '${s2.subject}' (${s2.startTime} - ${s2.endTime})!"
@@ -972,18 +1026,19 @@ fun checkScheduleConflictMulti(
     }
   }
 
-  // 2. Check external conflicts against currently active entries for this batch or assigned mentor
-  val assignedMentor = com.example.data.AppRepository.batches.value
-    .firstOrNull { it.name.trim().equals(batch.trim(), ignoreCase = true) }?.teacherName?.trim()
+  // 2. Check external conflicts against currently active (non-archived) entries for this batch or assigned mentor
+  val matchedBatch = com.example.data.AppRepository.batches.value
+    .firstOrNull { it.name.trim().equals(batch.trim(), ignoreCase = true) || it.id.equals(batch.trim(), ignoreCase = true) }
+  val targetBatchId = matchedBatch?.id ?: ""
+  val assignedMentor = matchedBatch?.teacherName?.trim()
+  val assignedTeacherId = matchedBatch?.teacherId?.trim()
 
   for (slot in validSlots) {
     val slotStart = parseTimeTextToMinutes(slot.startTime)
     val slotEnd = parseTimeTextToMinutes(slot.endTime)
-    if (slotStart == -1 || slotEnd == -1 || slotStart >= slotEnd) continue
 
     for (entry in allEntries) {
-      val elapsed = System.currentTimeMillis() - entry.createdAt
-      if (elapsed in 0L until twentyThreeHoursInMillis) {
+      if (!com.example.data.AppRepository.isDynamicEntryArchived(entry)) {
         val entryStart = parseTimeTextToMinutes(entry.startTime)
         val entryEnd = parseTimeTextToMinutes(entry.endTime)
         if (entryStart == -1 || entryEnd == -1 || entryStart >= entryEnd) continue
@@ -991,17 +1046,23 @@ fun checkScheduleConflictMulti(
         val hasOverlap = slotStart < entryEnd && slotEnd > entryStart
         if (!hasOverlap) continue
 
-        if (entry.batch.trim().equals(batch.trim(), ignoreCase = true)) {
+        val sameBatch = (targetBatchId.isNotBlank() && entry.batchId.equals(targetBatchId, ignoreCase = true)) ||
+          entry.batch.trim().equals(batch.trim(), ignoreCase = true)
+        if (sameBatch) {
           return "⚠️ Batch Conflict: $batch already has an active class '${entry.subject}' (${entry.startTime} - ${entry.endTime})!"
         }
 
-        if (!assignedMentor.isNullOrBlank() &&
+        val sameTeacherById = !assignedTeacherId.isNullOrBlank() &&
+          entry.teacherId.isNotBlank() &&
+          entry.teacherId.equals(assignedTeacherId, ignoreCase = true)
+        val sameTeacherByName = !assignedMentor.isNullOrBlank() &&
           !entry.teacherName.equals("Faculty", ignoreCase = true) &&
           !entry.teacherName.equals("Subject Faculty", ignoreCase = true) &&
           (entry.teacherName.trim().equals(assignedMentor, ignoreCase = true) ||
            com.example.data.AppRepository.isSameFaculty(entry.teacherName, assignedMentor))
-        ) {
-          return "⚠️ Faculty Conflict: Faculty '$assignedMentor' is already assigned to '${entry.batch}' (${entry.startTime} - ${entry.endTime})!"
+
+        if (sameTeacherById || sameTeacherByName) {
+          return "⚠️ Faculty Conflict: Faculty '${assignedMentor ?: assignedTeacherId}' is already assigned to '${entry.batch}' (${entry.startTime} - ${entry.endTime})!"
         }
       }
     }

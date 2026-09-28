@@ -67,18 +67,8 @@ fun UniversalLoginScreen(
     }
   }
 
-  // Real-time detected role preview based on typed identifier
-  val detectedRole = remember(identifier) {
-    val clean = identifier.trim().lowercase()
-    when {
-      clean.isEmpty() -> null
-      clean.contains("admin") || clean == "joshiakash1209@gmail.com" || clean == "joshiakash1712@gmail.com" || clean == "admin@fsi.com" -> UserRole.ADMIN
-      clean.contains("teacher") || clean.contains("faculty") || clean.startsWith("tch") -> UserRole.TEACHER
-      clean.contains("parent") || clean.startsWith("par") -> UserRole.PARENT
-      clean.contains("student") || clean.startsWith("stu") -> UserRole.STUDENT
-      else -> null
-    }
-  }
+  val accountStatus by authViewModel.accountStatus.collectAsState()
+  val detectedRole = accountStatus.role
 
   // Atmospheric background gradient brushes
   val backgroundBrush = if (isDark) {
@@ -195,14 +185,20 @@ fun UniversalLoginScreen(
             fontSize = 24.sp,
             fontWeight = FontWeight.ExtraBold,
             color = if (isDark) Color(0xFFF8FAFC) else Color(0xFF0F172A),
-            letterSpacing = (-0.5).sp
+            letterSpacing = (-0.5).sp,
+            maxLines = 1,
+            softWrap = false,
+            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
           )
 
           Text(
             text = "Universal AI-Powered ERP Portal",
             fontSize = 13.sp,
             fontWeight = FontWeight.Medium,
-            color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B)
+            color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B),
+            maxLines = 1,
+            softWrap = false,
+            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
           )
         }
 
@@ -228,17 +224,23 @@ fun UniversalLoginScreen(
               ) {
                 Icon(Icons.Default.Lock, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
               }
-              Column {
+              Column(modifier = Modifier.weight(1f)) {
                 Text(
                   text = "Brute-Force Protection Active",
                   fontWeight = FontWeight.Bold,
                   fontSize = 13.sp,
-                  color = if (isDark) Color(0xFFFCA5A5) else Color(0xFF991B1B)
+                  color = if (isDark) Color(0xFFFCA5A5) else Color(0xFF991B1B),
+                  maxLines = 1,
+                  softWrap = false,
+                  overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                 )
                 Text(
                   text = "Lockout expires in $lockoutRemainingSeconds second${if (lockoutRemainingSeconds == 1L) "" else "s"}.",
                   fontSize = 11.sp,
-                  color = if (isDark) Color(0xFFF87171) else Color(0xFF7F1D1D)
+                  color = if (isDark) Color(0xFFF87171) else Color(0xFF7F1D1D),
+                  maxLines = 1,
+                  softWrap = false,
+                  overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                 )
               }
             }
@@ -267,7 +269,10 @@ fun UniversalLoginScreen(
                 text = "Authenticating secure credentials...",
                 fontSize = 13.sp,
                 color = if (isDark) Color(0xFFE2E8F0) else Color(0xFF0F172A),
-                fontWeight = FontWeight.Medium
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                softWrap = false,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
               )
             }
           }
@@ -342,7 +347,6 @@ fun UniversalLoginScreen(
           }
         }
 
-        val accountStatus by authViewModel.accountStatus.collectAsState()
         val manualActivationOverride by authViewModel.manualActivationOverride.collectAsState()
         val activationCode by authViewModel.activationCode.collectAsState()
         val newPasswordInput by authViewModel.newPasswordInput.collectAsState()
@@ -398,7 +402,7 @@ fun UniversalLoginScreen(
             value = activationCode,
             onValueChange = { authViewModel.onActivationCodeChanged(it) },
             label = { Text("6-Digit Institute Activation Code") },
-            placeholder = { Text("e.g. 891420") },
+            placeholder = { Text("Enter 6-digit PIN") },
             leadingIcon = { Icon(Icons.Default.Pin, contentDescription = null, tint = Color(0xFFD97706)) },
             shape = RoundedCornerShape(14.dp),
             modifier = Modifier.fillMaxWidth(),
@@ -446,7 +450,14 @@ fun UniversalLoginScreen(
             TextButton(
               onClick = { authViewModel.setManualActivationOverride(false) }
             ) {
-              Text("Already set your password? Switch to Standard Sign In", fontSize = 11.sp, color = brandColor)
+              Text(
+                "Already set your password? Switch to Standard Sign In",
+                fontSize = 11.sp,
+                color = brandColor,
+                maxLines = 1,
+                softWrap = false,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+              )
             }
           }
         } else {
@@ -510,6 +521,9 @@ fun UniversalLoginScreen(
               Text(
                 text = "Remember me",
                 fontSize = 12.sp,
+                maxLines = 1,
+                softWrap = false,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                 color = if (isDark) Color(0xFFCBD5E1) else Color(0xFF475569)
               )
             }
@@ -519,6 +533,9 @@ fun UniversalLoginScreen(
               color = brandColor,
               fontSize = 12.sp,
               fontWeight = FontWeight.Bold,
+              maxLines = 1,
+              softWrap = false,
+              overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
               modifier = Modifier
                 .clickable { showForgotDialog = true }
                 .padding(vertical = 4.dp, horizontal = 6.dp)
@@ -533,7 +550,14 @@ fun UniversalLoginScreen(
             TextButton(
               onClick = { authViewModel.setManualActivationOverride(true) }
             ) {
-              Text("First time user? Activate with Code", fontSize = 11.sp, color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B))
+              Text(
+                "First time user? Activate with Code",
+                fontSize = 11.sp,
+                color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B),
+                maxLines = 1,
+                softWrap = false,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+              )
             }
           }
         }
@@ -583,7 +607,10 @@ fun UniversalLoginScreen(
                 "Locked Out (${lockoutRemainingSeconds}s)",
                 fontWeight = FontWeight.Bold,
                 fontSize = 15.sp,
-                color = Color.White
+                color = Color.White,
+                maxLines = 1,
+                softWrap = false,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
               )
             }
           } else if (isActivationMode) {
@@ -592,7 +619,15 @@ fun UniversalLoginScreen(
               horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
               Icon(imageVector = Icons.Default.CheckCircle, contentDescription = null, tint = Color.White)
-              Text("Verify Code & Set Password", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = Color.White)
+              Text(
+                "Verify Code & Set Password",
+                fontWeight = FontWeight.Bold,
+                fontSize = 15.sp,
+                color = Color.White,
+                maxLines = 1,
+                softWrap = false,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+              )
             }
           } else {
             Row(
@@ -600,78 +635,50 @@ fun UniversalLoginScreen(
               horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
               Icon(imageVector = Icons.Default.Login, contentDescription = null, tint = Color.White)
-              Text("Secure Sign In", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = Color.White)
+              Text(
+                "Secure Sign In",
+                fontWeight = FontWeight.Bold,
+                fontSize = 15.sp,
+                color = Color.White,
+                maxLines = 1,
+                softWrap = false,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+              )
             }
           }
         }
 
-        // --- QUICK PREVIEW / DEMO ROLE ACCESS (1-Tap Switch) ---
+        // --- VERIFIED ROLE & SECURITY NOTICE ---
         HorizontalDivider(
           color = if (isDark) Color(0xFF334155) else Color(0xFFE2E8F0),
           modifier = Modifier.padding(vertical = 4.dp)
         )
 
-        Column(
+        Row(
           modifier = Modifier.fillMaxWidth(),
-          horizontalAlignment = Alignment.CenterHorizontally,
-          verticalArrangement = Arrangement.spacedBy(8.dp)
+          verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.Center
         ) {
-          Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
-          ) {
-            Icon(
-              imageVector = Icons.Default.Bolt,
-              contentDescription = null,
-              tint = brandColor,
-              modifier = Modifier.size(16.dp)
-            )
-            Text(
-              text = "Quick Demo Access (1-Tap Login)",
-              fontSize = 11.sp,
-              fontWeight = FontWeight.Bold,
-              color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B)
-            )
-          }
-
-          Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
-          ) {
-            listOf(
-              Triple("Admin", UserRole.ADMIN, "admin@mytuition.com"),
-              Triple("Faculty", UserRole.TEACHER, "deshmukh.physics@mytuition.com"),
-              Triple("Student", UserRole.STUDENT, "student@mytuition.com"),
-              Triple("Parent", UserRole.PARENT, "parent@mytuition.com")
-            ).forEach { (label, role, email) ->
-              Surface(
-                color = if (isDark) Color(0xFF111C2E) else Color(0xFFF1F5F9),
-                shape = RoundedCornerShape(10.dp),
-                border = androidx.compose.foundation.BorderStroke(
-                  1.dp,
-                  if (isDark) Color(0xFF1E2D42) else Color(0xFFCBD5E1)
-                ),
-                modifier = Modifier
-                  .weight(1f)
-                  .clickable {
-                    AppRepository.login(email, role)
-                    onLoginSuccess()
-                  }
-              ) {
-                Box(
-                  modifier = Modifier.padding(vertical = 8.dp),
-                  contentAlignment = Alignment.Center
-                ) {
-                  Text(
-                    text = label,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = brandColor
-                  )
-                }
-              }
-            }
-          }
+          Icon(
+            imageVector = Icons.Default.VerifiedUser,
+            contentDescription = null,
+            tint = brandColor,
+            modifier = Modifier.size(16.dp)
+          )
+          Spacer(modifier = Modifier.width(6.dp))
+          Text(
+            text = if (accountStatus.exists && detectedRole != null) {
+              "Verified Directory Account: ${accountStatus.displayName} (${detectedRole.name})"
+            } else {
+              "Sign in with your registered Institute Email, Mobile, or ID"
+            },
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Medium,
+            color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B),
+            maxLines = 1,
+            softWrap = false,
+            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+          )
         }
       }
     }
@@ -679,6 +686,10 @@ fun UniversalLoginScreen(
 
   // --- FORGOT PASSWORD / FORMAL SECURITY ASSISTANCE DIALOG ---
   if (showForgotDialog) {
+    var resetEmail by remember(identifier) { mutableStateOf(if (identifier.contains("@")) identifier else "") }
+    var resetStatusMsg by remember { mutableStateOf<String?>(null) }
+    var resetIsSuccess by remember { mutableStateOf(false) }
+
     AlertDialog(
       onDismissRequest = { showForgotDialog = false },
       icon = {
@@ -704,6 +715,9 @@ fun UniversalLoginScreen(
           fontWeight = FontWeight.Bold,
           color = if (isDark) Color(0xFFF8FAFC) else Color(0xFF0F172A),
           textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+          maxLines = 1,
+          softWrap = false,
+          overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
           modifier = Modifier.fillMaxWidth()
         )
       },
@@ -712,6 +726,50 @@ fun UniversalLoginScreen(
           modifier = Modifier.fillMaxWidth(),
           verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
+          OutlinedTextField(
+            value = resetEmail,
+            onValueChange = {
+              resetEmail = it
+              resetStatusMsg = null
+            },
+            label = { Text("Registered Email Address") },
+            placeholder = { Text("name@domain.com") },
+            singleLine = true,
+            shape = RoundedCornerShape(12.dp),
+            modifier = Modifier.fillMaxWidth()
+          )
+
+          if (resetStatusMsg != null) {
+            Surface(
+              color = if (resetIsSuccess) Color(0xFFDCFCE7) else Color(0xFFFEE2E2),
+              shape = RoundedCornerShape(10.dp),
+              border = androidx.compose.foundation.BorderStroke(
+                1.dp,
+                if (resetIsSuccess) Color(0xFF86EFAC) else Color(0xFFFCA5A5)
+              ),
+              modifier = Modifier.fillMaxWidth()
+            ) {
+              Row(
+                modifier = Modifier.padding(10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+              ) {
+                Icon(
+                  imageVector = if (resetIsSuccess) Icons.Default.CheckCircle else Icons.Default.Error,
+                  contentDescription = null,
+                  tint = if (resetIsSuccess) Color(0xFF16A34A) else Color(0xFFDC2626),
+                  modifier = Modifier.size(18.dp)
+                )
+                Text(
+                  text = resetStatusMsg ?: "",
+                  fontSize = 11.sp,
+                  color = if (resetIsSuccess) Color(0xFF15803D) else Color(0xFFB91C1C),
+                  fontWeight = FontWeight.Medium
+                )
+              }
+            }
+          }
+
           Surface(
             color = if (isDark) Color(0xFF0F172A) else Color(0xFFF8FAFC),
             shape = RoundedCornerShape(12.dp),
@@ -736,65 +794,30 @@ fun UniversalLoginScreen(
                   text = "Institutional Security Notice",
                   fontSize = 13.sp,
                   fontWeight = FontWeight.Bold,
+                  maxLines = 1,
+                  softWrap = false,
+                  overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                   color = if (isDark) Color(0xFFF1F5F9) else Color(0xFF0F172A)
                 )
               }
               Text(
-                text = "To safeguard student records and institutional data integrity, automated public password resets are restricted.",
+                text = "Password reset requires an active Firebase Authentication connection or verified Institute Administrator assistance.",
                 fontSize = 12.sp,
                 color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B),
                 lineHeight = 17.sp
               )
             }
           }
-
-          Text(
-            text = "How to Reset Your Password:",
-            fontSize = 13.sp,
-            fontWeight = FontWeight.SemiBold,
-            color = if (isDark) Color(0xFFE2E8F0) else Color(0xFF1E293B)
-          )
-
-          Row(
-            verticalAlignment = Alignment.Top,
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
-          ) {
-            Icon(
-              imageVector = Icons.Default.AdminPanelSettings,
-              contentDescription = null,
-              tint = brandColor,
-              modifier = Modifier.size(18.dp).padding(top = 2.dp)
-            )
-            Text(
-              text = "Contact your Assigned Teacher or Institute Administrator to request a verified credential reset.",
-              fontSize = 12.sp,
-              color = if (isDark) Color(0xFFCBD5E1) else Color(0xFF334155),
-              lineHeight = 17.sp
-            )
-          }
-
-          Row(
-            verticalAlignment = Alignment.Top,
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
-          ) {
-            Icon(
-              imageVector = Icons.Default.CheckCircle,
-              contentDescription = null,
-              tint = Color(0xFF16A34A),
-              modifier = Modifier.size(18.dp).padding(top = 2.dp)
-            )
-            Text(
-              text = "Authorized faculty can immediately update and issue temporary access credentials via the Admin & Faculty Console.",
-              fontSize = 12.sp,
-              color = if (isDark) Color(0xFFCBD5E1) else Color(0xFF334155),
-              lineHeight = 17.sp
-            )
-          }
         }
       },
       confirmButton = {
         Button(
-          onClick = { showForgotDialog = false },
+          onClick = {
+            authViewModel.performPasswordReset(resetEmail) { ok, msg ->
+              resetIsSuccess = ok
+              resetStatusMsg = msg
+            }
+          },
           shape = RoundedCornerShape(12.dp),
           colors = ButtonDefaults.buttonColors(containerColor = brandColor),
           modifier = Modifier
@@ -802,11 +825,22 @@ fun UniversalLoginScreen(
             .height(44.dp)
         ) {
           Text(
-            text = "Understood",
+            text = "Send Password Reset Link",
             fontWeight = FontWeight.Bold,
             fontSize = 14.sp,
-            color = Color.White
+            color = Color.White,
+            maxLines = 1,
+            softWrap = false,
+            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
           )
+        }
+      },
+      dismissButton = {
+        TextButton(
+          onClick = { showForgotDialog = false },
+          modifier = Modifier.fillMaxWidth()
+        ) {
+          Text("Close")
         }
       },
       containerColor = if (isDark) Color(0xFF1E293B) else Color(0xFFFFFFFF),

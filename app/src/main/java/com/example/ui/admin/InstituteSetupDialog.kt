@@ -32,6 +32,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.example.data.AppRepository
 import com.example.data.InstituteConfig
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -42,6 +43,7 @@ fun InstituteSetupDialog(
   onDismiss: () -> Unit
 ) {
   val context = LocalContext.current
+  val coroutineScope = rememberCoroutineScope()
   val currentConfig by AppRepository.instituteConfig.collectAsState()
 
   var selectedTab by remember { mutableStateOf(0) }
@@ -200,19 +202,19 @@ fun InstituteSetupDialog(
           Tab(
             selected = selectedTab == 0,
             onClick = { selectedTab = 0 },
-            text = { Text("1. Admin Profile", fontSize = 12.sp, fontWeight = FontWeight.Bold) },
+            text = { Text("1. Admin Profile", fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis) },
             icon = { Icon(Icons.Default.AdminPanelSettings, contentDescription = null, modifier = Modifier.size(18.dp)) }
           )
           Tab(
             selected = selectedTab == 1,
             onClick = { selectedTab = 1 },
-            text = { Text("2. Institute Info", fontSize = 12.sp, fontWeight = FontWeight.Bold) },
+            text = { Text("2. Institute Info", fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis) },
             icon = { Icon(Icons.Default.Apartment, contentDescription = null, modifier = Modifier.size(18.dp)) }
           )
           Tab(
             selected = selectedTab == 2,
             onClick = { selectedTab = 2 },
-            text = { Text("3. Grades & Subjects", fontSize = 12.sp, fontWeight = FontWeight.Bold) },
+            text = { Text("3. Grades & Subjects", fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis) },
             icon = { Icon(Icons.Default.MenuBook, contentDescription = null, modifier = Modifier.size(18.dp)) }
           )
         }
@@ -374,16 +376,18 @@ fun InstituteSetupDialog(
 
                   AppRepository.updateInstituteConfig(newConfig)
 
-                  if (adminNewPassword.isNotBlank()) {
-                    com.example.security.SecurityEngine.registerUserCredential(
-                      identifier = adminEmail,
-                      rawPassword = adminNewPassword,
-                      role = com.example.data.UserRole.ADMIN
-                    )
+                  coroutineScope.launch {
+                    if (adminNewPassword.isNotBlank() && adminEmail.isNotBlank()) {
+                      com.example.security.SecurityEngine.registerUserCredential(
+                        identifier = adminEmail,
+                        rawPassword = adminNewPassword,
+                        role = com.example.data.UserRole.ADMIN,
+                        fullName = adminFullName
+                      )
+                    }
+                    Toast.makeText(context, "✅ Institute Configuration Saved Permanently!", Toast.LENGTH_SHORT).show()
+                    onDismiss()
                   }
-
-                  Toast.makeText(context, "✅ Institute Configuration Saved Permanently!", Toast.LENGTH_SHORT).show()
-                  onDismiss()
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF059669)),
                 shape = RoundedCornerShape(12.dp)
@@ -850,6 +854,9 @@ fun GradesAndSubjectsStep(
                   color = if (isCurrent) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
                   fontSize = 11.sp,
                   fontWeight = FontWeight.Bold,
+                  maxLines = 1,
+                  softWrap = false,
+                  overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                   modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
                 )
               }
@@ -902,7 +909,7 @@ fun GradesAndSubjectsStep(
               InputChip(
                 selected = false,
                 onClick = {},
-                label = { Text(sub, fontSize = 11.sp) },
+                label = { Text(sub, fontSize = 11.sp, maxLines = 1, softWrap = false, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis) },
                 trailingIcon = {
                   Icon(
                     imageVector = Icons.Default.Close,

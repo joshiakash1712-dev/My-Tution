@@ -31,31 +31,98 @@ import java.util.*
 
 @Composable
 fun TeacherMainContent(currentTab: Int, onTabChange: (Int) -> Unit = {}) {
-  val students by AppRepository.students.collectAsState()
-  val batches by AppRepository.batches.collectAsState()
-  val tests by AppRepository.tests.collectAsState()
-  val doubts by AppRepository.doubts.collectAsState()
-  val timetable by AppRepository.timetable.collectAsState()
-  val subjects by AppRepository.subjects.collectAsState()
+  val allStudents by AppRepository.students.collectAsState()
+  val teachers by AppRepository.teachers.collectAsState()
+  val currentUserId by AppRepository.currentUserIdentifier.collectAsState()
+  val currentAccount by AppRepository.currentUserAccount.collectAsState()
+  val activeTeacher = remember(teachers, currentUserId, currentAccount) {
+    AppRepository.getActiveTeacherForCurrentSession()
+  }
+  val allBatches by AppRepository.batches.collectAsState()
+  val allTests by AppRepository.tests.collectAsState()
+  val allDoubts by AppRepository.doubts.collectAsState()
+  val allHomework by AppRepository.homework.collectAsState()
+  val allTimetable by AppRepository.timetable.collectAsState()
+  val allSubjects by AppRepository.subjects.collectAsState()
+
+  if (activeTeacher == null) {
+    Box(modifier = Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
+      Text(
+        "No authenticated faculty profile found for current session.",
+        color = MaterialTheme.colorScheme.error,
+        fontWeight = FontWeight.Bold
+      )
+    }
+    return
+  }
+
+  val batches = remember(allBatches, activeTeacher) {
+    AppRepository.getAuthorizedBatchesForCurrentTeacher()
+  }
+  val authorizedBatchNames = remember(batches) { batches.map { it.name.lowercase() }.toSet() }
+  val authorizedBatchIds = remember(batches) { batches.map { it.id.lowercase() }.toSet() }
+
+  val students = remember(allStudents, authorizedBatchNames, authorizedBatchIds) {
+    allStudents.filter {
+      it.batch.lowercase() in authorizedBatchNames || it.batchId.lowercase() in authorizedBatchIds
+    }
+  }
+  val studentIds = remember(students) { students.map { it.id }.toSet() }
+
+  val tests = remember(allTests, authorizedBatchNames, authorizedBatchIds) {
+    allTests.filter {
+      it.batch.lowercase() in authorizedBatchNames || it.batchId.lowercase() in authorizedBatchIds
+    }
+  }
+  val doubts = remember(allDoubts, studentIds, activeTeacher) {
+    allDoubts.filter {
+      it.studentId in studentIds || it.subject.equals(activeTeacher.subject, ignoreCase = true)
+    }
+  }
+  val homework = remember(allHomework, authorizedBatchNames, authorizedBatchIds) {
+    allHomework.filter {
+      it.batchName.lowercase() in authorizedBatchNames || it.batchId.lowercase() in authorizedBatchIds
+    }
+  }
+  val timetable = remember(allTimetable, activeTeacher, authorizedBatchNames, authorizedBatchIds) {
+    allTimetable.filter {
+      it.teacherId == activeTeacher.id ||
+        it.teacherName.equals(activeTeacher.name, ignoreCase = true) ||
+        it.batch.lowercase() in authorizedBatchNames ||
+        it.batchId.lowercase() in authorizedBatchIds
+    }
+  }
+  val subjects = remember(allSubjects, activeTeacher, authorizedBatchIds) {
+    allSubjects.filter {
+      it.teacherId.isBlank() ||
+        it.teacherId == activeTeacher.id ||
+        it.batchId.isBlank() ||
+        it.batchId.lowercase() in authorizedBatchIds ||
+        it.name.equals(activeTeacher.subject, ignoreCase = true)
+    }
+  }
 
   when (currentTab) {
-    0 -> TeacherDashboardTab(batches, doubts, timetable, subjects, onTabChange)
+    0 -> TeacherDashboardTab(activeTeacher, batches, doubts, timetable, subjects, students, onTabChange)
     1 -> TeacherAttendanceTab(students, batches)
     2 -> TeacherTestsTab(tests, students)
     3 -> TeacherTimetableTab(timetable)
-    4 -> TeacherDoubtsAndMaterialsTab(doubts)
+    4 -> TeacherDoubtsAndMaterialsTab(doubts, homework, batches, subjects, activeTeacher)
   }
 }
 
 @Composable
 fun TeacherDashboardTab(
+  activeTeacher: Teacher?,
   batches: List<Batch>,
   doubts: List<DoubtItem>,
   timetable: List<TimetableItem>,
   subjects: List<Subject>,
+  students: List<Student> = emptyList(),
   onTabChange: (Int) -> Unit = {}
 ) {
   val pendingDoubtsCount = doubts.count { it.status == "Pending" }
+  val attendanceRecords by AppRepository.attendanceRecords.collectAsState()
   var showTeacherAnnouncementDialog by remember { mutableStateOf(false) }
 
   if (showTeacherAnnouncementDialog) {
@@ -112,7 +179,7 @@ fun TeacherDashboardTab(
                   .clickable { selectedAudience = aud }
               ) {
                 Box(
-                  modifier = Modifier.padding(vertical = 6.dp),
+                  modifier = Modifier.padding(horizontal = 4.dp, vertical = 6.dp),
                   contentAlignment = Alignment.Center
                 ) {
                   Text(
@@ -124,6 +191,9 @@ fun TeacherDashboardTab(
                     },
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Ellipsis,
                     textAlign = androidx.compose.ui.text.style.TextAlign.Center
                   )
                 }
@@ -143,7 +213,7 @@ fun TeacherDashboardTab(
               Tab(
                 selected = selectedBatchForAnnc == bName,
                 onClick = { selectedBatchForAnnc = bName },
-                text = { Text(bName, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = if (selectedBatchForAnnc == bName) Color(0xFF38BDF8) else Color(0xFF94A3B8)) }
+                text = { Text(bName, fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis, color = if (selectedBatchForAnnc == bName) Color(0xFF38BDF8) else Color(0xFF94A3B8)) }
               )
             }
           }
@@ -175,7 +245,7 @@ fun TeacherDashboardTab(
                 id = "ANNC_${System.currentTimeMillis()}",
                 title = "📢 $anncTitle",
                 message = anncMessage,
-                sender = "Faculty ($selectedBatchForAnnc)",
+                sender = "${activeTeacher?.name ?: "Faculty"} ($selectedBatchForAnnc)",
                 targetAudience = selectedAudience,
                 batchName = selectedBatchForAnnc,
                 timestamp = System.currentTimeMillis(),
@@ -284,12 +354,12 @@ fun TeacherDashboardTab(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
               ) {
-                Column {
-                  Text(cl.subject, fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color(0xFF001D36))
-                  Text("${cl.batch} • ${cl.room}", fontSize = 11.sp, color = Color(0xFF44474E))
+                Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                  Text(cl.subject, fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color(0xFF001D36), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                  Text("${cl.batch} • ${cl.room}", fontSize = 11.sp, color = Color(0xFF44474E), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
                 Surface(color = Color(0xFF0061A4), shape = RoundedCornerShape(8.dp)) {
-                  Text("${cl.startTime} - ${cl.endTime}", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
+                  Text("${cl.startTime} - ${cl.endTime}", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
                 }
               }
             }
@@ -304,9 +374,23 @@ fun TeacherDashboardTab(
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
           subjects.forEach { sub ->
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-              Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text(sub.name, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-                Text("${sub.completionPercent}%", fontWeight = FontWeight.Bold, color = Color(0xFF0061A4), fontSize = 13.sp)
+              Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Text(sub.name, fontWeight = FontWeight.SemiBold, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                  IconButton(
+                    onClick = { AppRepository.updateSyllabusProgress(sub.id, (sub.completionPercent - 5).coerceAtLeast(0)) },
+                    modifier = Modifier.size(24.dp)
+                  ) {
+                    Icon(Icons.Default.RemoveCircleOutline, contentDescription = "Decrease syllabus progress", tint = Color(0xFF0061A4), modifier = Modifier.size(16.dp))
+                  }
+                  Text("${sub.completionPercent}%", fontWeight = FontWeight.Bold, color = Color(0xFF0061A4), fontSize = 13.sp, maxLines = 1, softWrap = false)
+                  IconButton(
+                    onClick = { AppRepository.updateSyllabusProgress(sub.id, (sub.completionPercent + 5).coerceAtMost(100)) },
+                    modifier = Modifier.size(24.dp)
+                  ) {
+                    Icon(Icons.Default.AddCircleOutline, contentDescription = "Increase syllabus progress", tint = Color(0xFF0061A4), modifier = Modifier.size(16.dp))
+                  }
+                }
               }
               LinearProgressIndicator(
                 progress = { sub.completionPercent / 100f },
@@ -320,60 +404,91 @@ fun TeacherDashboardTab(
       }
     }
 
-    // Weekly Attendance Trends Telemetry
+    // Weekly Attendance Trends Telemetry (Computed from real Room attendance records)
     item {
-      GeoSectionCard(title = "Weekly Attendance Trends (All Batches)") {
+      val authorizedStudentIds = remember(students) { students.map { it.id }.toSet() }
+      val scopedRecords = remember(attendanceRecords, authorizedStudentIds) {
+        if (authorizedStudentIds.isEmpty()) emptyList()
+        else attendanceRecords.filter { it.studentId in authorizedStudentIds }
+      }
+      val overallPercent = remember(scopedRecords) {
+        if (scopedRecords.isEmpty()) 0f
+        else {
+          val present = scopedRecords.count {
+            it.status.equals("Present", true) || it.status.equals("Late", true)
+          }
+          (present.toFloat() / scopedRecords.size.toFloat()) * 100f
+        }
+      }
+      val recentDates = remember(scopedRecords) {
+        scopedRecords.groupBy { it.date }
+          .entries
+          .sortedBy { it.key }
+          .takeLast(6)
+          .map { (dateStr, recs) ->
+            val p = recs.count { it.status.equals("Present", true) || it.status.equals("Late", true) }
+            val pct = if (recs.isEmpty()) 0f else (p.toFloat() / recs.size.toFloat()) * 100f
+            Pair(dateStr.take(5), pct)
+          }
+      }
+
+      GeoSectionCard(title = "Attendance Telemetry (Assigned Batches)") {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
           Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
           ) {
-            Column {
-              Text("Weekly Class Average", fontSize = 11.sp, color = Color(0xFF64748B))
-              Text("94.8% Present", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color(0xFF15803D))
+            Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+              Text("Recorded Class Average", fontSize = 11.sp, color = Color(0xFF64748B), maxLines = 1, overflow = TextOverflow.Ellipsis)
+              Text(
+                if (scopedRecords.isEmpty()) "No records yet" else "${String.format(Locale.US, "%.1f", overallPercent)}% Present",
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color(0xFF15803D),
+                maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Ellipsis
+              )
             }
             Surface(
               color = Color(0xFFDCFCE7),
               shape = RoundedCornerShape(8.dp)
             ) {
               Text(
-                "+2.4% vs Last Week",
+                "${scopedRecords.size} Total Logs",
                 fontSize = 10.sp,
                 fontWeight = FontWeight.Bold,
                 color = Color(0xFF15803D),
+                maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
               )
             }
           }
-          
-          Row(
-            modifier = Modifier.fillMaxWidth().height(48.dp).padding(vertical = 4.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.Bottom
-          ) {
-            val attendanceDays = listOf(
-              Pair("Mon", 95f),
-              Pair("Tue", 92f),
-              Pair("Wed", 96f),
-              Pair("Thu", 91f),
-              Pair("Fri", 98f),
-              Pair("Sat", 95f)
-            )
-            attendanceDays.forEach { (day, pct) ->
-              Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-                modifier = Modifier.weight(1f)
-              ) {
-                Box(
-                  modifier = Modifier
-                    .width(18.dp)
-                    .height((pct * 0.35f).dp)
-                    .clip(RoundedCornerShape(topStart = 4.dp, topEnd = 4.dp))
-                    .background(if (pct >= 95f) Color(0xFF15803D) else Color(0xFF0061A4))
-                )
-                Text(day, fontSize = 9.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF64748B))
+
+          if (recentDates.isNotEmpty()) {
+            Row(
+              modifier = Modifier.fillMaxWidth().height(48.dp).padding(vertical = 4.dp),
+              horizontalArrangement = Arrangement.SpaceBetween,
+              verticalAlignment = Alignment.Bottom
+            ) {
+              recentDates.forEach { (dayLabel, pct) ->
+                Column(
+                  horizontalAlignment = Alignment.CenterHorizontally,
+                  verticalArrangement = Arrangement.spacedBy(4.dp),
+                  modifier = Modifier.weight(1f)
+                ) {
+                  Box(
+                    modifier = Modifier
+                      .width(18.dp)
+                      .height((pct.coerceAtLeast(10f) * 0.35f).dp)
+                      .clip(RoundedCornerShape(topStart = 4.dp, topEnd = 4.dp))
+                      .background(if (pct >= 90f) Color(0xFF15803D) else Color(0xFF0061A4))
+                  )
+                  Text(dayLabel, fontSize = 9.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF64748B), maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
+                }
               }
             }
           }
@@ -400,19 +515,19 @@ fun TeacherAttendanceTab(students: List<Student>, batches: List<Batch>) {
       Tab(
         selected = selectedTabState == 0,
         onClick = { selectedTabState = 0 },
-        text = { Text("Daily Register", fontWeight = FontWeight.Bold, fontSize = 13.sp) },
+        text = { Text("Daily Register", fontWeight = FontWeight.Bold, fontSize = 13.sp, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis) },
         icon = { Icon(imageVector = Icons.Default.FactCheck, contentDescription = "Daily Register Icon", modifier = Modifier.size(18.dp)) }
       )
       Tab(
         selected = selectedTabState == 1,
         onClick = { selectedTabState = 1 },
-        text = { Text("Card Flow", fontWeight = FontWeight.Bold, fontSize = 13.sp) },
+        text = { Text("Card Flow", fontWeight = FontWeight.Bold, fontSize = 13.sp, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis) },
         icon = { Icon(imageVector = Icons.Default.HowToReg, contentDescription = "Card Flow Icon", modifier = Modifier.size(18.dp)) }
       )
       Tab(
         selected = selectedTabState == 2,
         onClick = { selectedTabState = 2 },
-        text = { Text("Attendance History", fontWeight = FontWeight.Bold, fontSize = 13.sp) },
+        text = { Text("Attendance History", fontWeight = FontWeight.Bold, fontSize = 13.sp, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis) },
         icon = { Icon(imageVector = Icons.Default.History, contentDescription = "History Icon", modifier = Modifier.size(18.dp)) }
       )
     }
@@ -470,7 +585,7 @@ fun TeacherTestsTab(tests: List<TestRecord>, students: List<Student>) {
             color = if (sel) Color(0xFF0061A4) else Color(0xFFEEF0F6),
             shape = RoundedCornerShape(12.dp),
             modifier = Modifier.clickable { selectedTest = t }
-          ) { Text(t.testName.take(16) + "...", color = if (sel) Color.White else Color(0xFF44474E), fontSize = 11.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)) }
+          ) { Text(t.testName.take(16) + "...", color = if (sel) Color.White else Color(0xFF44474E), fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)) }
         }
       }
     }
@@ -490,12 +605,12 @@ fun TeacherTestsTab(tests: List<TestRecord>, students: List<Student>) {
             batchStudents.forEach { bStu ->
               val currScore = marksEditingMap[bStu.id] ?: 0
               Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Text(bStu.name, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                Text(bStu.name, fontSize = 13.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                   IconButton(onClick = { marksEditingMap = marksEditingMap + (bStu.id to (currScore - 10).coerceAtLeast(0)) }, modifier = Modifier.size(28.dp)) {
                     Icon(Icons.Default.RemoveCircleOutline, contentDescription = null, tint = Color(0xFF0061A4))
                   }
-                  Text("$currScore", fontWeight = FontWeight.Bold, fontSize = 14.sp, modifier = Modifier.width(36.dp), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                  Text("$currScore", fontWeight = FontWeight.Bold, fontSize = 14.sp, maxLines = 1, softWrap = false, modifier = Modifier.width(36.dp), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
                   IconButton(onClick = { marksEditingMap = marksEditingMap + (bStu.id to (currScore + 10).coerceAtMost(selectedTest!!.totalMarks)) }, modifier = Modifier.size(28.dp)) {
                     Icon(Icons.Default.AddCircleOutline, contentDescription = null, tint = Color(0xFF0061A4))
                   }
@@ -528,22 +643,22 @@ fun TeacherTestsTab(tests: List<TestRecord>, students: List<Student>) {
               modifier = Modifier.weight(1f).clip(RoundedCornerShape(12.dp)).background(Color(0xFF182438)).border(1.dp, Color(0xFF1E2D42), RoundedCornerShape(12.dp)).padding(10.dp),
               horizontalAlignment = Alignment.CenterHorizontally
             ) {
-              Text("Class Avg", fontSize = 11.sp, color = Color(0xFF94A3B8))
-              Text("$classAverage / ${selectedTest!!.totalMarks}", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF38BDF8))
+              Text("Class Avg", fontSize = 11.sp, color = Color(0xFF94A3B8), maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
+              Text("$classAverage / ${selectedTest!!.totalMarks}", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF38BDF8), maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
             }
             Column(
               modifier = Modifier.weight(1f).clip(RoundedCornerShape(12.dp)).background(Color(0xFF064E3B)).border(1.dp, Color(0xFF047857), RoundedCornerShape(12.dp)).padding(10.dp),
               horizontalAlignment = Alignment.CenterHorizontally
             ) {
-              Text("Highest Score", fontSize = 11.sp, color = Color(0xFF6EE7B7))
-              Text("$maxScore / ${selectedTest!!.totalMarks}", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF4ADE80))
+              Text("Highest Score", fontSize = 11.sp, color = Color(0xFF6EE7B7), maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
+              Text("$maxScore / ${selectedTest!!.totalMarks}", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF4ADE80), maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
             }
             Column(
               modifier = Modifier.weight(1f).clip(RoundedCornerShape(12.dp)).background(Color(0xFF450A0A)).border(1.dp, Color(0xFF991B1B), RoundedCornerShape(12.dp)).padding(10.dp),
               horizontalAlignment = Alignment.CenterHorizontally
             ) {
-              Text("Lowest Score", fontSize = 11.sp, color = Color(0xFFFCA5A5))
-              Text("$minScore / ${selectedTest!!.totalMarks}", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFFF87171))
+              Text("Lowest Score", fontSize = 11.sp, color = Color(0xFFFCA5A5), maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
+              Text("$minScore / ${selectedTest!!.totalMarks}", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFFF87171), maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
             }
           }
         }
@@ -571,6 +686,9 @@ fun TeacherTestsTab(tests: List<TestRecord>, students: List<Student>) {
                   fontSize = 11.sp,
                   fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal,
                   color = if (isSel) Color.White else Color(0xFF94A3B8),
+                  maxLines = 1,
+                  softWrap = false,
+                  overflow = TextOverflow.Ellipsis,
                   modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
                 )
               }
@@ -603,13 +721,13 @@ fun TeacherTimetableTab(timetable: List<TimetableItem>) {
       Tab(
         selected = selectedSubTab == 0,
         onClick = { selectedSubTab = 0 },
-        text = { Text("Daily Dynamic Timetable", fontWeight = FontWeight.Bold, fontSize = 12.sp) },
+        text = { Text("Daily Dynamic Timetable", fontWeight = FontWeight.Bold, fontSize = 12.sp, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis) },
         icon = { Icon(Icons.Default.Schedule, contentDescription = null, modifier = Modifier.size(20.dp)) }
       )
       Tab(
         selected = selectedSubTab == 1,
         onClick = { selectedSubTab = 1 },
-        text = { Text("Weekly Fixed Schedule", fontWeight = FontWeight.Bold, fontSize = 12.sp) },
+        text = { Text("Weekly Fixed Schedule", fontWeight = FontWeight.Bold, fontSize = 12.sp, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis) },
         icon = { Icon(Icons.Default.DateRange, contentDescription = null, modifier = Modifier.size(20.dp)) }
       )
     }
@@ -677,11 +795,11 @@ fun TeacherWeeklyTimetableList(timetable: List<TimetableItem>) {
             .padding(16.dp),
           verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-          Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text(dayName.uppercase(), fontWeight = FontWeight.Bold, fontSize = 13.sp, color = if (isThisDay) Color(0xFF38BDF8) else Color(0xFFF8FAFC))
+          Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            Text(dayName.uppercase(), fontWeight = FontWeight.Bold, fontSize = 13.sp, color = if (isThisDay) Color(0xFF38BDF8) else Color(0xFFF8FAFC), maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
             if (isThisDay) {
               Surface(color = Color(0xFF0284C7), shape = CircleShape) {
-                Text("TODAY", fontSize = 9.sp, color = Color.White, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp))
+                Text("TODAY", fontSize = 9.sp, color = Color.White, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp))
               }
             }
           }
@@ -729,6 +847,7 @@ fun TimetableCard(item: TimetableItem, isToday: Boolean) {
         fontSize = 10.sp,
         fontWeight = FontWeight.Bold,
         maxLines = 1,
+        softWrap = false,
         overflow = TextOverflow.Ellipsis,
         modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
       )
@@ -737,9 +856,78 @@ fun TimetableCard(item: TimetableItem, isToday: Boolean) {
 }
 
 @Composable
-fun TeacherDoubtsAndMaterialsTab(doubts: List<DoubtItem>) {
+fun TeacherDoubtsAndMaterialsTab(
+  doubts: List<DoubtItem>,
+  homework: List<HomeworkItem> = emptyList(),
+  batches: List<Batch> = emptyList(),
+  subjects: List<Subject> = emptyList(),
+  activeTeacher: Teacher? = null
+) {
   var replyText by remember { mutableStateOf("") }
   var activeDoubt by remember { mutableStateOf<DoubtItem?>(null) }
+  var showCreateHomeworkDialog by remember { mutableStateOf(false) }
+
+  var hwSubject by remember(activeTeacher) { mutableStateOf(activeTeacher?.subject ?: "Physics") }
+  var hwTitle by remember { mutableStateOf("") }
+  var hwDesc by remember { mutableStateOf("") }
+  var hwDueDate by remember { mutableStateOf("28/08/2026") }
+  var hwBatch by remember(batches) { mutableStateOf(batches.firstOrNull()?.name ?: "") }
+
+  if (showCreateHomeworkDialog) {
+    AlertDialog(
+      onDismissRequest = { showCreateHomeworkDialog = false },
+      title = { Text("Assign New Batch Homework", fontWeight = FontWeight.Bold, fontSize = 16.sp) },
+      text = {
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+          OutlinedTextField(value = hwSubject, onValueChange = { hwSubject = it }, label = { Text("Subject") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+          if (batches.isNotEmpty()) {
+            Text("Select Assigned Batch:", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
+              batches.forEach { b ->
+                val isSel = hwBatch.equals(b.name, ignoreCase = true)
+                FilterChip(
+                  selected = isSel,
+                  onClick = { hwBatch = b.name },
+                  label = { Text(b.name, fontSize = 11.sp) }
+                )
+              }
+            }
+          }
+          OutlinedTextField(value = hwBatch, onValueChange = { hwBatch = it }, label = { Text("Target Batch") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+          OutlinedTextField(value = hwTitle, onValueChange = { hwTitle = it }, label = { Text("Assignment Title") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+          OutlinedTextField(value = hwDesc, onValueChange = { hwDesc = it }, label = { Text("Instructions / Problems") }, modifier = Modifier.fillMaxWidth().height(90.dp))
+          OutlinedTextField(value = hwDueDate, onValueChange = { hwDueDate = it }, label = { Text("Due Date (dd/MM/yyyy)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        }
+      },
+      confirmButton = {
+        Button(
+          onClick = {
+            if (hwTitle.isNotBlank() && hwBatch.isNotBlank()) {
+              val matchedBatch = batches.find { it.name.equals(hwBatch, ignoreCase = true) }
+              val matchedSubject = subjects.find { it.name.equals(hwSubject, ignoreCase = true) }
+              AppRepository.addHomework(
+                subject = hwSubject,
+                title = hwTitle,
+                description = hwDesc.ifBlank { hwTitle },
+                dueDate = hwDueDate,
+                batchName = matchedBatch?.name ?: hwBatch,
+                assignedBy = activeTeacher?.name ?: "",
+                subjectId = matchedSubject?.id ?: "",
+                batchId = matchedBatch?.id ?: ""
+              )
+              hwTitle = ""
+              hwDesc = ""
+              showCreateHomeworkDialog = false
+            }
+          },
+          colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0061A4))
+        ) { Text("Assign Homework") }
+      },
+      dismissButton = { TextButton(onClick = { showCreateHomeworkDialog = false }) { Text("Cancel") } },
+      containerColor = MaterialTheme.colorScheme.surface,
+      shape = RoundedCornerShape(24.dp)
+    )
+  }
 
   if (activeDoubt != null) {
     AlertDialog(
@@ -748,7 +936,17 @@ fun TeacherDoubtsAndMaterialsTab(doubts: List<DoubtItem>) {
       text = {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
           Surface(color = Color(0xFFEEF0F6), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
-            Text(activeDoubt!!.questionText, fontSize = 13.sp, modifier = Modifier.padding(12.dp))
+            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+              Text(activeDoubt!!.questionText, fontSize = 13.sp, color = Color(0xFF001D36))
+              if (!activeDoubt!!.photoAttachmentUri.isNullOrBlank()) {
+                Text(
+                  "📎 Attachment: ${activeDoubt!!.photoAttachmentUri!!.substringAfterLast('/')}",
+                  fontSize = 11.sp,
+                  fontWeight = FontWeight.SemiBold,
+                  color = Color(0xFF0061A4)
+                )
+              }
+            }
           }
           OutlinedTextField(
             value = replyText,
@@ -781,7 +979,60 @@ fun TeacherDoubtsAndMaterialsTab(doubts: List<DoubtItem>) {
     contentPadding = PaddingValues(16.dp),
     verticalArrangement = Arrangement.spacedBy(14.dp)
   ) {
-    item { Text("Student Doubts Queue & Uploads", fontWeight = FontWeight.Bold, fontSize = 18.sp) }
+    item {
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+      ) {
+        Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+          Text("Homework & Student Doubts", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+          Text("Assign batch homework and resolve student queries", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Button(
+          onClick = { showCreateHomeworkDialog = true },
+          colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0061A4)),
+          shape = RoundedCornerShape(12.dp)
+        ) {
+          Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+          Spacer(Modifier.width(4.dp))
+          Text("Assign HW", fontSize = 12.sp)
+        }
+      }
+    }
+
+    if (homework.isNotEmpty()) {
+      item {
+        GeoSectionCard(title = "Active Homework Assignments (${homework.size})") {
+          Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            homework.take(5).forEach { hw ->
+              Row(
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .clip(RoundedCornerShape(10.dp))
+                  .background(MaterialTheme.colorScheme.surfaceVariant)
+                  .padding(10.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+              ) {
+                Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                  Text("${hw.subject} • ${hw.title}", fontWeight = FontWeight.Bold, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                  Text("Batch: ${hw.batchName} • Due: ${hw.dueDate}", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Text(
+                  text = "${hw.completedByStudentIds.size} Submitted",
+                  fontSize = 11.sp,
+                  fontWeight = FontWeight.Bold,
+                  color = Color(0xFF0061A4)
+                )
+              }
+            }
+          }
+        }
+      }
+    }
+
+    item { Text("Student Doubts Queue (${doubts.size})", fontWeight = FontWeight.Bold, fontSize = 16.sp) }
 
     items(doubts) { d ->
       GeoSectionCard(title = "${d.studentName} (${d.subject})", actionText = d.status) {

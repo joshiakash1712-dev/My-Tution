@@ -44,8 +44,25 @@ fun AttendanceHistoryView(
   currentUserId: String = "system_fsi"
 ) {
   val context = LocalContext.current
-  val liveAttendanceList by AppRepository.attendance.collectAsState()
-  val batches by AppRepository.batches.collectAsState()
+  val rawAttendanceList by AppRepository.attendance.collectAsState()
+  val allBatches by AppRepository.batches.collectAsState()
+  val allStudents by AppRepository.students.collectAsState()
+
+  val batches = remember(allBatches, currentUserRole) {
+    if (currentUserRole.equals("Teacher", ignoreCase = true)) {
+      AppRepository.getAuthorizedBatchesForCurrentTeacher()
+    } else {
+      allBatches
+    }
+  }
+  val authorizedBatchNames = remember(batches) { batches.map { it.name.lowercase() }.toSet() }
+  val liveAttendanceList = remember(rawAttendanceList, currentUserRole, authorizedBatchNames) {
+    if (currentUserRole.equals("Teacher", ignoreCase = true)) {
+      rawAttendanceList.filter { it.batchName.lowercase() in authorizedBatchNames }
+    } else {
+      rawAttendanceList
+    }
+  }
 
   // Calendar state for Day, Month, Year selection (Rule 3)
   val todayCal = remember { Calendar.getInstance() }
@@ -56,6 +73,7 @@ fun AttendanceHistoryView(
 
   var selectedBatchFilter by remember { mutableStateOf("All") }
   var selectedStatusFilter by remember { mutableStateOf("All") }
+  var selectedStudentIdFilter by remember { mutableStateOf("All") }
   var systemFeedbackMsg by remember { mutableStateOf<String?>(null) }
   var showDatePickerDialog by remember { mutableStateOf(false) }
   var editingRecordForReason by remember { mutableStateOf<AttendanceRecord?>(null) }
@@ -101,7 +119,8 @@ fun AttendanceHistoryView(
     selectedMonth,
     selectedYear,
     selectedBatchFilter,
-    selectedStatusFilter
+    selectedStatusFilter,
+    selectedStudentIdFilter
   ) {
     liveAttendanceList.filter { record ->
       // 1. Date filter (Day, Month, Year)
@@ -130,7 +149,14 @@ fun AttendanceHistoryView(
         record.status.equals(selectedStatusFilter, ignoreCase = true)
       }
 
-      matchesDate && matchesBatch && matchesStatus
+      // 4. Student filter (by stable studentId)
+      val matchesStudent = if (selectedStudentIdFilter == "All") {
+        true
+      } else {
+        record.studentId == selectedStudentIdFilter
+      }
+
+      matchesDate && matchesBatch && matchesStatus && matchesStudent
     }.sortedByDescending { it.timestamp }
   }
 
@@ -183,6 +209,7 @@ fun AttendanceHistoryView(
                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                 color = if (isSelected) Color.White else Color(0xFF94A3B8),
                 maxLines = 1,
+                softWrap = false,
                 overflow = TextOverflow.Ellipsis
               )
             }
@@ -217,7 +244,8 @@ fun AttendanceHistoryView(
           ) {
             Row(
               verticalAlignment = Alignment.CenterVertically,
-              horizontalArrangement = Arrangement.spacedBy(8.dp)
+              horizontalArrangement = Arrangement.spacedBy(8.dp),
+              modifier = Modifier.weight(1f)
             ) {
               Icon(
                 imageVector = Icons.Default.CalendarMonth,
@@ -229,7 +257,9 @@ fun AttendanceHistoryView(
                 text = "Date Filter (Day / Month / Year)",
                 fontWeight = FontWeight.Bold,
                 fontSize = 14.sp,
-                color = Color.White
+                color = Color.White,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
               )
             }
 
@@ -287,7 +317,7 @@ fun AttendanceHistoryView(
                 labelColor = Color(0xFFCBD5E1)
               ),
               border = SuggestionChipDefaults.suggestionChipBorder(enabled = true, borderColor = Color(0xFF1E2D42)),
-              label = { Text("Today (${todayCal.get(Calendar.DAY_OF_MONTH)} ${monthNames[todayCal.get(Calendar.MONTH)]})", fontSize = 11.sp) }
+              label = { Text("Today (${todayCal.get(Calendar.DAY_OF_MONTH)} ${monthNames[todayCal.get(Calendar.MONTH)]})", fontSize = 11.sp, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis) }
             )
 
             SuggestionChip(
@@ -304,7 +334,7 @@ fun AttendanceHistoryView(
                 labelColor = Color(0xFFCBD5E1)
               ),
               border = SuggestionChipDefaults.suggestionChipBorder(enabled = true, borderColor = Color(0xFF1E2D42)),
-              label = { Text("Yesterday", fontSize = 11.sp) }
+              label = { Text("Yesterday", fontSize = 11.sp, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis) }
             )
 
             SuggestionChip(
@@ -314,7 +344,7 @@ fun AttendanceHistoryView(
                 labelColor = Color(0xFF38BDF8)
               ),
               border = SuggestionChipDefaults.suggestionChipBorder(enabled = true, borderColor = Color(0xFF1E2D42)),
-              label = { Text("Calendar Picker", fontSize = 11.sp) },
+              label = { Text("Calendar Picker", fontSize = 11.sp, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis) },
               icon = { Icon(Icons.Default.Event, contentDescription = null, modifier = Modifier.size(14.dp), tint = Color(0xFF38BDF8)) }
             )
 
@@ -326,7 +356,7 @@ fun AttendanceHistoryView(
                   labelColor = Color(0xFF38BDF8)
                 ),
                 border = SuggestionChipDefaults.suggestionChipBorder(enabled = true, borderColor = Color(0xFF0284C7)),
-                label = { Text("View All Records", fontSize = 11.sp, color = Color(0xFF38BDF8)) }
+                label = { Text("View All Records", fontSize = 11.sp, color = Color(0xFF38BDF8), maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis) }
               )
             }
           }
@@ -469,23 +499,23 @@ fun AttendanceHistoryView(
           verticalAlignment = Alignment.CenterVertically
         ) {
           Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1f)) {
-            Text("TOTAL", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFF94A3B8))
-            Text("$totalCount", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White)
+            Text("TOTAL", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFF94A3B8), maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
+            Text("$totalCount", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White, maxLines = 1, softWrap = false)
           }
           VerticalDivider(modifier = Modifier.height(28.dp), color = Color(0xFF1E2D42))
           Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1f)) {
-            Text("PRESENT", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFF4ADE80))
-            Text("$presentCount", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color(0xFF4ADE80))
+            Text("PRESENT", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFF4ADE80), maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
+            Text("$presentCount", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color(0xFF4ADE80), maxLines = 1, softWrap = false)
           }
           VerticalDivider(modifier = Modifier.height(28.dp), color = Color(0xFF1E2D42))
           Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1f)) {
-            Text("ABSENT", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFFF87171))
-            Text("$absentCount", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color(0xFFF87171))
+            Text("ABSENT", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFFF87171), maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
+            Text("$absentCount", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color(0xFFF87171), maxLines = 1, softWrap = false)
           }
           VerticalDivider(modifier = Modifier.height(28.dp), color = Color(0xFF1E2D42))
           Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1f)) {
-            Text("RATE", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFF38BDF8))
-            Text("$attendanceRate%", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color(0xFF38BDF8))
+            Text("RATE", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFF38BDF8), maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
+            Text("$attendanceRate%", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color(0xFF38BDF8), maxLines = 1, softWrap = false)
           }
         }
       }
@@ -563,6 +593,60 @@ fun AttendanceHistoryView(
           }
         }
 
+        // Student Filter Row
+        val scopedStudents = remember(allStudents, currentUserRole, authorizedBatchNames, selectedBatchFilter) {
+          allStudents.filter { stu ->
+            val roleAllowed = !currentUserRole.equals("Teacher", ignoreCase = true) || stu.batch.lowercase() in authorizedBatchNames
+            val batchMatched = selectedBatchFilter == "All" || stu.batch.equals(selectedBatchFilter, ignoreCase = true)
+            roleAllowed && batchMatched
+          }
+        }
+        if (scopedStudents.isNotEmpty()) {
+          Row(
+            modifier = Modifier
+              .fillMaxWidth()
+              .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically
+          ) {
+            FilterChip(
+              selected = selectedStudentIdFilter == "All",
+              onClick = { selectedStudentIdFilter = "All" },
+              colors = FilterChipDefaults.filterChipColors(
+                containerColor = Color(0xFF111C2E),
+                labelColor = Color(0xFF94A3B8),
+                selectedContainerColor = Color(0xFF0284C7),
+                selectedLabelColor = Color.White
+              ),
+              border = FilterChipDefaults.filterChipBorder(
+                enabled = true,
+                selected = selectedStudentIdFilter == "All",
+                borderColor = if (selectedStudentIdFilter == "All") Color(0xFF38BDF8) else Color(0xFF1E2D42)
+              ),
+              label = { Text("All Students", fontSize = 11.sp) }
+            )
+            scopedStudents.forEach { st ->
+              val isSel = selectedStudentIdFilter == st.id
+              FilterChip(
+                selected = isSel,
+                onClick = { selectedStudentIdFilter = if (isSel) "All" else st.id },
+                colors = FilterChipDefaults.filterChipColors(
+                  containerColor = Color(0xFF111C2E),
+                  labelColor = Color(0xFF94A3B8),
+                  selectedContainerColor = Color(0xFF0284C7),
+                  selectedLabelColor = Color.White
+                ),
+                border = FilterChipDefaults.filterChipBorder(
+                  enabled = true,
+                  selected = isSel,
+                  borderColor = if (isSel) Color(0xFF38BDF8) else Color(0xFF1E2D42)
+                ),
+                label = { Text("${st.name} (${st.id})", fontSize = 11.sp, maxLines = 1) }
+              )
+            }
+          }
+        }
+
         // Action Toolbar (Count + Export CSV)
         Row(
           modifier = Modifier.fillMaxWidth(),
@@ -584,7 +668,7 @@ fun AttendanceHistoryView(
           ) {
             Icon(Icons.Default.Share, contentDescription = "Export", modifier = Modifier.size(14.dp), tint = Color.White)
             Spacer(Modifier.width(4.dp))
-            Text("Export CSV", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
+            Text("Export CSV", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
           }
         }
       }
@@ -686,17 +770,21 @@ fun AttendanceHistoryView(
               horizontalArrangement = Arrangement.SpaceBetween,
               verticalAlignment = Alignment.CenterVertically
             ) {
-              Column(modifier = Modifier.weight(1f)) {
+              Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
                 Text(
                   text = log.studentName,
                   fontWeight = FontWeight.Bold,
                   fontSize = 15.sp,
-                  color = Color.White
+                  color = Color.White,
+                  maxLines = 1,
+                  overflow = TextOverflow.Ellipsis
                 )
                 Text(
                   text = "ID: ${log.studentId} • Batch: ${log.batchName}",
                   fontSize = 11.sp,
-                  color = Color(0xFF94A3B8)
+                  color = Color(0xFF94A3B8),
+                  maxLines = 1,
+                  overflow = TextOverflow.Ellipsis
                 )
               }
 
@@ -721,7 +809,10 @@ fun AttendanceHistoryView(
                     text = editStatusText,
                     fontSize = 10.sp,
                     fontWeight = FontWeight.Bold,
-                    color = if (isEditable) Color(0xFF38BDF8) else Color(0xFF94A3B8)
+                    color = if (isEditable) Color(0xFF38BDF8) else Color(0xFF94A3B8),
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Ellipsis
                   )
                 }
               }
@@ -807,6 +898,9 @@ fun AttendanceHistoryView(
                       "absent" -> Color(0xFFF87171)
                       else -> Color(0xFFCBD5E1)
                     },
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                   )
                 }
@@ -846,12 +940,15 @@ fun AttendanceHistoryView(
                       color = if (isActive) Color.White else if (isEditable) Color(0xFFCBD5E1) else Color(0xFF64748B),
                       fontSize = 10.sp,
                       fontWeight = FontWeight.Bold,
+                      maxLines = 1,
+                      softWrap = false,
+                      overflow = TextOverflow.Ellipsis,
                       modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
                     )
                   }
                 }
 
-                // Edit remark button if editable
+                // Edit remark & Delete buttons if editable/authorized
                 if (isEditable) {
                   IconButton(
                     onClick = {
@@ -864,6 +961,26 @@ fun AttendanceHistoryView(
                       imageVector = Icons.Outlined.EditNote,
                       contentDescription = "Edit Remark",
                       tint = Color(0xFF38BDF8),
+                      modifier = Modifier.size(18.dp)
+                    )
+                  }
+                }
+                if (isEditable || currentUserRole.equals("Admin", ignoreCase = true)) {
+                  IconButton(
+                    onClick = {
+                      val deleted = AppRepository.deleteAttendanceRecord(log.id)
+                      if (deleted) {
+                        systemFeedbackMsg = null
+                      } else {
+                        systemFeedbackMsg = "Not authorized to delete this attendance record."
+                      }
+                    },
+                    modifier = Modifier.size(28.dp)
+                  ) {
+                    Icon(
+                      imageVector = Icons.Default.DeleteOutline,
+                      contentDescription = "Delete Record",
+                      tint = Color(0xFFF87171),
                       modifier = Modifier.size(18.dp)
                     )
                   }

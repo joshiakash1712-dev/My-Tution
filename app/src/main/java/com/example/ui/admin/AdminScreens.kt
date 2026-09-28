@@ -531,7 +531,10 @@ fun AdminDashboardTab(
               text = currentDateFormatted,
               fontSize = 12.sp,
               fontWeight = FontWeight.SemiBold,
-              color = Color.White
+              color = Color.White,
+              maxLines = 1,
+              softWrap = false,
+              overflow = TextOverflow.Ellipsis
             )
           }
         }
@@ -553,7 +556,10 @@ fun AdminDashboardTab(
                 text = selectedSession,
                 fontSize = 12.sp,
                 fontWeight = FontWeight.Bold,
-                color = Color(0xFF38BDF8)
+                color = Color(0xFF38BDF8),
+                maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Ellipsis
               )
               Icon(
                 imageVector = Icons.Outlined.ArrowDropDown,
@@ -678,7 +684,7 @@ fun AdminDashboardTab(
                     modifier = Modifier.size(18.dp)
                   )
                 }
-                Text("Present Today", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF4ADE80))
+                Text("Present Today", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF4ADE80), maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
               }
               Spacer(modifier = Modifier.height(8.dp))
               AnimatedCounterText(
@@ -734,7 +740,7 @@ fun AdminDashboardTab(
                     modifier = Modifier.size(18.dp)
                   )
                 }
-                Text("Absent Today", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = if (absentCount > 0) Color(0xFFF87171) else Color(0xFF4ADE80))
+                Text("Absent Today", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = if (absentCount > 0) Color(0xFFF87171) else Color(0xFF4ADE80), maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
               }
               Spacer(modifier = Modifier.height(8.dp))
               AnimatedCounterText(
@@ -805,7 +811,7 @@ fun AdminDashboardTab(
                     modifier = Modifier.size(18.dp)
                   )
                 }
-                Text("Total Students", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF818CF8))
+                Text("Total Students", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF818CF8), maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
               }
               Spacer(modifier = Modifier.height(8.dp))
               AnimatedCounterText(
@@ -861,7 +867,7 @@ fun AdminDashboardTab(
                     modifier = Modifier.size(18.dp)
                   )
                 }
-                Text("Total Batches", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF38BDF8))
+                Text("Total Batches", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF38BDF8), maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
               }
               Spacer(modifier = Modifier.height(8.dp))
               AnimatedCounterText(
@@ -1290,6 +1296,9 @@ fun AdminDashboardTab(
                       fontSize = 10.sp,
                       fontWeight = FontWeight.SemiBold,
                       color = Color(0xFF94A3B8),
+                      maxLines = 1,
+                      softWrap = false,
+                      overflow = TextOverflow.Ellipsis,
                       modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
                       textAlign = androidx.compose.ui.text.style.TextAlign.Center
                     )
@@ -1307,13 +1316,13 @@ fun AdminDashboardTab(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                       ) {
-                        Text(subject, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                        Text(subject, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f).padding(end = 6.dp))
                         Icon(Icons.Outlined.ChevronRight, contentDescription = null, tint = Color(0xFF64748B), modifier = Modifier.size(14.dp))
                       }
                       Spacer(modifier = Modifier.height(2.dp))
-                      Text("Batch: $batchName • Room: $room", fontSize = 11.sp, color = Color(0xFF94A3B8))
+                      Text("Batch: $batchName • Room: $room", fontSize = 11.sp, color = Color(0xFF94A3B8), maxLines = 1, overflow = TextOverflow.Ellipsis)
                       Spacer(modifier = Modifier.height(2.dp))
-                      Text("Faculty: $teacher", fontSize = 11.sp, color = Color(0xFF38BDF8), fontWeight = FontWeight.Medium)
+                      Text("Faculty: $teacher", fontSize = 11.sp, color = Color(0xFF38BDF8), fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                   }
                 }
@@ -1777,7 +1786,10 @@ fun AdminDashboardTab(
                     },
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
-                    textAlign = TextAlign.Center
+                    textAlign = TextAlign.Center,
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Ellipsis
                   )
                 }
               }
@@ -1940,6 +1952,7 @@ fun AdminStudentsTab(
                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                 color = if (isSelected) Color.White else Color(0xFF94A3B8),
                 maxLines = 1,
+                softWrap = false,
                 overflow = TextOverflow.Ellipsis
               )
             }
@@ -2336,6 +2349,9 @@ fun AdminStudentsTab(
                       fontSize = 10.sp,
                       fontWeight = FontWeight.Bold,
                       color = Color(0xFF38BDF8),
+                      maxLines = 1,
+                      softWrap = false,
+                      overflow = TextOverflow.Ellipsis,
                       modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                     )
                   }
@@ -2393,6 +2409,9 @@ fun AdminStudentsTab(
                         stu.status,
                         fontSize = 9.sp,
                         color = if (stu.status == "Active") Color(0xFF4ADE80) else Color(0xFF94A3B8),
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                       )
                     }
@@ -2424,6 +2443,7 @@ fun AdminStudentsTab(
                     fontWeight = FontWeight.Bold,
                     color = Color(0xFF38BDF8),
                     maxLines = 1,
+                    softWrap = false,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.clickable { onStudentClick(stu) }
                   )
@@ -2432,6 +2452,9 @@ fun AdminStudentsTab(
                     if (isSelected) "SELECTED" else "TAP TO SELECT",
                     fontSize = 10.sp,
                     fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Ellipsis,
                     color = if (isSelected) Color(0xFF38BDF8) else Color(0xFF94A3B8)
                   )
                 }
@@ -2854,7 +2877,7 @@ fun AdminStaffTab(
         ) {
           Icon(Icons.Default.PersonAdd, contentDescription = null, modifier = Modifier.size(16.dp))
           Spacer(Modifier.width(6.dp))
-          Text("Onboard Staff", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+          Text("Onboard Staff", fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
         }
       }
     }
@@ -2877,7 +2900,8 @@ fun AdminStaffTab(
           ) {
             Row(
               verticalAlignment = Alignment.CenterVertically,
-              horizontalArrangement = Arrangement.spacedBy(10.dp)
+              horizontalArrangement = Arrangement.spacedBy(10.dp),
+              modifier = Modifier.weight(1f).padding(end = 8.dp)
             ) {
               Box(
                 modifier = Modifier
@@ -2898,9 +2922,9 @@ fun AdminStaffTab(
                   Icon(Icons.Default.Person, contentDescription = null, tint = Color(0xFF38BDF8), modifier = Modifier.size(22.dp))
                 }
               }
-              Column {
-                Text(t.name, fontWeight = FontWeight.Bold, fontSize = 15.sp, color = Color.White)
-                Text(t.subject, fontWeight = FontWeight.SemiBold, color = Color(0xFF38BDF8), fontSize = 12.sp)
+              Column(modifier = Modifier.weight(1f)) {
+                Text(t.name, fontWeight = FontWeight.Bold, fontSize = 15.sp, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(t.subject, fontWeight = FontWeight.SemiBold, color = Color(0xFF38BDF8), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
               }
             }
             if (isPending) {
@@ -2909,7 +2933,7 @@ fun AdminStaffTab(
                 border = BorderStroke(1.dp, Color(0xFFD97706)),
                 shape = RoundedCornerShape(8.dp)
               ) {
-                Text("PENDING APPROVAL", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFFFBBF24), modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
+                Text("PENDING APPROVAL", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFFFBBF24), maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
               }
             } else {
               Surface(
@@ -2917,7 +2941,7 @@ fun AdminStaffTab(
                 border = BorderStroke(1.dp, Color(0xFF059669)),
                 shape = RoundedCornerShape(8.dp)
               ) {
-                Text("ACTIVE", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFF4ADE80), modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
+                Text("ACTIVE", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFF4ADE80), maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
               }
             }
           }
@@ -3249,7 +3273,7 @@ fun AdminBatchesTab(
               horizontalArrangement = Arrangement.SpaceBetween,
               verticalAlignment = Alignment.CenterVertically
             ) {
-              Text(b.name, fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color.White)
+              Text(b.name, fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f).padding(end = 8.dp))
               Surface(
                 color = Color(0xFF0284C7).copy(alpha = 0.2f),
                 border = BorderStroke(1.dp, Color(0xFF0284C7).copy(alpha = 0.4f)),
@@ -3260,6 +3284,9 @@ fun AdminBatchesTab(
                   fontSize = 11.sp,
                   fontWeight = FontWeight.Bold,
                   color = Color(0xFF38BDF8),
+                  maxLines = 1,
+                  softWrap = false,
+                  overflow = TextOverflow.Ellipsis,
                   modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
                 )
               }
@@ -3338,9 +3365,9 @@ fun AdminBatchesTab(
             border = BorderStroke(1.dp, Color(0xFF1E2D42))
           ) {
             Column(modifier = Modifier.padding(12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-              Text("Total Students", fontSize = 10.sp, color = Color(0xFF94A3B8), fontWeight = FontWeight.SemiBold)
+              Text("Total Students", fontSize = 10.sp, color = Color(0xFF94A3B8), fontWeight = FontWeight.SemiBold, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
               Spacer(Modifier.height(4.dp))
-              Text("$totalStudents", fontSize = 20.sp, fontWeight = FontWeight.ExtraBold, color = Color.White)
+              Text("$totalStudents", fontSize = 20.sp, fontWeight = FontWeight.ExtraBold, color = Color.White, maxLines = 1, softWrap = false)
             }
           }
 
@@ -3351,9 +3378,9 @@ fun AdminBatchesTab(
             border = BorderStroke(1.dp, Color(0xFF059669))
           ) {
             Column(modifier = Modifier.padding(12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-              Text("Present Today", fontSize = 10.sp, color = Color(0xFF4ADE80), fontWeight = FontWeight.Bold)
+              Text("Present Today", fontSize = 10.sp, color = Color(0xFF4ADE80), fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
               Spacer(Modifier.height(4.dp))
-              Text("$presentCount", fontSize = 20.sp, fontWeight = FontWeight.ExtraBold, color = Color(0xFF4ADE80))
+              Text("$presentCount", fontSize = 20.sp, fontWeight = FontWeight.ExtraBold, color = Color(0xFF4ADE80), maxLines = 1, softWrap = false)
             }
           }
 
@@ -3364,9 +3391,9 @@ fun AdminBatchesTab(
             border = BorderStroke(1.dp, Color(0xFF7F1D1D))
           ) {
             Column(modifier = Modifier.padding(12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-              Text("Absent Today", fontSize = 10.sp, color = Color(0xFFF87171), fontWeight = FontWeight.Bold)
+              Text("Absent Today", fontSize = 10.sp, color = Color(0xFFF87171), fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
               Spacer(Modifier.height(4.dp))
-              Text("$absentCount", fontSize = 20.sp, fontWeight = FontWeight.ExtraBold, color = Color(0xFFF87171))
+              Text("$absentCount", fontSize = 20.sp, fontWeight = FontWeight.ExtraBold, color = Color(0xFFF87171), maxLines = 1, softWrap = false)
             }
           }
         }
@@ -3395,9 +3422,9 @@ fun AdminBatchesTab(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
           ) {
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-              Text(sub.name, fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color.White)
-              Text("Tap to view faculty & syllabus", fontSize = 11.sp, color = Color(0xFF38BDF8), fontWeight = FontWeight.Medium)
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+              Text(sub.name, fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis)
+              Text("Tap to view faculty & syllabus", fontSize = 11.sp, color = Color(0xFF38BDF8), fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
               Surface(
@@ -3410,6 +3437,9 @@ fun AdminBatchesTab(
                   fontSize = 11.sp,
                   fontWeight = FontWeight.Bold,
                   color = Color(0xFF4ADE80),
+                  maxLines = 1,
+                  softWrap = false,
+                  overflow = TextOverflow.Ellipsis,
                   modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                 )
               }
@@ -3425,7 +3455,7 @@ fun AdminBatchesTab(
           horizontalArrangement = Arrangement.SpaceBetween,
           verticalAlignment = Alignment.CenterVertically
         ) {
-          Text("Enrolled Students in ${b.name}", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color.White)
+          Text("Enrolled Students in ${b.name}", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f).padding(end = 8.dp))
           Surface(
             color = Color(0xFF0284C7).copy(alpha = 0.2f),
             border = BorderStroke(1.dp, Color(0xFF0284C7).copy(alpha = 0.4f)),
@@ -3436,6 +3466,9 @@ fun AdminBatchesTab(
               fontSize = 11.sp,
               fontWeight = FontWeight.Bold,
               color = Color(0xFF38BDF8),
+              maxLines = 1,
+              softWrap = false,
+              overflow = TextOverflow.Ellipsis,
               modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
             )
           }
@@ -3475,7 +3508,7 @@ fun AdminBatchesTab(
               horizontalArrangement = Arrangement.SpaceBetween,
               verticalAlignment = Alignment.CenterVertically
             ) {
-              Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+              Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.weight(1f).padding(end = 8.dp)) {
                 Box(
                   modifier = Modifier.size(36.dp).clip(CircleShape).background(Color(0xFF0284C7).copy(alpha = 0.2f)),
                   contentAlignment = Alignment.Center
@@ -3487,9 +3520,9 @@ fun AdminBatchesTab(
                     fontSize = 14.sp
                   )
                 }
-                Column {
-                  Text(stu.name, fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color.White)
-                  Text("ID: ${stu.id} • ${stu.mobile.ifBlank { stu.email }}", fontSize = 11.sp, color = Color(0xFF94A3B8))
+                Column(modifier = Modifier.weight(1f)) {
+                  Text(stu.name, fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                  Text("ID: ${stu.id} • ${stu.mobile.ifBlank { stu.email }}", fontSize = 11.sp, color = Color(0xFF94A3B8), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
               }
               Surface(
@@ -3502,6 +3535,9 @@ fun AdminBatchesTab(
                   fontSize = 10.sp,
                   fontWeight = FontWeight.Bold,
                   color = Color(0xFF4ADE80),
+                  maxLines = 1,
+                  softWrap = false,
+                  overflow = TextOverflow.Ellipsis,
                   modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                 )
               }
@@ -3759,6 +3795,7 @@ fun AdminCrmAndFeesTab(
               fontWeight = FontWeight.Bold,
               textAlign = TextAlign.Center,
               maxLines = 1,
+              softWrap = false,
               overflow = TextOverflow.Ellipsis
             )
           }
@@ -3937,6 +3974,9 @@ fun AdminCrmAndFeesTab(
                       fontSize = 11.sp,
                       fontWeight = FontWeight.Bold,
                       color = if (isSelected) Color.White else Color(0xFF44474E),
+                      maxLines = 1,
+                      softWrap = false,
+                      overflow = TextOverflow.Ellipsis,
                       modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
                     )
                   }
@@ -3970,6 +4010,9 @@ fun AdminCrmAndFeesTab(
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
                     color = if (isSelected) Color.White else Color(0xFF44474E),
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
                   )
                 }
@@ -4402,9 +4445,9 @@ fun AdminCrmAndFeesTab(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
               ) {
-                Column {
-                  Text(p.studentName, fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color(0xFF0F172A))
-                  Text("${p.studentId} • ${p.feeType}", fontSize = 11.sp, color = Color(0xFF64748B))
+                Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                  Text(p.studentName, fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color(0xFF0F172A), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                  Text("${p.studentId} • ${p.feeType}", fontSize = 11.sp, color = Color(0xFF64748B), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
                 Surface(
                   color = badgeColor.copy(alpha = 0.12f),
@@ -4415,6 +4458,9 @@ fun AdminCrmAndFeesTab(
                     color = badgeColor,
                     fontSize = 10.sp,
                     fontWeight = FontWeight.ExtraBold,
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                   )
                 }
@@ -6386,6 +6432,9 @@ fun AdminFeeLedgerDialog(
                 fontSize = 11.sp,
                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                 color = if (isSelected) badgeColor else Color(0xFF94A3B8),
+                maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
               )
             }
@@ -6441,7 +6490,8 @@ fun AdminFeeLedgerDialog(
                   ) {
                     Row(
                       verticalAlignment = Alignment.CenterVertically,
-                      horizontalArrangement = Arrangement.spacedBy(10.dp)
+                      horizontalArrangement = Arrangement.spacedBy(10.dp),
+                      modifier = Modifier.weight(1f).padding(end = 8.dp)
                     ) {
                       Box(
                         modifier = Modifier
@@ -6457,17 +6507,21 @@ fun AdminFeeLedgerDialog(
                           color = statusColor
                         )
                       }
-                      Column {
+                      Column(modifier = Modifier.weight(1f)) {
                         Text(
                           text = fee.studentName,
                           fontWeight = FontWeight.Bold,
                           fontSize = 14.sp,
-                          color = Color.White
+                          color = Color.White,
+                          maxLines = 1,
+                          overflow = TextOverflow.Ellipsis
                         )
                         Text(
                           text = "ID: $studentId • $batchName",
                           fontSize = 11.sp,
-                          color = Color(0xFF94A3B8)
+                          color = Color(0xFF94A3B8),
+                          maxLines = 1,
+                          overflow = TextOverflow.Ellipsis
                         )
                       }
                     }
@@ -6482,6 +6536,9 @@ fun AdminFeeLedgerDialog(
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Bold,
                         color = statusColor,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
                       )
                     }
@@ -6872,6 +6929,9 @@ fun AdminFeesTab(
             fontSize = 11.sp,
             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
             color = textColor,
+            maxLines = 1,
+            softWrap = false,
+            overflow = TextOverflow.Ellipsis,
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
           )
         }
@@ -6928,7 +6988,8 @@ fun AdminFeesTab(
             ) {
               Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.weight(1f).padding(end = 8.dp)
               ) {
                 Box(
                   modifier = Modifier
@@ -6944,17 +7005,21 @@ fun AdminFeesTab(
                     color = statusColor
                   )
                 }
-                Column {
+                Column(modifier = Modifier.weight(1f)) {
                   Text(
                     text = fee.studentName,
                     fontWeight = FontWeight.Bold,
                     fontSize = 14.sp,
-                    color = Color.White
+                    color = Color.White,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                   )
                   Text(
                     text = "ID: $studentId • $batchName",
                     fontSize = 11.sp,
-                    color = Color(0xFF94A3B8)
+                    color = Color(0xFF94A3B8),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                   )
                 }
               }
@@ -6969,6 +7034,9 @@ fun AdminFeesTab(
                   fontSize = 10.sp,
                   fontWeight = FontWeight.Bold,
                   color = statusColor,
+                  maxLines = 1,
+                  softWrap = false,
+                  overflow = TextOverflow.Ellipsis,
                   modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
                 )
               }

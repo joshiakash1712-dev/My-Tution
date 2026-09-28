@@ -161,7 +161,8 @@ fun GlobalOfflineStateNotification(
           ) {
             Row(
               verticalAlignment = Alignment.CenterVertically,
-              horizontalArrangement = Arrangement.spacedBy(10.dp)
+              horizontalArrangement = Arrangement.spacedBy(10.dp),
+              modifier = Modifier.weight(1f)
             ) {
               Box(
                 modifier = Modifier
@@ -178,7 +179,7 @@ fun GlobalOfflineStateNotification(
                 )
               }
 
-              Column {
+              Column(modifier = Modifier.weight(1f)) {
                 Row(
                   verticalAlignment = Alignment.CenterVertically,
                   horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -192,6 +193,9 @@ fun GlobalOfflineStateNotification(
                       fontSize = 9.sp,
                       fontWeight = FontWeight.Bold,
                       color = Color.White,
+                      maxLines = 1,
+                      softWrap = false,
+                      overflow = TextOverflow.Ellipsis,
                       modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                     )
                   }
@@ -210,6 +214,7 @@ fun GlobalOfflineStateNotification(
                   fontSize = 14.sp,
                   color = Color.White,
                   maxLines = 1,
+                  softWrap = false,
                   overflow = TextOverflow.Ellipsis
                 )
               }
@@ -287,7 +292,8 @@ fun GlobalOfflineStateNotification(
           ) {
             Row(
               verticalAlignment = Alignment.CenterVertically,
-              horizontalArrangement = Arrangement.spacedBy(6.dp)
+              horizontalArrangement = Arrangement.spacedBy(6.dp),
+              modifier = Modifier.weight(1f)
             ) {
               Icon(
                 imageVector = Icons.Default.Storage,
@@ -298,14 +304,21 @@ fun GlobalOfflineStateNotification(
               Text(
                 text = "Last synced: $lastSyncFormatted",
                 fontSize = 10.sp,
-                color = Color(0xFF94A3B8)
+                color = Color(0xFF94A3B8),
+                maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Ellipsis
               )
             }
+            Spacer(modifier = Modifier.width(8.dp))
 
             Text(
               text = if (isSimulatedOffline) "Simulator: Active" else "Network: Offline",
               fontSize = 10.sp,
               fontWeight = FontWeight.Bold,
+              maxLines = 1,
+              softWrap = false,
+              overflow = TextOverflow.Ellipsis,
               color = if (isSimulatedOffline) Color(0xFFFBBF24) else Color(0xFFF87171)
             )
           }
@@ -353,7 +366,7 @@ fun GlobalOfflineStateNotification(
                   color = Color.White
                 )
                 Spacer(Modifier.width(6.dp))
-                Text("Checking...", fontSize = 11.sp, color = Color.White)
+                Text("Checking...", fontSize = 11.sp, color = Color.White, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
               } else {
                 Icon(
                   imageVector = Icons.Default.Refresh,
@@ -361,7 +374,7 @@ fun GlobalOfflineStateNotification(
                   modifier = Modifier.size(14.dp)
                 )
                 Spacer(Modifier.width(6.dp))
-                Text("Check Connection", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                Text("Check Connection", fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
               }
             }
 
@@ -377,7 +390,7 @@ fun GlobalOfflineStateNotification(
                 colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFFBBF24)),
                 contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
               ) {
-                Text("Turn Online", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                Text("Turn Online", fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
               }
             }
 
@@ -389,7 +402,7 @@ fun GlobalOfflineStateNotification(
               colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFFECACA)),
               contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
             ) {
-              Text("Understood", fontSize = 11.sp)
+              Text("Understood", fontSize = 11.sp, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
             }
           }
         }

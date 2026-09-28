@@ -57,12 +57,24 @@ fun MonthlyAttendanceSummary(
   onNavigateToDailyRegister: () -> Unit = {}
 ) {
   val context = LocalContext.current
-  val allStudents by AppRepository.students.collectAsState()
+  val rawStudents by AppRepository.students.collectAsState()
   val allBatches by AppRepository.batches.collectAsState()
   val allRecords by AppRepository.attendance.collectAsState()
 
-  val activeBatches = remember(allBatches) {
-    if (allBatches.isEmpty()) SeedData.defaultBatches else allBatches
+  val activeBatches = remember(allBatches, currentUserRole) {
+    if (currentUserRole.equals("Teacher", ignoreCase = true)) {
+      AppRepository.getAuthorizedBatchesForCurrentTeacher()
+    } else {
+      allBatches
+    }
+  }
+  val authorizedBatchNames = remember(activeBatches) { activeBatches.map { it.name.lowercase() }.toSet() }
+  val allStudents = remember(rawStudents, currentUserRole, authorizedBatchNames) {
+    if (currentUserRole.equals("Teacher", ignoreCase = true)) {
+      rawStudents.filter { it.batch.lowercase() in authorizedBatchNames }
+    } else {
+      rawStudents
+    }
   }
 
   // Month & Year state
@@ -112,11 +124,10 @@ fun MonthlyAttendanceSummary(
       val percentage = if (total > 0) {
         ((presents.toFloat() / total) * 100).toInt().coerceIn(0, 100)
       } else {
-        // If no records logged in this specific month, default to student's overall profile avg or 0
-        student.attendancePercent
+        AppRepository.calculateStudentAttendancePercentage(student.id)
       }
 
-      val hasLow = total > 0 && percentage < thresholdPercent || (total == 0 && student.attendancePercent < thresholdPercent)
+      val hasLow = total > 0 && percentage < thresholdPercent
 
       StudentMonthlyAttendance(
         student = student,
@@ -178,9 +189,9 @@ fun MonthlyAttendanceSummary(
           horizontalArrangement = Arrangement.SpaceBetween,
           verticalAlignment = Alignment.CenterVertically
         ) {
-          Column {
-            Text(item.student.name, fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color.White)
-            Text("ID: ${item.student.id} • ${item.student.batch}", fontSize = 11.sp, color = Color(0xFF94A3B8))
+          Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+            Text(item.student.name, fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text("ID: ${item.student.id} • ${item.student.batch}", fontSize = 11.sp, color = Color(0xFF94A3B8), maxLines = 1, overflow = TextOverflow.Ellipsis)
           }
           Surface(
             color = if (item.isLowAttendance) Color(0xFF991B1B).copy(alpha = 0.25f) else Color(0xFF166534).copy(alpha = 0.25f),
@@ -192,6 +203,8 @@ fun MonthlyAttendanceSummary(
               fontWeight = FontWeight.ExtraBold,
               fontSize = 14.sp,
               color = if (item.isLowAttendance) Color(0xFFF87171) else Color(0xFF4ADE80),
+              maxLines = 1,
+              softWrap = false,
               modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
             )
           }
@@ -223,8 +236,8 @@ fun MonthlyAttendanceSummary(
               modifier = Modifier.weight(1f)
             ) {
               Column(modifier = Modifier.padding(8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("${item.presentCount}", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color(0xFF4ADE80))
-                Text("Present", fontSize = 10.sp, color = Color(0xFF94A3B8))
+                Text("${item.presentCount}", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color(0xFF4ADE80), maxLines = 1, softWrap = false)
+                Text("Present", fontSize = 10.sp, color = Color(0xFF94A3B8), maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
               }
             }
             Surface(
@@ -234,8 +247,8 @@ fun MonthlyAttendanceSummary(
               modifier = Modifier.weight(1f)
             ) {
               Column(modifier = Modifier.padding(8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("${item.absentCount}", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color(0xFFF87171))
-                Text("Absent", fontSize = 10.sp, color = Color(0xFF94A3B8))
+                Text("${item.absentCount}", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color(0xFFF87171), maxLines = 1, softWrap = false)
+                Text("Absent", fontSize = 10.sp, color = Color(0xFF94A3B8), maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
               }
             }
             Surface(
@@ -245,8 +258,8 @@ fun MonthlyAttendanceSummary(
               modifier = Modifier.weight(1f)
             ) {
               Column(modifier = Modifier.padding(8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("${item.lateCount}", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color(0xFFFBBF24))
-                Text("Late", fontSize = 10.sp, color = Color(0xFF94A3B8))
+                Text("${item.lateCount}", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color(0xFFFBBF24), maxLines = 1, softWrap = false)
+                Text("Late", fontSize = 10.sp, color = Color(0xFF94A3B8), maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
               }
             }
           }
@@ -312,6 +325,9 @@ fun MonthlyAttendanceSummary(
                           "Absent" -> Color(0xFFF87171)
                           else -> Color(0xFFFBBF24)
                         },
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                       )
                     }
@@ -426,17 +442,21 @@ fun MonthlyAttendanceSummary(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
           ) {
-            Column {
+            Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
               Text(
                 "Monthly Attendance Summary",
                 color = Color.White,
                 fontSize = 18.sp,
-                fontWeight = FontWeight.Bold
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
               )
               Text(
                 "Automated Percentages • Low Attendance Diagnostics",
                 color = Color(0xFF94A3B8),
-                fontSize = 11.sp
+                fontSize = 11.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
               )
             }
 
@@ -451,7 +471,7 @@ fun MonthlyAttendanceSummary(
                 horizontalArrangement = Arrangement.spacedBy(4.dp)
               ) {
                 Icon(Icons.Default.Analytics, contentDescription = null, tint = Color(0xFF38BDF8), modifier = Modifier.size(14.dp))
-                Text("Threshold: $thresholdPercent%", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                Text("Threshold: $thresholdPercent%", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
               }
             }
           }
@@ -528,7 +548,7 @@ fun MonthlyAttendanceSummary(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
           ) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.weight(1f).padding(end = 8.dp)) {
               Box(
                 modifier = Modifier
                   .size(32.dp)
@@ -548,12 +568,16 @@ fun MonthlyAttendanceSummary(
                   if (lowAttendanceCount > 0) "$lowAttendanceCount Students with Low Attendance" else "All Students Above Threshold ($thresholdPercent%)",
                   fontWeight = FontWeight.Bold,
                   fontSize = 13.sp,
-                  color = Color.White
+                  color = Color.White,
+                  maxLines = 1,
+                  overflow = TextOverflow.Ellipsis
                 )
                 Text(
                   if (lowAttendanceCount > 0) "Immediate intervention recommended via parent alerts." else "Healthy attendance distribution maintained for $currentMonthName.",
                   fontSize = 11.sp,
-                  color = Color(0xFF94A3B8)
+                  color = Color(0xFF94A3B8),
+                  maxLines = 1,
+                  overflow = TextOverflow.Ellipsis
                 )
               }
             }
@@ -567,7 +591,7 @@ fun MonthlyAttendanceSummary(
               ) {
                 Icon(Icons.Default.NotificationsActive, contentDescription = null, modifier = Modifier.size(14.dp))
                 Spacer(Modifier.width(4.dp))
-                Text("Alert All", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                Text("Alert All", fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
               }
             }
           }
@@ -700,19 +724,25 @@ fun MonthlyAttendanceSummary(
               .clickable { selectedCategoryFilter = cat }
           ) {
             Column(
-              modifier = Modifier.padding(vertical = 6.dp),
+              modifier = Modifier.padding(vertical = 6.dp, horizontal = 2.dp),
               horizontalAlignment = Alignment.CenterHorizontally
             ) {
               Text(
                 cat.takeWhile { it != ' ' },
                 fontSize = 10.sp,
                 fontWeight = if (isSel) FontWeight.Bold else FontWeight.SemiBold,
-                color = if (isSel) Color.White else Color(0xFF94A3B8)
+                color = if (isSel) Color.White else Color(0xFF94A3B8),
+                maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Ellipsis
               )
               Text(
                 "($catCount)",
                 fontSize = 9.sp,
-                color = if (isSel) Color(0xFFE0F2FE) else Color(0xFF64748B)
+                color = if (isSel) Color(0xFFE0F2FE) else Color(0xFF64748B),
+                maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Ellipsis
               )
             }
           }
@@ -802,7 +832,8 @@ fun MonthlyStudentAttendanceCard(
       ) {
         Row(
           verticalAlignment = Alignment.CenterVertically,
-          horizontalArrangement = Arrangement.spacedBy(10.dp)
+          horizontalArrangement = Arrangement.spacedBy(10.dp),
+          modifier = Modifier.weight(1f).padding(end = 8.dp)
         ) {
           Box(
             modifier = Modifier
@@ -815,7 +846,9 @@ fun MonthlyStudentAttendanceCard(
               student.name.take(2).uppercase(),
               color = if (isLow) Color(0xFFFCA5A5) else Color(0xFF93C5FD),
               fontWeight = FontWeight.Bold,
-              fontSize = 12.sp
+              fontSize = 12.sp,
+              maxLines = 1,
+              softWrap = false
             )
           }
 
@@ -827,7 +860,8 @@ fun MonthlyStudentAttendanceCard(
                 fontSize = 13.sp,
                 color = Color.White,
                 maxLines = 1,
-                overflow = TextOverflow.Ellipsis
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false)
               )
               if (isLow) {
                 Surface(
@@ -840,6 +874,9 @@ fun MonthlyStudentAttendanceCard(
                     fontSize = 8.sp,
                     fontWeight = FontWeight.ExtraBold,
                     color = Color(0xFFFCA5A5),
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
                   )
                 }
@@ -848,7 +885,9 @@ fun MonthlyStudentAttendanceCard(
             Text(
               "ID: ${student.id} • ${student.batch}",
               fontSize = 10.sp,
-              color = Color(0xFF94A3B8)
+              color = Color(0xFF94A3B8),
+              maxLines = 1,
+              overflow = TextOverflow.Ellipsis
             )
           }
         }
@@ -867,13 +906,18 @@ fun MonthlyStudentAttendanceCard(
               "${data.monthlyPercentage}%",
               fontSize = 13.sp,
               fontWeight = FontWeight.ExtraBold,
-              color = if (isLow) Color(0xFFF87171) else Color(0xFF4ADE80)
+              color = if (isLow) Color(0xFFF87171) else Color(0xFF4ADE80),
+              maxLines = 1,
+              softWrap = false
             )
             Text(
               if (isLow) "Below $threshold%" else "Safe",
               fontSize = 8.sp,
               fontWeight = FontWeight.SemiBold,
-              color = if (isLow) Color(0xFFFCA5A5) else Color(0xFF86EFAC)
+              color = if (isLow) Color(0xFFFCA5A5) else Color(0xFF86EFAC),
+              maxLines = 1,
+              softWrap = false,
+              overflow = TextOverflow.Ellipsis
             )
           }
         }
@@ -897,9 +941,9 @@ fun MonthlyStudentAttendanceCard(
         verticalAlignment = Alignment.CenterVertically
       ) {
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-          Text("Present: ${data.presentCount}d", fontSize = 10.sp, color = Color(0xFF4ADE80), fontWeight = FontWeight.SemiBold)
-          Text("Absent: ${data.absentCount}d", fontSize = 10.sp, color = if (data.absentCount > 0) Color(0xFFF87171) else Color(0xFF94A3B8), fontWeight = FontWeight.SemiBold)
-          Text("Total: ${data.totalDaysRecorded}d", fontSize = 10.sp, color = Color(0xFF94A3B8))
+          Text("Present: ${data.presentCount}d", fontSize = 10.sp, color = Color(0xFF4ADE80), fontWeight = FontWeight.SemiBold, maxLines = 1, softWrap = false)
+          Text("Absent: ${data.absentCount}d", fontSize = 10.sp, color = if (data.absentCount > 0) Color(0xFFF87171) else Color(0xFF94A3B8), fontWeight = FontWeight.SemiBold, maxLines = 1, softWrap = false)
+          Text("Total: ${data.totalDaysRecorded}d", fontSize = 10.sp, color = Color(0xFF94A3B8), maxLines = 1, softWrap = false)
         }
 
         Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -915,7 +959,7 @@ fun MonthlyStudentAttendanceCard(
             ) {
               Icon(Icons.Default.Send, contentDescription = null, modifier = Modifier.size(11.dp))
               Spacer(Modifier.width(2.dp))
-              Text("Alert Parent", fontSize = 9.sp, fontWeight = FontWeight.Bold)
+              Text("Alert Parent", fontSize = 9.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
             }
           }
 
@@ -925,7 +969,7 @@ fun MonthlyStudentAttendanceCard(
             contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
             modifier = Modifier.height(28.dp)
           ) {
-            Text("Details", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFF38BDF8))
+            Text("Details", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFF38BDF8), maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
             Icon(Icons.Default.ChevronRight, contentDescription = null, modifier = Modifier.size(12.dp), tint = Color(0xFF38BDF8))
           }
         }

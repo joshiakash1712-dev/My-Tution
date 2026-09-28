@@ -48,9 +48,13 @@ fun DailyAttendanceRegister(
   val allBatches by AppRepository.batches.collectAsState()
   val attendanceRecords by AppRepository.attendance.collectAsState()
 
-  // Ensure default batches if list is empty
-  val activeBatches = remember(allBatches) {
-    if (allBatches.isEmpty()) SeedData.defaultBatches else allBatches
+  // Enforce teacher batch authorization
+  val activeBatches = remember(allBatches, currentUserRole) {
+    if (currentUserRole.equals("Teacher", ignoreCase = true)) {
+      AppRepository.getAuthorizedBatchesForCurrentTeacher()
+    } else {
+      allBatches
+    }
   }
 
   // Date Selection State (dd/MM/yyyy)
@@ -167,7 +171,10 @@ fun DailyAttendanceRegister(
                       fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal,
                       color = if (isSel) Color(0xFFFCA5A5) else Color(0xFFCBD5E1),
                       modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
-                      textAlign = TextAlign.Center
+                      textAlign = TextAlign.Center,
+                      maxLines = 1,
+                      softWrap = false,
+                      overflow = TextOverflow.Ellipsis
                     )
                   }
                 }
@@ -244,18 +251,22 @@ fun DailyAttendanceRegister(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
           ) {
-            Column {
+            Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
               Text(
                 "Daily Attendance Register",
                 color = Color.White,
                 fontSize = 18.sp,
-                fontWeight = FontWeight.Bold
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
               )
               Text(
                 if (selectedBatchName == null) "Step 1: Select a Batch to Take Attendance" else "Active Batch: $selectedBatchName",
                 color = Color(0xFF94A3B8),
                 fontSize = 12.sp,
-                fontWeight = FontWeight.Medium
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
               )
             }
 
@@ -270,7 +281,7 @@ fun DailyAttendanceRegister(
                 horizontalArrangement = Arrangement.spacedBy(4.dp)
               ) {
                 Icon(Icons.Default.Storage, contentDescription = null, tint = Color(0xFF38BDF8), modifier = Modifier.size(14.dp))
-                Text("Room DB Active", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                Text("Room DB Active", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
               }
             }
           }
@@ -306,6 +317,9 @@ fun DailyAttendanceRegister(
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
                     color = Color.White,
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                   )
                 }
@@ -315,7 +329,10 @@ fun DailyAttendanceRegister(
                   displayDateLabel,
                   color = Color.White,
                   fontSize = 12.sp,
-                  fontWeight = FontWeight.SemiBold
+                  fontWeight = FontWeight.SemiBold,
+                  maxLines = 1,
+                  softWrap = false,
+                  overflow = TextOverflow.Ellipsis
                 )
               }
 
@@ -341,7 +358,7 @@ fun DailyAttendanceRegister(
               ) {
                 Icon(Icons.Default.CalendarMonth, contentDescription = "Pick Date", modifier = Modifier.size(14.dp))
                 Spacer(Modifier.width(4.dp))
-                Text("Pick Date", fontSize = 11.sp)
+                Text("Pick Date", fontSize = 11.sp, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
               }
             }
           }
@@ -457,12 +474,16 @@ fun DailyAttendanceRegister(
                   batch.name,
                   fontWeight = FontWeight.Bold,
                   fontSize = 14.sp,
-                  color = if (hasStudents) Color.White else Color(0xFF94A3B8)
+                  color = if (hasStudents) Color.White else Color(0xFF94A3B8),
+                  maxLines = 1,
+                  overflow = TextOverflow.Ellipsis
                 )
                 Text(
                   "${batch.schedule} • ${batch.teacherName}",
                   fontSize = 11.sp,
-                  color = Color(0xFF64748B)
+                  color = Color(0xFF64748B),
+                  maxLines = 1,
+                  overflow = TextOverflow.Ellipsis
                 )
                 Row(
                   horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -472,14 +493,20 @@ fun DailyAttendanceRegister(
                     if (hasStudents) "${studentsInBatch.size} Students Enrolled" else "0 Students Enrolled",
                     fontSize = 11.sp,
                     fontWeight = FontWeight.SemiBold,
-                    color = if (hasStudents) Color(0xFF38BDF8) else Color(0xFF64748B)
+                    color = if (hasStudents) Color(0xFF38BDF8) else Color(0xFF64748B),
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Ellipsis
                   )
                   Text("•", fontSize = 10.sp, color = Color(0xFF475569))
                   Text(
                     if (!hasStudents) "No Students" else if (isAllMarked) "All Marked" else if (markedInBatch > 0) "$markedInBatch/${studentsInBatch.size} Marked" else "Not Marked Yet",
                     fontSize = 10.sp,
                     fontWeight = FontWeight.Bold,
-                    color = if (!hasStudents) Color(0xFF64748B) else if (isAllMarked) Color(0xFF4ADE80) else if (markedInBatch > 0) Color(0xFFFBBF24) else Color(0xFF94A3B8)
+                    color = if (!hasStudents) Color(0xFF64748B) else if (isAllMarked) Color(0xFF4ADE80) else if (markedInBatch > 0) Color(0xFFFBBF24) else Color(0xFF94A3B8),
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Ellipsis
                   )
                 }
               }
@@ -505,7 +532,7 @@ fun DailyAttendanceRegister(
               contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
               modifier = Modifier.testTag("select_batch_button_${batch.id}")
             ) {
-              Text("Select", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+              Text("Select", fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
               Spacer(Modifier.width(4.dp))
               Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, modifier = Modifier.size(14.dp))
             }
@@ -534,7 +561,8 @@ fun DailyAttendanceRegister(
           ) {
             Row(
               verticalAlignment = Alignment.CenterVertically,
-              horizontalArrangement = Arrangement.spacedBy(8.dp)
+              horizontalArrangement = Arrangement.spacedBy(8.dp),
+              modifier = Modifier.weight(1f).padding(end = 8.dp)
             ) {
               Icon(Icons.Default.School, contentDescription = null, tint = Color(0xFF38BDF8), modifier = Modifier.size(20.dp))
               Column {
@@ -542,12 +570,16 @@ fun DailyAttendanceRegister(
                   "Batch: $selectedBatchName",
                   fontWeight = FontWeight.Bold,
                   fontSize = 13.sp,
-                  color = Color.White
+                  color = Color.White,
+                  maxLines = 1,
+                  overflow = TextOverflow.Ellipsis
                 )
                 Text(
                   "${batchStudents.size} Students Enrolled",
                   fontSize = 11.sp,
-                  color = Color(0xFF94A3B8)
+                  color = Color(0xFF94A3B8),
+                  maxLines = 1,
+                  overflow = TextOverflow.Ellipsis
                 )
               }
             }
@@ -561,7 +593,7 @@ fun DailyAttendanceRegister(
             ) {
               Icon(Icons.Default.SwapHoriz, contentDescription = null, tint = Color(0xFF38BDF8), modifier = Modifier.size(14.dp))
               Spacer(Modifier.width(4.dp))
-              Text("Switch Batch", fontSize = 11.sp, color = Color(0xFF38BDF8), fontWeight = FontWeight.Bold)
+              Text("Switch Batch", fontSize = 11.sp, color = Color(0xFF38BDF8), fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
             }
           }
         }
@@ -681,7 +713,7 @@ fun DailyAttendanceRegister(
               ) {
                 Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(13.dp))
                 Spacer(Modifier.width(3.dp))
-                Text("All Present", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                Text("All Present", fontSize = 10.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
               }
 
               // Bulk Mark All Absent
@@ -707,7 +739,7 @@ fun DailyAttendanceRegister(
               ) {
                 Icon(Icons.Default.Close, contentDescription = null, modifier = Modifier.size(13.dp))
                 Spacer(Modifier.width(3.dp))
-                Text("All Absent", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                Text("All Absent", fontSize = 10.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
               }
             }
           }
@@ -803,7 +835,7 @@ fun DailyAttendanceRegister(
                 recordedBy = currentUserId
               )
               if (!success) {
-                Toast.makeText(context, "Cannot edit: 22h lock expired", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, "Cannot edit: 22h lock expired or unauthorized", Toast.LENGTH_SHORT).show()
               }
             },
             onMarkAbsent = {
@@ -811,6 +843,16 @@ fun DailyAttendanceRegister(
             },
             onEditReason = {
               reasonDialogStudent = student
+            },
+            onDeleteRecord = {
+              if (record != null) {
+                val deleted = AppRepository.deleteAttendanceRecord(record.id)
+                if (deleted) {
+                  Toast.makeText(context, "Attendance record cleared for ${student.name}", Toast.LENGTH_SHORT).show()
+                } else {
+                  Toast.makeText(context, "Not authorized to delete record", Toast.LENGTH_SHORT).show()
+                }
+              }
             }
           )
         }
@@ -827,7 +869,8 @@ fun StudentAttendanceCard(
   currentUserId: String,
   onMarkPresent: () -> Unit,
   onMarkAbsent: () -> Unit,
-  onEditReason: () -> Unit
+  onEditReason: () -> Unit,
+  onDeleteRecord: () -> Unit = {}
 ) {
   val status = currentRecord?.status
   val isPresent = status == "Present"
@@ -851,7 +894,8 @@ fun StudentAttendanceCard(
       ) {
         Row(
           verticalAlignment = Alignment.CenterVertically,
-          horizontalArrangement = Arrangement.spacedBy(10.dp)
+          horizontalArrangement = Arrangement.spacedBy(10.dp),
+          modifier = Modifier.weight(1f).padding(end = 8.dp)
         ) {
           // Initials Avatar
           Box(
@@ -875,7 +919,9 @@ fun StudentAttendanceCard(
                 else -> Color(0xFF93C5FD)
               },
               fontWeight = FontWeight.Bold,
-              fontSize = 12.sp
+              fontSize = 12.sp,
+              maxLines = 1,
+              softWrap = false
             )
           }
 
@@ -889,9 +935,9 @@ fun StudentAttendanceCard(
               overflow = TextOverflow.Ellipsis
             )
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-              Text("ID: ${student.id}", fontSize = 10.sp, color = Color(0xFF94A3B8))
+              Text("ID: ${student.id}", fontSize = 10.sp, color = Color(0xFF94A3B8), maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
               Text("•", fontSize = 10.sp, color = Color(0xFF475569))
-              Text(student.batch, fontSize = 10.sp, color = Color(0xFF38BDF8), fontWeight = FontWeight.SemiBold)
+              Text(student.batch, fontSize = 10.sp, color = Color(0xFF38BDF8), fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
           }
         }
@@ -907,6 +953,9 @@ fun StudentAttendanceCard(
             fontSize = 10.sp,
             fontWeight = FontWeight.Bold,
             color = if (student.attendancePercent >= 75) Color(0xFF4ADE80) else Color(0xFFF87171),
+            maxLines = 1,
+            softWrap = false,
+            overflow = TextOverflow.Ellipsis,
             modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
           )
         }
@@ -935,7 +984,7 @@ fun StudentAttendanceCard(
             modifier = Modifier.size(16.dp)
           )
           Spacer(Modifier.width(6.dp))
-          Text("Present", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+          Text("Present", fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
         }
 
         // 2. ABSENT BUTTON
@@ -956,7 +1005,7 @@ fun StudentAttendanceCard(
             modifier = Modifier.size(16.dp)
           )
           Spacer(Modifier.width(6.dp))
-          Text("Absent", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+          Text("Absent", fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
         }
       }
 
@@ -980,18 +1029,31 @@ fun StudentAttendanceCard(
                 horizontalArrangement = Arrangement.spacedBy(4.dp)
               ) {
                 Icon(Icons.Default.Edit, contentDescription = null, tint = Color(0xFFFCA5A5), modifier = Modifier.size(10.dp))
-                Text("Reason: ${currentRecord.reason}", fontSize = 10.sp, color = Color(0xFFFCA5A5), fontWeight = FontWeight.SemiBold)
+                Text("Reason: ${currentRecord.reason}", fontSize = 10.sp, color = Color(0xFFFCA5A5), fontWeight = FontWeight.SemiBold, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
               }
             }
           } else {
             Spacer(Modifier.width(1.dp))
           }
 
-          Text(
-            "Logged: ${currentRecord.time.ifBlank { "Recorded" }}",
-            fontSize = 9.sp,
-            color = Color(0xFF94A3B8)
-          )
+          Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(
+              "Logged: ${currentRecord.time.ifBlank { "Recorded" }}",
+              fontSize = 9.sp,
+              color = Color(0xFF94A3B8)
+            )
+            IconButton(
+              onClick = onDeleteRecord,
+              modifier = Modifier.size(20.dp)
+            ) {
+              Icon(
+                Icons.Default.DeleteOutline,
+                contentDescription = "Delete attendance record",
+                tint = Color(0xFFF87171),
+                modifier = Modifier.size(14.dp)
+              )
+            }
+          }
         }
       }
     }
@@ -1017,8 +1079,8 @@ fun AttendanceStatPill(
       horizontalAlignment = Alignment.CenterHorizontally,
       verticalArrangement = Arrangement.Center
     ) {
-      Text(count, fontWeight = FontWeight.ExtraBold, fontSize = 14.sp, color = textColor)
-      Text(title, fontSize = 10.sp, color = Color(0xFF94A3B8))
+      Text(count, fontWeight = FontWeight.ExtraBold, fontSize = 14.sp, color = textColor, maxLines = 1, softWrap = false)
+      Text(title, fontSize = 10.sp, color = Color(0xFF94A3B8), maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
     }
   }
 }

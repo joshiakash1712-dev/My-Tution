@@ -388,7 +388,10 @@ fun StudentCsvImportDialog(
                 "1. Choose / Paste CSV",
                 fontWeight = FontWeight.Bold,
                 fontSize = 12.sp,
-                color = if (inputMode == 0) Color.White else Color(0xFF475569)
+                color = if (inputMode == 0) Color.White else Color(0xFF475569),
+                maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Ellipsis
               )
             }
           }
@@ -423,7 +426,10 @@ fun StudentCsvImportDialog(
                 "2. Preview (${parsedRows.size})",
                 fontWeight = FontWeight.Bold,
                 fontSize = 12.sp,
-                color = if (inputMode == 1) Color.White else Color(0xFF475569)
+                color = if (inputMode == 1) Color.White else Color(0xFF475569),
+                maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Ellipsis
               )
             }
           }
@@ -629,8 +635,8 @@ fun StudentCsvImportDialog(
                   modifier = Modifier.weight(1f)
                 ) {
                   Column(modifier = Modifier.padding(10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("${parsedRows.size}", fontWeight = FontWeight.ExtraBold, fontSize = 16.sp, color = Color(0xFF0061A4))
-                    Text("Total Parsed", fontSize = 10.sp, color = Color(0xFF1E40AF))
+                    Text("${parsedRows.size}", fontWeight = FontWeight.ExtraBold, fontSize = 16.sp, color = Color(0xFF0061A4), maxLines = 1, softWrap = false)
+                    Text("Total Parsed", fontSize = 10.sp, color = Color(0xFF1E40AF), maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
                   }
                 }
 
@@ -640,8 +646,8 @@ fun StudentCsvImportDialog(
                   modifier = Modifier.weight(1f)
                 ) {
                   Column(modifier = Modifier.padding(10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("${parsedRows.size - duplicateCount}", fontWeight = FontWeight.ExtraBold, fontSize = 16.sp, color = Color(0xFF15803D))
-                    Text("Unique / Ready", fontSize = 10.sp, color = Color(0xFF166534))
+                    Text("${parsedRows.size - duplicateCount}", fontWeight = FontWeight.ExtraBold, fontSize = 16.sp, color = Color(0xFF15803D), maxLines = 1, softWrap = false)
+                    Text("Unique / Ready", fontSize = 10.sp, color = Color(0xFF166534), maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
                   }
                 }
 
@@ -651,8 +657,8 @@ fun StudentCsvImportDialog(
                   modifier = Modifier.weight(1f)
                 ) {
                   Column(modifier = Modifier.padding(10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("$duplicateCount", fontWeight = FontWeight.ExtraBold, fontSize = 16.sp, color = if (duplicateCount > 0) Color(0xFFD97706) else Color(0xFF64748B))
-                    Text("Duplicate IDs", fontSize = 10.sp, color = if (duplicateCount > 0) Color(0xFFB45309) else Color(0xFF64748B))
+                    Text("$duplicateCount", fontWeight = FontWeight.ExtraBold, fontSize = 16.sp, color = if (duplicateCount > 0) Color(0xFFD97706) else Color(0xFF64748B), maxLines = 1, softWrap = false)
+                    Text("Duplicate IDs", fontSize = 10.sp, color = if (duplicateCount > 0) Color(0xFFB45309) else Color(0xFF64748B), maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
                   }
                 }
               }
@@ -783,7 +789,8 @@ fun StudentCsvImportDialog(
                 ) {
                   Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier.weight(1f).padding(end = 8.dp)
                   ) {
                     Box(
                       modifier = Modifier
@@ -796,13 +803,15 @@ fun StudentCsvImportDialog(
                         stu.name.take(2).uppercase(),
                         fontWeight = FontWeight.Bold,
                         color = Color(0xFF0061A4),
-                        fontSize = 12.sp
+                        fontSize = 12.sp,
+                        maxLines = 1,
+                        softWrap = false
                       )
                     }
 
                     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                       Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text(stu.name, fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color(0xFF0F172A))
+                        Text(stu.name, fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color(0xFF0F172A), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
                         if (row.isDuplicateId) {
                           Surface(
                             color = Color(0xFFFEF3C7),
@@ -813,6 +822,9 @@ fun StudentCsvImportDialog(
                               fontSize = 8.sp,
                               fontWeight = FontWeight.Bold,
                               color = Color(0xFFB45309),
+                              maxLines = 1,
+                              softWrap = false,
+                              overflow = TextOverflow.Ellipsis,
                               modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
                             )
                           }
@@ -821,12 +833,16 @@ fun StudentCsvImportDialog(
                       Text(
                         "ID: ${stu.id} • ${if (overrideBatchSelection == "Keep File Batch") stu.batch else overrideBatchSelection} • ${stu.className}",
                         fontSize = 10.sp,
-                        color = Color(0xFF64748B)
+                        color = Color(0xFF64748B),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                       )
                       Text(
                         "Mobile: ${stu.mobile} • Parent: ${stu.parentName}",
                         fontSize = 9.sp,
-                        color = Color(0xFF94A3B8)
+                        color = Color(0xFF94A3B8),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                       )
                     }
                   }
@@ -840,6 +856,9 @@ fun StudentCsvImportDialog(
                       fontSize = 10.sp,
                       fontWeight = FontWeight.Bold,
                       color = Color(0xFF475569),
+                      maxLines = 1,
+                      softWrap = false,
+                      overflow = TextOverflow.Ellipsis,
                       modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp)
                     )
                   }

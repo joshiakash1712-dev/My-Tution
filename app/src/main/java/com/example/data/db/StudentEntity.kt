@@ -36,8 +36,13 @@ data class StudentEntity(
   val markMemoPhoto10th: String = "",
   val markMemoPhoto11th: String = "",
   val targetExam: String = "JEE / NEET / CET",
-  val activationCode: String = "742189",
-  val isActivated: Boolean = true,
+  val activationCode: String = "",
+  val isActivated: Boolean = false,
+  val batchId: String = "",
+  val parentId: String = "",
+  val parentEmail: String = "",
+  val feeStatus: String = "Pending",
+  val instituteId: String = "FSI_MAIN",
   val syncedToFirestore: Boolean = false,
   val lastUpdated: Long = System.currentTimeMillis()
 ) {
@@ -85,7 +90,12 @@ data class StudentEntity(
       markMemoPhoto11th = markMemoPhoto11th,
       targetExam = targetExam,
       activationCode = activationCode,
-      isActivated = isActivated
+      isActivated = isActivated,
+      batchId = batchId,
+      parentId = parentId,
+      parentEmail = parentEmail,
+      feeStatus = feeStatus,
+      instituteId = instituteId
     )
   }
 
@@ -125,6 +135,11 @@ data class StudentEntity(
         targetExam = student.targetExam,
         activationCode = student.activationCode,
         isActivated = student.isActivated,
+        batchId = student.batchId,
+        parentId = student.parentId,
+        parentEmail = student.parentEmail,
+        feeStatus = student.feeStatus,
+        instituteId = student.instituteId,
         syncedToFirestore = synced
       )
     }

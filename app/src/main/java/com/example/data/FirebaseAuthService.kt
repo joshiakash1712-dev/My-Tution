@@ -1,17 +1,23 @@
 package com.example.data
 
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import com.example.security.SecurityEngine
 import com.example.security.SecuritySeverity
-import com.google.firebase.auth.FirebaseAuth
-import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.FirebaseApp
+import com.google.firebase.auth.FirebaseAuth
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 
 object FirebaseAuthService {
   private const val TAG = "FirebaseAuthService"
   private const val ROLES_COLLECTION = "user_roles"
+  private val authScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
   private val _authStatus = MutableStateFlow("Firebase Auth: Initializing...")
   val authStatus = _authStatus.asStateFlow()
@@ -29,8 +35,8 @@ object FirebaseAuthService {
   val auth: FirebaseAuth? by lazy {
     try {
       if (!isFirebaseInitialized) {
-        Log.i(TAG, "FirebaseApp not initialized. Falling back to offline/simulation auth.")
-        _authStatus.value = "Auth Offline Mode (google-services.json not configured)"
+        Log.i(TAG, "FirebaseApp not initialized. Using local BCrypt vault verifier.")
+        _authStatus.value = "Auth Local Vault Mode (Firebase not initialized)"
         null
       } else {
         val instance = FirebaseAuth.getInstance()
@@ -38,8 +44,8 @@ object FirebaseAuthService {
         instance
       }
     } catch (e: Exception) {
-      Log.w(TAG, "Failed to initialize Firebase Auth. Fallback to offline/simulation auth.", e)
-      _authStatus.value = "Auth Offline Mode (google-services.json not configured)"
+      Log.w(TAG, "Failed to initialize Firebase Auth. Using local BCrypt vault verifier.", e)
+      _authStatus.value = "Auth Local Vault Mode (Firebase not initialized)"
       null
     }
   }
@@ -48,10 +54,18 @@ object FirebaseAuthService {
     return auth != null
   }
 
+  private fun runOnMainOrDirect(block: () -> Unit) {
+    val mainLooper = try { Looper.getMainLooper() } catch (_: Exception) { null }
+    if (mainLooper != null && Looper.myLooper() != mainLooper) {
+      Handler(mainLooper).post(block)
+    } else {
+      block()
+    }
+  }
+
   /**
    * Checks for an existing active Firebase Auth session upon app launch.
-   * If a session is present, fetches or detects their UserRole and invokes onSuccess
-   * so returning users are automatically logged in without re-verifying their identifier.
+   * If a session is present, fetches or detects their UserRole and invokes onSessionFound.
    */
   fun checkExistingSession(
     onSessionFound: (email: String, role: UserRole, uid: String) -> Unit,
@@ -72,7 +86,7 @@ object FirebaseAuthService {
 
       fetchUserRole(uid, userEmail, { role ->
         onSessionFound(userEmail, role, uid)
-      }, { error ->
+      }, { _ ->
         val detectedRole = smartDetectRole(userEmail)
         onSessionFound(userEmail, detectedRole, uid)
       })
@@ -82,7 +96,7 @@ object FirebaseAuthService {
     }
   }
 
-  // Real Sign In with Role-Based Access Control Retrieval
+  // Authoritative Sign In with Role-Based Access Control Retrieval
   fun signIn(
     email: String,
     password: String,
@@ -95,14 +109,43 @@ object FirebaseAuthService {
       return
     }
 
-    // 1. MANDATORY DATABASE USER ACCOUNT EXISTENCE CHECK
-    // Verify if account is registered in tuition database or credential vault
+    val accountStatus = AppRepository.getAccountStatus(cleanEmail)
     val existsInVault = SecurityEngine.hasRegisteredAccount(cleanEmail)
-    val existsInStudents = AppRepository.students.value.any { it.email.lowercase() == cleanEmail || it.id.lowercase() == cleanEmail }
-    val existsInTeachers = AppRepository.teachers.value.any { it.email.lowercase() == cleanEmail || it.id.lowercase() == cleanEmail }
-    val isMasterAdmin = cleanEmail == "joshiakash1209@gmail.com" || cleanEmail == "joshiakash1712@gmail.com" || cleanEmail == "admin@fsi.com" || cleanEmail == "admin"
+    val firebaseAuth = auth
 
-    if (!existsInVault && !existsInStudents && !existsInTeachers && !isMasterAdmin) {
+    // When Firebase Authentication is available in production, use Firebase Auth as the authoritative authentication mechanism
+    if (firebaseAuth != null) {
+      val resolvedEmail = if (cleanEmail.contains("@")) {
+        cleanEmail
+      } else {
+        AppRepository.resolveCanonicalEmailForIdentifier(cleanEmail) ?: cleanEmail
+      }
+      _authStatus.value = "Signing in with Firebase Auth..."
+      firebaseAuth.signInWithEmailAndPassword(resolvedEmail, password)
+        .addOnSuccessListener { authResult ->
+          val uid = authResult.user?.uid ?: ""
+          val userEmail = (authResult.user?.email ?: resolvedEmail).trim().lowercase()
+          Log.d(TAG, "Firebase Auth sign in successful for UID: $uid")
+
+          fetchUserRole(uid, userEmail, { role ->
+            _authStatus.value = "Signed in successfully as ${role.name}"
+            onSuccess(role, userEmail)
+          }, { _ ->
+            val detected = smartDetectRole(userEmail)
+            _authStatus.value = "Signed in (Role: ${detected.name})"
+            onSuccess(detected, userEmail)
+          })
+        }
+        .addOnFailureListener { e ->
+          Log.e(TAG, "Firebase Auth sign in failed", e)
+          _authStatus.value = "Sign-In Failed: Invalid credentials"
+          onFailure("Invalid email/ID or password. Please verify your credentials or contact institute administration.")
+        }
+      return
+    }
+
+    // When Firebase Auth is unavailable (offline / local environment), verify against SecurityEngine on Dispatchers.Default
+    if (!existsInVault && !accountStatus.exists) {
       Log.w(TAG, "Login denied for '$cleanEmail': User account not registered in tuition database.")
       _authStatus.value = "Sign-In Denied: Unregistered Account"
       SecurityEngine.logEvent(
@@ -115,46 +158,37 @@ object FirebaseAuthService {
       return
     }
 
-    // 2. SALTED HASHING PASSWORD VERIFICATION
-    // Check against cryptographically salted SHA-256 password vault
-    val (isSaltedValid, saltedRole) = SecurityEngine.verifySaltedCredential(cleanEmail, password)
-    if (isSaltedValid && saltedRole != null) {
-      Log.i(TAG, "Salted password authentication succeeded for $cleanEmail as ${saltedRole.name}")
-      _authStatus.value = "Signed in successfully as ${saltedRole.name}"
-      onSuccess(saltedRole, cleanEmail)
-      return
-    }
+    authScope.launch {
+      val (isSaltedValid, saltedRole) = SecurityEngine.verifySaltedCredential(cleanEmail, password)
+      if (isSaltedValid && saltedRole != null) {
+        val resolvedRole = accountStatus.role ?: saltedRole
+        Log.i(TAG, "Salted password authentication succeeded for $cleanEmail as ${resolvedRole.name}")
+        _authStatus.value = "Signed in successfully as ${resolvedRole.name}"
+        runOnMainOrDirect { onSuccess(resolvedRole, cleanEmail) }
+        return@launch
+      }
 
-    // Fallback or Cloud Sync with Firebase Auth
-    val firebaseAuth = auth
-    if (firebaseAuth != null) {
-      _authStatus.value = "Signing in with Firebase Auth..."
-      firebaseAuth.signInWithEmailAndPassword(email, password)
-        .addOnSuccessListener { authResult ->
-          val uid = authResult.user?.uid ?: ""
-          val userEmail = authResult.user?.email ?: email
-          Log.d(TAG, "Firebase Auth sign in successful for UID: $uid")
-          
-          fetchUserRole(uid, userEmail, { role ->
-            SecurityEngine.registerSaltedCredential(userEmail, password, role)
-            _authStatus.value = "Signed in successfully as ${role.name}"
-            onSuccess(role, userEmail)
-          }, { error ->
-            val detected = smartDetectRole(userEmail)
-            SecurityEngine.registerSaltedCredential(userEmail, password, detected)
-            _authStatus.value = "Signed in (Role: ${detected.name})"
-            onSuccess(detected, userEmail)
-          })
+      if (accountStatus.exists && accountStatus.role != null) {
+        val canonicalId = when (accountStatus.role) {
+          UserRole.TEACHER -> accountStatus.teacherId?.lowercase() ?: ""
+          UserRole.STUDENT -> accountStatus.studentId?.lowercase() ?: ""
+          UserRole.PARENT -> accountStatus.studentId?.let { "parent_${it.lowercase()}@mytuition.com" } ?: ""
+          UserRole.ADMIN -> AppRepository.resolveCanonicalEmailForIdentifier(cleanEmail) ?: ""
         }
-        .addOnFailureListener { e ->
-          Log.e(TAG, "Firebase Auth sign in failed", e)
-          _authStatus.value = "Sign-In Failed: Invalid credentials"
-          onFailure("Invalid email/ID or password. Please verify your credentials or contact institute administration.")
+        if (canonicalId.isNotBlank() && canonicalId != cleanEmail) {
+          val (isCanonicalValid, _) = SecurityEngine.verifySaltedCredential(canonicalId, password)
+          if (isCanonicalValid) {
+            Log.i(TAG, "Canonical salted password authentication succeeded for $cleanEmail as ${accountStatus.role.name}")
+            _authStatus.value = "Signed in successfully as ${accountStatus.role.name}"
+            runOnMainOrDirect { onSuccess(accountStatus.role, cleanEmail) }
+            return@launch
+          }
         }
-    } else {
+      }
+
       Log.w(TAG, "Sign-in failed for $cleanEmail: Invalid salted password hash.")
       _authStatus.value = "Sign-In Failed: Incorrect password"
-      onFailure("Invalid email/ID or password. Please verify your credentials.")
+      runOnMainOrDirect { onFailure("Invalid email/ID or password. Please verify your credentials.") }
     }
   }
 
@@ -168,28 +202,29 @@ object FirebaseAuthService {
     onFailure: (String) -> Unit
   ) {
     val cleanEmail = email.trim().lowercase()
-
-    // Register BCrypt salted credential locally
-    SecurityEngine.registerSaltedCredential(cleanEmail, password, role, fullName)
+    if (cleanEmail.isBlank() || password.length < 6) {
+      onFailure("A valid email and password (minimum 6 characters) are required.")
+      return
+    }
 
     val firebaseAuth = auth
     if (firebaseAuth == null) {
-      // Local Fallback simulation
-      Log.d(TAG, "FirebaseAuth offline fallback sign up. Role: ${role.name}")
-      _authStatus.value = "Offline Sign-Up simulated for $cleanEmail (BCrypt Salted)"
-      onSuccess()
+      authScope.launch {
+        SecurityEngine.registerSaltedCredential(cleanEmail, password, role, fullName)
+        Log.d(TAG, "Local vault registration completed for $cleanEmail. Role: ${role.name}")
+        _authStatus.value = "Registered in local vault for $cleanEmail"
+        runOnMainOrDirect { onSuccess() }
+      }
       return
     }
 
     _authStatus.value = "Creating account in Firebase Auth..."
-    firebaseAuth.createUserWithEmailAndPassword(email, password)
+    firebaseAuth.createUserWithEmailAndPassword(cleanEmail, password)
       .addOnSuccessListener { authResult ->
         val uid = authResult.user?.uid ?: ""
-        Log.d(TAG, "Firebase account created. UID: $uid. Writing BCrypt salted user role mapping to Firestore...")
+        Log.d(TAG, "Firebase account created. UID: $uid. Writing user role mapping to Firestore...")
 
-        // Save User Role mapping in Firestore with BCrypt Hash
-        val bcryptHash = SecurityEngine.hashPasswordWithBCrypt(password)
-        saveUserRole(uid, cleanEmail, fullName, role, bcryptHash, {
+        saveUserRole(uid, cleanEmail, fullName, role, {
           _authStatus.value = "Registered successfully. Role: ${role.name}"
           onSuccess()
         }, { error ->
@@ -205,23 +240,32 @@ object FirebaseAuthService {
       }
   }
 
-  // Trigger password reset email
+  // Trigger password reset email — NEVER pretends success when Firebase is unavailable
   fun sendPasswordResetEmail(
     email: String,
     onSuccess: () -> Unit,
     onFailure: (String) -> Unit
   ) {
+    val cleanEmail = email.trim()
+    if (cleanEmail.isBlank() || !cleanEmail.contains("@")) {
+      _authStatus.value = "Reset Failed: Invalid email address"
+      onFailure("Please provide a valid registered email address.")
+      return
+    }
+
     val firebaseAuth = auth
     if (firebaseAuth == null) {
-      Log.d(TAG, "FirebaseAuth offline fallback password reset.")
-      onSuccess()
+      val errorMsg = "Password reset service is unavailable: Firebase Authentication is not configured."
+      Log.w(TAG, errorMsg)
+      _authStatus.value = "Reset Failed: Firebase Auth unavailable"
+      onFailure(errorMsg)
       return
     }
 
     _authStatus.value = "Sending password reset email..."
-    firebaseAuth.sendPasswordResetEmail(email)
+    firebaseAuth.sendPasswordResetEmail(cleanEmail)
       .addOnSuccessListener {
-        _authStatus.value = "Password reset email sent to $email"
+        _authStatus.value = "Password reset email sent to $cleanEmail"
         onSuccess()
       }
       .addOnFailureListener { e ->
@@ -237,13 +281,12 @@ object FirebaseAuthService {
     _authStatus.value = "Signed out of Firebase Auth"
   }
 
-  // Helper: Save user role mapping in Firestore with BCrypt Salted Hash
+  // Helper: Save user role mapping in Firestore (without storing any password hashes in Firestore)
   private fun saveUserRole(
     uid: String,
     email: String,
     fullName: String,
     role: UserRole,
-    bcryptHash: String = "",
     onSuccess: () -> Unit,
     onFailure: (Exception) -> Unit
   ) {
@@ -258,8 +301,6 @@ object FirebaseAuthService {
       "email" to email,
       "fullName" to fullName,
       "role" to role.name,
-      "bcryptHash" to bcryptHash,
-      "passwordStorage" to "BCrypt-2a (Salted & Hashed)",
       "createdAt" to System.currentTimeMillis()
     )
 
@@ -267,7 +308,7 @@ object FirebaseAuthService {
       .document(uid)
       .set(roleData)
       .addOnSuccessListener {
-        Log.d(TAG, "User role & BCrypt hash recorded successfully in Firestore for UID: $uid")
+        Log.d(TAG, "User role recorded successfully in Firestore for UID: $uid")
         onSuccess()
       }
       .addOnFailureListener { e ->
@@ -302,7 +343,6 @@ object FirebaseAuthService {
             onSuccess(smartDetectRole(email))
           }
         } else {
-          // Document doesn't exist, try smart detection
           Log.w(TAG, "User role document not found for UID: $uid. Using fallback smart detection.")
           onSuccess(smartDetectRole(email))
         }
@@ -312,14 +352,17 @@ object FirebaseAuthService {
       }
   }
 
-  // Fallback Role Detector based on email/username conventions
+  // Role lookup strictly backed by verified directory records and SecurityEngine vault
   private fun smartDetectRole(email: String): UserRole {
     val clean = email.trim().lowercase()
-    return when {
-      clean == "admin" || clean.contains("admin") || clean == "joshiakash1209@gmail.com" || clean == "joshiakash1712@gmail.com" -> UserRole.ADMIN
-      clean.contains("teacher") || clean.contains("faculty") -> UserRole.TEACHER
-      clean.contains("parent") -> UserRole.PARENT
-      else -> UserRole.STUDENT
+    val status = AppRepository.getAccountStatus(clean)
+    if (status.exists && status.role != null) {
+      return status.role
     }
+    val vaultRole = SecurityEngine.getVerifiedRole(clean)
+    if (vaultRole != null) {
+      return vaultRole
+    }
+    return UserRole.STUDENT
   }
 }

@@ -62,10 +62,10 @@ fun TakeAttendanceWorkflow(
   val currentUserIdentifier by AppRepository.currentUserIdentifier.collectAsState()
   val currentRole by AppRepository.currentRole.collectAsState()
 
-  // Ensure default reference batches exist if allBatches is empty or small
-  val activeBatches = remember(allBatches) {
-    if (allBatches.isEmpty()) {
-      SeedData.defaultBatches
+  // Enforce teacher batch authorization
+  val activeBatches = remember(allBatches, currentRole) {
+    if (currentRole == UserRole.TEACHER) {
+      AppRepository.getAuthorizedBatchesForCurrentTeacher()
     } else {
       allBatches
     }
@@ -99,19 +99,19 @@ fun TakeAttendanceWorkflow(
     }
   }
 
-  // Calculate dynamic absence history for a student
+  // Calculate dynamic absence history for a student from real Room records only
   fun getAbsenceHistory(student: Student): AbsenceHistoryInfo {
     val studentRecords = attendanceRecords
-      .filter { it.studentId == student.id || it.studentName.equals(student.name, true) }
+      .filter { it.studentId == student.id }
       .sortedByDescending { it.timestamp }
 
     if (studentRecords.isEmpty()) {
-      return AbsenceHistoryInfo(consecutiveDays = 0, lastPresentDate = "26 Jul 2026", isAbsentYesterday = false)
+      return AbsenceHistoryInfo(consecutiveDays = 0, lastPresentDate = "No prior records", isAbsentYesterday = false)
     }
 
     // Check last present date
     val lastPresentRecord = studentRecords.find { it.status == "Present" }
-    val lastPresentDateStr = lastPresentRecord?.date ?: "26 Jul 2026"
+    val lastPresentDateStr = lastPresentRecord?.date ?: "No prior present date"
 
     // Count consecutive absent days
     var consecutive = 0
@@ -123,19 +123,10 @@ fun TakeAttendanceWorkflow(
       }
     }
 
-    // Default simulation fallback if student name matches seed references in Image 2 & 3
-    val fallbackConsecutive = when (student.name) {
-      "Rahul Sharma" -> 3
-      "Ananya Singh" -> 2
-      "Karan Patel" -> 2
-      "Neha Gupta" -> 1
-      else -> consecutive
-    }
-
     return AbsenceHistoryInfo(
-      consecutiveDays = max(consecutive, fallbackConsecutive),
+      consecutiveDays = consecutive,
       lastPresentDate = lastPresentDateStr,
-      isAbsentYesterday = fallbackConsecutive > 0
+      isAbsentYesterday = consecutive > 0
     )
   }
 
@@ -144,22 +135,13 @@ fun TakeAttendanceWorkflow(
     selectedBatch = batch
     searchQuery = ""
 
-    // Resolve students belonging to this batch
+    // Resolve students belonging to this batch strictly
     val matchedStudents = allStudents.filter { stu ->
       stu.batch.equals(batch.name, ignoreCase = true) ||
-      stu.className.contains(batch.name, ignoreCase = true) ||
-      batch.name.contains(stu.batch, ignoreCase = true)
+      stu.batchId.equals(batch.id, ignoreCase = true)
     }
 
-    val finalStudentsList = if (matchedStudents.isNotEmpty()) {
-      matchedStudents
-    } else if (allStudents.isNotEmpty()) {
-      allStudents.take(batch.studentCount.coerceAtLeast(10))
-    } else {
-      SeedData.get12thScienceStudents().take(batch.studentCount.coerceAtLeast(10))
-    }
-
-    batchStudents = finalStudentsList
+    batchStudents = matchedStudents
     currentStudentIndex = 0
     undoStack.clear()
     sessionStartTime = System.currentTimeMillis()
@@ -230,7 +212,12 @@ fun TakeAttendanceWorkflow(
           recordedBy = previousRecord.recordedBy
         )
       } else {
-        // Revert to Not Marked by finding student and updating index
+        val newlyCreated = attendanceRecords.find {
+          it.studentId == studentId && it.date == currentDateStr && it.batchName == (selectedBatch?.name ?: "")
+        }
+        if (newlyCreated != null) {
+          AppRepository.deleteAttendanceRecord(newlyCreated.id)
+        }
       }
 
       if (currentStudentIndex > 0) {
@@ -285,19 +272,19 @@ fun TakeAttendanceWorkflow(
           }
         }
         AttendanceStep.STEP_3_SUMMARY -> {
-          val activeBatchName = selectedBatch?.name ?: "10th - Science (A)"
+          val activeBatchName = selectedBatch?.name ?: ""
           val batchRecords = attendanceRecords.filter {
-            it.batchName == activeBatchName && it.date == currentDateStr
+            it.batchName.equals(activeBatchName, ignoreCase = true) && it.date == currentDateStr
           }
-          val presentCount = if (batchRecords.isNotEmpty()) batchRecords.count { it.status == "Present" } else (batchStudents.size * 24 / 28)
-          val absentCount = if (batchRecords.isNotEmpty()) batchRecords.count { it.status == "Absent" } else 4
-          val totalCount = batchStudents.size.coerceAtLeast(28)
+          val presentCount = batchRecords.count { it.status == "Present" }
+          val absentCount = batchRecords.count { it.status == "Absent" }
+          val totalCount = batchStudents.size
 
-          // Gather absent students with history
+          // Gather absent students from real records
           val absentStudentsList = batchStudents.filter { stu ->
             val r = batchRecords.find { it.studentId == stu.id }
-            r?.status == "Absent" || stu.name in listOf("Rahul Sharma", "Ananya Singh", "Karan Patel", "Neha Gupta")
-          }.take(4)
+            r?.status == "Absent"
+          }
 
           Step3SummaryScreen(
             batchName = activeBatchName,
@@ -372,9 +359,10 @@ fun TakeAttendanceWorkflow(
                 ) {
                   Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier.weight(1f).padding(end = 8.dp)
                   ) {
-                    Text("${idx + 1}.", fontSize = 12.sp, color = Color(0xFF94A3B8), fontWeight = FontWeight.Bold)
+                    Text("${idx + 1}.", fontSize = 12.sp, color = Color(0xFF94A3B8), fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
                     Box(
                       modifier = Modifier
                         .size(36.dp)
@@ -385,8 +373,8 @@ fun TakeAttendanceWorkflow(
                       Text(stu.name.take(1), fontWeight = FontWeight.Bold, color = Color.White, fontSize = 14.sp)
                     }
                     Column {
-                      Text(stu.name, fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color.White)
-                      Text("Roll No. ${idx + 1}", fontSize = 11.sp, color = Color(0xFF94A3B8))
+                      Text(stu.name, fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                      Text("Roll No. ${idx + 1}", fontSize = 11.sp, color = Color(0xFF94A3B8), maxLines = 1, softWrap = false)
                     }
                   }
 
@@ -406,6 +394,9 @@ fun TakeAttendanceWorkflow(
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
                         color = Color.White,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
                       )
                     }
@@ -425,6 +416,9 @@ fun TakeAttendanceWorkflow(
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
                         color = Color.White,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
                       )
                     }
@@ -616,6 +610,9 @@ private fun Step1BatchSelectionScreen(
                   fontSize = 10.sp,
                   fontWeight = FontWeight.SemiBold,
                   color = if (isMorning) Color(0xFF818CF8) else Color(0xFFA5B4FC),
+                  maxLines = 1,
+                  softWrap = false,
+                  overflow = TextOverflow.Ellipsis,
                   modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
                 )
               }
@@ -630,7 +627,10 @@ private fun Step1BatchSelectionScreen(
                 text = b.schedule,
                 fontSize = 11.sp,
                 color = Color(0xFF94A3B8),
-                fontWeight = FontWeight.Medium
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Ellipsis
               )
               Icon(Icons.Default.ChevronRight, contentDescription = null, tint = Color(0xFF64748B), modifier = Modifier.size(18.dp))
             }
@@ -851,6 +851,9 @@ private fun Step2CardSwipeScreen(
               fontSize = 11.sp,
               fontWeight = FontWeight.SemiBold,
               color = Color(0xFF818CF8),
+              maxLines = 1,
+              softWrap = false,
+              overflow = TextOverflow.Ellipsis,
               modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
             )
           }
@@ -866,7 +869,7 @@ private fun Step2CardSwipeScreen(
               horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
               Icon(Icons.Default.FormatListBulleted, contentDescription = null, tint = Color.White, modifier = Modifier.size(12.dp))
-              Text("View All", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
+              Text("View All", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
             }
           }
         }
@@ -959,6 +962,9 @@ private fun Step2CardSwipeScreen(
                   color = Color(0xFFF59E0B),
                   fontWeight = FontWeight.ExtraBold,
                   fontSize = 12.sp,
+                  maxLines = 1,
+                  softWrap = false,
+                  overflow = TextOverflow.Ellipsis,
                   modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                 )
               }
@@ -993,8 +999,8 @@ private fun Step2CardSwipeScreen(
               ) {
                 Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Color.White, modifier = Modifier.size(24.dp))
                 Column {
-                  Text("Present", fontWeight = FontWeight.ExtraBold, fontSize = 15.sp, color = Color.White)
-                  Text("Mark as present", fontSize = 10.sp, color = Color(0xFFDCFCE7))
+                  Text("Present", fontWeight = FontWeight.ExtraBold, fontSize = 15.sp, color = Color.White, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
+                  Text("Mark as present", fontSize = 10.sp, color = Color(0xFFDCFCE7), maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
                 }
               }
             }
@@ -1014,8 +1020,8 @@ private fun Step2CardSwipeScreen(
               ) {
                 Icon(Icons.Default.Cancel, contentDescription = null, tint = Color.White, modifier = Modifier.size(24.dp))
                 Column {
-                  Text("Absent", fontWeight = FontWeight.ExtraBold, fontSize = 15.sp, color = Color.White)
-                  Text("Mark as absent", fontSize = 10.sp, color = Color(0xFFFEE2E2))
+                  Text("Absent", fontWeight = FontWeight.ExtraBold, fontSize = 15.sp, color = Color.White, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
+                  Text("Mark as absent", fontSize = 10.sp, color = Color(0xFFFEE2E2), maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
                 }
               }
             }
@@ -1077,6 +1083,9 @@ private fun Step2CardSwipeScreen(
             color = if (canUndo) Color(0xFF38BDF8) else Color(0xFF64748B),
             fontSize = 11.sp,
             fontWeight = FontWeight.Bold,
+            maxLines = 1,
+            softWrap = false,
+            overflow = TextOverflow.Ellipsis,
             modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
           )
         }
@@ -1099,7 +1108,8 @@ private fun Step2CardSwipeScreen(
       ) {
         Row(
           verticalAlignment = Alignment.CenterVertically,
-          horizontalArrangement = Arrangement.spacedBy(8.dp)
+          horizontalArrangement = Arrangement.spacedBy(8.dp),
+          modifier = Modifier.weight(1f).padding(end = 8.dp)
         ) {
           Box(
             modifier = Modifier
@@ -1111,8 +1121,8 @@ private fun Step2CardSwipeScreen(
             Icon(Icons.Default.School, contentDescription = null, tint = Color(0xFFA5B4FC), modifier = Modifier.size(16.dp))
           }
           Column {
-            Text("Batch: ${batch.name}", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = Color.White)
-            Text("Time: ${batch.schedule}  •  ${totalStudentsCount} Students", fontSize = 10.sp, color = Color(0xFF94A3B8))
+            Text("Batch: ${batch.name}", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text("Time: ${batch.schedule}  •  ${totalStudentsCount} Students", fontSize = 10.sp, color = Color(0xFF94A3B8), maxLines = 1, overflow = TextOverflow.Ellipsis)
           }
         }
 
@@ -1127,7 +1137,7 @@ private fun Step2CardSwipeScreen(
             horizontalArrangement = Arrangement.spacedBy(2.dp)
           ) {
             Icon(Icons.Default.SwapHoriz, contentDescription = null, tint = Color.White, modifier = Modifier.size(12.dp))
-            Text("Change Batch", fontSize = 10.sp, color = Color.White, fontWeight = FontWeight.Bold)
+            Text("Change Batch", fontSize = 10.sp, color = Color.White, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
           }
         }
       }
@@ -1463,9 +1473,10 @@ private fun Step3SummaryScreen(
               ) {
                 Row(
                   verticalAlignment = Alignment.CenterVertically,
-                  horizontalArrangement = Arrangement.spacedBy(8.dp)
+                  horizontalArrangement = Arrangement.spacedBy(8.dp),
+                  modifier = Modifier.weight(1f).padding(end = 8.dp)
                 ) {
-                  Text("${idx + 1}.", fontSize = 12.sp, color = Color(0xFF94A3B8), fontWeight = FontWeight.Bold)
+                  Text("${idx + 1}.", fontSize = 12.sp, color = Color(0xFF94A3B8), fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
 
                   Box(
                     modifier = Modifier
@@ -1478,8 +1489,8 @@ private fun Step3SummaryScreen(
                   }
 
                   Column {
-                    Text(stu.name, fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color.White)
-                    Text("Roll No. ${idx + 17}", fontSize = 11.sp, color = Color(0xFF94A3B8))
+                    Text(stu.name, fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text("Roll No. ${idx + 17}", fontSize = 11.sp, color = Color(0xFF94A3B8), maxLines = 1, softWrap = false)
                   }
                 }
 
@@ -1491,7 +1502,7 @@ private fun Step3SummaryScreen(
                     color = Color(0xFF7F1D1D),
                     shape = RoundedCornerShape(8.dp)
                   ) {
-                    Text(badgeText, fontSize = 10.sp, fontWeight = FontWeight.ExtraBold, color = Color(0xFFFCA5A5), modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp))
+                    Text(badgeText, fontSize = 10.sp, fontWeight = FontWeight.ExtraBold, color = Color(0xFFFCA5A5), maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp))
                   }
                   Icon(Icons.Default.ChevronRight, contentDescription = null, tint = Color(0xFF64748B), modifier = Modifier.size(16.dp))
                 }
@@ -1523,7 +1534,7 @@ private fun Step3SummaryScreen(
           horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
           Icon(Icons.Default.Assignment, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
-          Text("View Attendance Report", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+          Text("View Attendance Report", fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
         }
       }
 
@@ -1548,7 +1559,7 @@ private fun Step3SummaryScreen(
           horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
           Icon(Icons.Default.Share, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
-          Text("Share Summary", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
+          Text("Share Summary", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
         }
       }
     }

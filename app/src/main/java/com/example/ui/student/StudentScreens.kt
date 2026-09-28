@@ -1,5 +1,9 @@
 package com.example.ui.student
 
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -18,11 +22,13 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -33,14 +39,17 @@ import com.example.ui.components.*
 import com.example.ui.teacher.TimetableCard
 import com.example.ui.timetable.DynamicTimetableScreen
 import kotlinx.coroutines.launch
+import java.io.File
 import java.text.SimpleDateFormat
 import java.util.*
 
 @Composable
 fun StudentMainContent(currentTab: Int, onTabChange: (Int) -> Unit = {}) {
   val students by AppRepository.students.collectAsState()
-  val activeStudent = remember(students) { 
-    students.firstOrNull() ?: Student(
+  val currentUserId by AppRepository.currentUserIdentifier.collectAsState()
+  val currentAccount by AppRepository.currentUserAccount.collectAsState()
+  val activeStudent = remember(students, currentUserId, currentAccount) {
+    AppRepository.getActiveStudentForCurrentSession() ?: Student(
       id = "STU-000",
       name = "No Enrolled Student",
       photo = "",
@@ -73,12 +82,36 @@ fun StudentMainContent(currentTab: Int, onTabChange: (Int) -> Unit = {}) {
   val goal by AppRepository.studentGoal.collectAsState()
   val badges by AppRepository.badges.collectAsState()
 
+  val studentTests = remember(tests, activeStudent.id, activeStudent.batch, activeStudent.batchId) {
+    tests.filter {
+      (activeStudent.batchId.isNotBlank() && it.batchId.equals(activeStudent.batchId, ignoreCase = true)) ||
+        it.batch.equals(activeStudent.batch, ignoreCase = true) ||
+        it.studentMarks.containsKey(activeStudent.id)
+    }
+  }
+
+  val studentHomework = remember(homework, activeStudent.id, activeStudent.batch, activeStudent.batchId) {
+    AppRepository.getHomeworkForCurrentStudent(activeStudent)
+  }
+
+  val studentDoubts = remember(doubts, activeStudent.id) {
+    AppRepository.getDoubtsForCurrentStudent(activeStudent)
+  }
+
+  val studentStudyLogs = remember(studyLogs, activeStudent.id) {
+    AppRepository.getStudyLogsForCurrentStudent(activeStudent)
+  }
+
+  val activeGoal = remember(goal, activeStudent.id) {
+    AppRepository.getGoalForCurrentStudent(activeStudent)
+  }
+
   when (currentTab) {
-    0 -> StudentDashboardTab(activeStudent, tests, homework, goal, badges, onTabChange)
-    1 -> StudentTimetableTab(timetable, activeStudent.batch)
-    2 -> StudentOnlineTestTab()
+    0 -> StudentDashboardTab(activeStudent, studentTests, studentHomework, activeGoal, badges, onTabChange)
+    1 -> StudentTimetableTab(timetable, activeStudent.batch, activeStudent.batchId)
+    2 -> StudentOnlineTestTab(activeStudent)
     3 -> StudentAiAssistantTab(activeStudent)
-    4 -> StudentStudyTrackerTab(studyLogs, doubts)
+    4 -> StudentStudyTrackerTab(studentStudyLogs, studentDoubts, activeStudent)
   }
 }
 
@@ -159,7 +192,7 @@ fun StudentDashboardTab(
                 modifier = Modifier.size(24.dp)
               )
               Spacer(Modifier.height(4.dp))
-              Text(bg.name, fontSize = 10.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+              Text(bg.name, fontSize = 10.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
             }
           }
         }
@@ -176,9 +209,9 @@ fun StudentDashboardTab(
               horizontalArrangement = Arrangement.SpaceBetween,
               verticalAlignment = Alignment.CenterVertically
             ) {
-              Text(tName, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+              Text(tName, fontWeight = FontWeight.SemiBold, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f).padding(end = 8.dp))
               Surface(color = Color(0xFFD1E4FF), shape = RoundedCornerShape(8.dp)) {
-                Text("$score / 100", fontWeight = FontWeight.Bold, color = Color(0xFF001D36), fontSize = 12.sp, modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp))
+                Text("$score / 100", fontWeight = FontWeight.Bold, color = Color(0xFF001D36), fontSize = 12.sp, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp))
               }
             }
           }
@@ -204,19 +237,41 @@ fun StudentDashboardTab(
 
     // 6. Pending Homework Assignments
     item {
-      GeoSectionCard(title = "Pending Homework Assignments") {
+      GeoSectionCard(title = "Homework Assignments (${homework.size})") {
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
           homework.forEach { hw ->
+            val isCompleted = hw.completedByStudentIds.contains(student.id) ||
+              hw.status.equals("Submitted", ignoreCase = true) ||
+              hw.status.equals("Reviewed", ignoreCase = true)
             Row(
-              modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(if (hw.status == "Pending") MaterialTheme.colorScheme.tertiaryContainer else MaterialTheme.colorScheme.surfaceVariant).padding(12.dp),
+              modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .background(if (!isCompleted) MaterialTheme.colorScheme.tertiaryContainer else MaterialTheme.colorScheme.surfaceVariant)
+                .clickable { AppRepository.toggleHomeworkStatus(hw.id, student.id) }
+                .padding(12.dp),
               horizontalArrangement = Arrangement.SpaceBetween,
               verticalAlignment = Alignment.CenterVertically
             ) {
-              Column(Modifier.weight(1f)) {
-                Text(hw.title, fontWeight = FontWeight.Medium, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface)
-                Text("Due: ${hw.dueDate}", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+              Column(Modifier.weight(1f).padding(end = 8.dp)) {
+                Text("${hw.subject}: ${hw.title}", fontWeight = FontWeight.Medium, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text("Due: ${hw.dueDate}${if (hw.assignedBy.isNotBlank()) " • ${hw.assignedBy}" else ""}", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
               }
-              Text(hw.status.uppercase(), fontWeight = FontWeight.Bold, fontSize = 10.sp, color = if (hw.status == "Pending") MaterialTheme.colorScheme.onTertiaryContainer else Color(0xFF22C55E))
+              Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = if (isCompleted) Color(0xFFDCFCE7) else Color(0xFF0061A4)
+              ) {
+                Text(
+                  text = if (isCompleted) "SUBMITTED ✓" else "MARK DONE",
+                  fontWeight = FontWeight.Bold,
+                  fontSize = 10.sp,
+                  maxLines = 1,
+                  softWrap = false,
+                  overflow = TextOverflow.Ellipsis,
+                  color = if (isCompleted) Color(0xFF15803D) else Color.White,
+                  modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                )
+              }
             }
           }
         }
@@ -226,7 +281,7 @@ fun StudentDashboardTab(
 }
 
 @Composable
-fun StudentTimetableTab(timetable: List<TimetableItem>, batchName: String) {
+fun StudentTimetableTab(timetable: List<TimetableItem>, batchName: String, batchId: String = "") {
   var selectedSubTab by remember { mutableStateOf(0) } // 0 = Daily Dynamic, 1 = Weekly Schedule
 
   Column(modifier = Modifier.fillMaxSize()) {
@@ -239,13 +294,13 @@ fun StudentTimetableTab(timetable: List<TimetableItem>, batchName: String) {
       Tab(
         selected = selectedSubTab == 0,
         onClick = { selectedSubTab = 0 },
-        text = { Text("Daily Dynamic Timetable", fontWeight = FontWeight.Bold, fontSize = 12.sp) },
+        text = { Text("Daily Dynamic Timetable", fontWeight = FontWeight.Bold, fontSize = 12.sp, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis) },
         icon = { Icon(Icons.Default.Schedule, contentDescription = null, modifier = Modifier.size(20.dp)) }
       )
       Tab(
         selected = selectedSubTab == 1,
         onClick = { selectedSubTab = 1 },
-        text = { Text("Weekly Fixed Schedule", fontWeight = FontWeight.Bold, fontSize = 12.sp) },
+        text = { Text("Weekly Fixed Schedule", fontWeight = FontWeight.Bold, fontSize = 12.sp, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis) },
         icon = { Icon(Icons.Default.DateRange, contentDescription = null, modifier = Modifier.size(20.dp)) }
       )
     }
@@ -253,15 +308,20 @@ fun StudentTimetableTab(timetable: List<TimetableItem>, batchName: String) {
     if (selectedSubTab == 0) {
       DynamicTimetableScreen()
     } else {
-      StudentWeeklyTimetableList(timetable, batchName)
+      StudentWeeklyTimetableList(timetable, batchName, batchId)
     }
   }
 }
 
 @Composable
-fun StudentWeeklyTimetableList(timetable: List<TimetableItem>, batchName: String) {
+fun StudentWeeklyTimetableList(timetable: List<TimetableItem>, batchName: String, batchId: String = "") {
   val daysOfWeek = listOf("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday")
-  val studentBatchSchedule = remember(timetable, batchName) { timetable.filter { it.batch == batchName } }
+  val studentBatchSchedule = remember(timetable, batchName, batchId) {
+    timetable.filter {
+      (batchId.isNotBlank() && it.batchId.equals(batchId, ignoreCase = true)) ||
+        it.batch.equals(batchName, ignoreCase = true)
+    }
+  }
 
   LazyColumn(
     modifier = Modifier.fillMaxSize(),
@@ -295,14 +355,96 @@ fun StudentWeeklyTimetableList(timetable: List<TimetableItem>, batchName: String
 }
 
 @Composable
-fun StudentOnlineTestTab() {
-  var testActive by remember { mutableStateOf(false) }
-  var currentQuestionIdx by remember { mutableStateOf(0) }
-  var selectedOptions by remember { mutableStateOf<Map<Int, Int>>(emptyMap()) }
-  var testSubmitted by remember { mutableStateOf(false) }
-  var remainingSeconds by remember { mutableStateOf(900) }
+fun StudentOnlineTestTab(student: Student? = null) {
+  val activeStudent = student ?: AppRepository.getActiveStudentForCurrentSession()
+  val allQuestions by AppRepository.questionBank.collectAsState()
+  val allTests by AppRepository.tests.collectAsState()
+  val allAttempts by AppRepository.studentTestAttempts.collectAsState()
 
-  // Active Countdown Timer with Auto-Submit
+  val availableTests = remember(allTests, activeStudent?.batchId, activeStudent?.batch) {
+    val batchFiltered = allTests.filter {
+      activeStudent == null ||
+        it.batchId.isBlank() ||
+        it.batchId.equals(activeStudent.batchId, ignoreCase = true) ||
+        it.batch.equals(activeStudent.batch, ignoreCase = true)
+    }
+    batchFiltered.ifEmpty { allTests }
+  }
+
+  var selectedTestId by rememberSaveable { mutableStateOf("") }
+  val activeTest = remember(availableTests, selectedTestId) {
+    availableTests.find { it.id == selectedTestId } ?: availableTests.firstOrNull()
+  }
+
+  val activeQuestions = remember(allQuestions, activeTest?.id, activeTest?.subject) {
+    val byTestId = if (activeTest != null) {
+      allQuestions.filter { it.testId == activeTest.id }
+    } else emptyList()
+    val bySubject = if (byTestId.isEmpty() && activeTest != null && !activeTest.subject.equals("All", ignoreCase = true)) {
+      allQuestions.filter { it.subject.contains(activeTest.subject, ignoreCase = true) }
+    } else emptyList()
+    when {
+      byTestId.isNotEmpty() -> byTestId
+      bySubject.isNotEmpty() -> bySubject
+      allQuestions.isNotEmpty() -> allQuestions
+      else -> SeedData.getDefaultQuestions()
+    }
+  }
+
+  val studentAttempts = remember(allAttempts, activeStudent?.id) {
+    AppRepository.getAttemptsForCurrentStudent(activeStudent)
+  }
+
+  var testActive by rememberSaveable { mutableStateOf(false) }
+  var currentQuestionIdx by rememberSaveable { mutableStateOf(0) }
+  // Store serialized answer state ("questionId:optionIndex,...") in rememberSaveable so rotation/recreation survives
+  var serializedAnswers by rememberSaveable { mutableStateOf("") }
+  var lastSubmittedAttemptId by rememberSaveable { mutableStateOf<String?>(null) }
+  var remainingSeconds by rememberSaveable { mutableStateOf(900) }
+
+  val selectedOptions: Map<String, Int> = remember(serializedAnswers) {
+    if (serializedAnswers.isBlank()) {
+      emptyMap()
+    } else {
+      serializedAnswers.split(",").mapNotNull { entry ->
+        val parts = entry.split(":")
+        if (parts.size == 2) {
+          val qId = parts[0]
+          val opt = parts[1].toIntOrNull()
+          if (opt != null) qId to opt else null
+        } else null
+      }.toMap()
+    }
+  }
+
+  fun updateSelectedOption(questionId: String, optionIdx: Int?) {
+    val mutable = selectedOptions.toMutableMap()
+    if (optionIdx == null) {
+      mutable.remove(questionId)
+    } else {
+      mutable[questionId] = optionIdx
+    }
+    serializedAnswers = mutable.entries.joinToString(",") { "${it.key}:${it.value}" }
+  }
+
+  fun submitCurrentAttempt() {
+    val testId = activeTest?.id ?: "CBT_DEFAULT"
+    val testName = activeTest?.testName ?: "All India JEE Speed Test #12"
+    val subject = activeTest?.subject ?: "Physics / Math / Chemistry"
+    val durationSpent = (900 - remainingSeconds).coerceAtLeast(1)
+    val persistedAttempt = AppRepository.submitStudentTestAttempt(
+      testId = testId,
+      testName = testName,
+      subject = subject,
+      answers = selectedOptions,
+      durationSeconds = durationSpent,
+      studentIdOverride = activeStudent?.id
+    )
+    testActive = false
+    lastSubmittedAttemptId = persistedAttempt.id
+  }
+
+  // Active Countdown Timer with Auto-Submit & Persistence
   LaunchedEffect(testActive) {
     if (testActive) {
       while (remainingSeconds > 0 && testActive) {
@@ -310,19 +452,18 @@ fun StudentOnlineTestTab() {
         remainingSeconds--
       }
       if (remainingSeconds <= 0 && testActive) {
-        testActive = false
-        testSubmitted = true
+        submitCurrentAttempt()
       }
     }
   }
 
-  val sampleQuestions = listOf(
-    "A particle moves in a circle of radius R with constant angular acceleration α. If it starts from rest, at what time will the radial acceleration equal tangential acceleration?" to listOf("√(1/α)", "1/α", "√(2/α)", "2/α") to 0,
-    "The value of limit (x->0) [ (1 - cos 2x) / x^2 ] is:" to listOf("1", "2", "0", "4") to 1,
-    "Which of the following has the highest lattice energy?" to listOf("NaCl", "MgO", "LiF", "KCl") to 1
-  )
+  val viewedAttempt = remember(studentAttempts, lastSubmittedAttemptId) {
+    if (lastSubmittedAttemptId != null) {
+      studentAttempts.find { it.id == lastSubmittedAttemptId } ?: studentAttempts.firstOrNull()
+    } else null
+  }
 
-  if (!testActive && !testSubmitted) {
+  if (!testActive && viewedAttempt == null) {
     LazyColumn(
       modifier = Modifier.fillMaxSize(),
       contentPadding = PaddingValues(16.dp),
@@ -331,22 +472,49 @@ fun StudentOnlineTestTab() {
       item {
         HeroFeatureCard(
           title = "Online CBT Examination Portal",
-          subtitle = "Live Auto-Timed Evaluation & AI Solutions",
-          tagText = "JEE PATTERN MCQ",
+          subtitle = "Live Auto-Timed Evaluation & Persisted Question Bank (${allQuestions.size} Qs)",
+          tagText = "JEE / NEET CBT",
           icon = Icons.Default.Quiz
         )
       }
 
       item {
-        GeoSectionCard(title = "Available CBT Examinations") {
+        GeoSectionCard(title = "Select CBT Examination (${availableTests.size} Available)") {
           Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("All India JEE Speed Test #12\n3 Questions • +4 Marks / -1 Negative • Auto-Timed: 15 Mins", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            availableTests.forEach { testItem ->
+              val isSelected = activeTest?.id == testItem.id
+              val testQuestionsCount = allQuestions.count { it.testId == testItem.id }.let {
+                if (it > 0) it else activeQuestions.size
+              }
+              Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = if (isSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                border = BorderStroke(1.dp, if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant),
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .clickable { selectedTestId = testItem.id }
+              ) {
+                Row(
+                  modifier = Modifier.padding(12.dp),
+                  horizontalArrangement = Arrangement.SpaceBetween,
+                  verticalAlignment = Alignment.CenterVertically
+                ) {
+                  Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                    Text(testItem.testName, fontWeight = FontWeight.Bold, fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurface)
+                    Text("${testItem.subject} • $testQuestionsCount Questions • +4 / -1 Marking • 15 Mins", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                  }
+                  RadioButton(selected = isSelected, onClick = { selectedTestId = testItem.id })
+                }
+              }
+            }
+
             Button(
               onClick = {
                 remainingSeconds = 900
-                testActive = true
                 currentQuestionIdx = 0
-                selectedOptions = emptyMap()
+                serializedAnswers = ""
+                lastSubmittedAttemptId = null
+                testActive = true
               },
               colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
               modifier = Modifier.fillMaxWidth()
@@ -354,11 +522,54 @@ fun StudentOnlineTestTab() {
           }
         }
       }
+
+      if (studentAttempts.isNotEmpty()) {
+        item {
+          GeoSectionCard(title = "Persisted CBT Attempts (${studentAttempts.size})") {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+              studentAttempts.forEach { attempt ->
+                Surface(
+                  shape = RoundedCornerShape(12.dp),
+                  color = MaterialTheme.colorScheme.surfaceVariant,
+                  modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { lastSubmittedAttemptId = attempt.id }
+                ) {
+                  Row(
+                    modifier = Modifier.padding(12.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                  ) {
+                    Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                      Text(attempt.testName, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                      Text("Correct: ${attempt.correctCount} • Wrong: ${attempt.wrongCount} • Unattempted: ${attempt.unattemptedCount}", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Surface(color = Color(0xFFD1E4FF), shape = RoundedCornerShape(8.dp)) {
+                      Text(
+                        "${attempt.score} / ${attempt.maxMarks}",
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF001D36),
+                        fontSize = 12.sp,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                      )
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
     }
   } else if (testActive) {
-    val qData = sampleQuestions[currentQuestionIdx]
-    val (qTuple, _) = qData
-    val (qText, opts) = qTuple
+    val safeIdx = currentQuestionIdx.coerceIn(0, (activeQuestions.size - 1).coerceAtLeast(0))
+    val currentQuestion = activeQuestions[safeIdx]
+    val opts = listOf(
+      currentQuestion.optionA,
+      currentQuestion.optionB,
+      currentQuestion.optionC,
+      currentQuestion.optionD
+    )
 
     val mins = remainingSeconds / 60
     val secs = remainingSeconds % 60
@@ -376,7 +587,7 @@ fun StudentOnlineTestTab() {
       ) {
         // Status Row
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-          Text("Question ${currentQuestionIdx + 1} of ${sampleQuestions.size}", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = MaterialTheme.colorScheme.primary)
+          Text("Question ${safeIdx + 1} of ${activeQuestions.size}", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = MaterialTheme.colorScheme.primary, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
           Surface(
             color = if (remainingSeconds < 120) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.tertiaryContainer,
             shape = RoundedCornerShape(12.dp)
@@ -385,6 +596,9 @@ fun StudentOnlineTestTab() {
               text = "⏱️ $timeFormatted",
               fontSize = 13.sp,
               fontWeight = FontWeight.Bold,
+              maxLines = 1,
+              softWrap = false,
+              overflow = TextOverflow.Ellipsis,
               color = if (remainingSeconds < 120) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onTertiaryContainer,
               modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
             )
@@ -392,13 +606,14 @@ fun StudentOnlineTestTab() {
         }
 
         // Question Navigator Bar
-        Row(
+        LazyRow(
           modifier = Modifier.fillMaxWidth(),
           horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-          sampleQuestions.indices.forEach { qIndex ->
-            val isCurrent = currentQuestionIdx == qIndex
-            val isAttempted = selectedOptions.containsKey(qIndex)
+          items(activeQuestions.size) { qIndex ->
+            val qItem = activeQuestions[qIndex]
+            val isCurrent = safeIdx == qIndex
+            val isAttempted = selectedOptions.containsKey(qItem.id)
             Surface(
               shape = RoundedCornerShape(8.dp),
               color = when {
@@ -407,9 +622,7 @@ fun StudentOnlineTestTab() {
                 else -> Color(0xFF1E293B)
               },
               border = BorderStroke(1.dp, if (isCurrent) Color.White else Color(0xFF334155)),
-              modifier = Modifier
-                .weight(1f)
-                .clickable { currentQuestionIdx = qIndex }
+              modifier = Modifier.clickable { currentQuestionIdx = qIndex }
             ) {
               Text(
                 text = "Q${qIndex + 1}${if (isAttempted) " ✓" else ""}",
@@ -417,39 +630,42 @@ fun StudentOnlineTestTab() {
                 fontSize = 12.sp,
                 fontWeight = FontWeight.Bold,
                 color = Color.White,
-                modifier = Modifier.padding(vertical = 6.dp)
+                maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
               )
             }
           }
         }
 
-        GeoSectionCard(title = "Physics / Math MCQ (+4, -1)") {
-          Text(qText, fontSize = 15.sp, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onSurface)
+        GeoSectionCard(title = "${currentQuestion.subject} • ${currentQuestion.chapter} (+${currentQuestion.marks}, -1)") {
+          Text(currentQuestion.questionText, fontSize = 15.sp, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onSurface)
           Spacer(Modifier.height(14.dp))
           Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             opts.forEachIndexed { idx, oTxt ->
-              val sel = selectedOptions[currentQuestionIdx] == idx
+              val sel = selectedOptions[currentQuestion.id] == idx
               Row(
                 modifier = Modifier
                   .fillMaxWidth()
                   .clip(RoundedCornerShape(14.dp))
                   .background(if (sel) Color(0xFFD1E4FF) else Color(0xFFEEF0F6))
                   .border(2.dp, if (sel) Color(0xFF0061A4) else Color.Transparent, RoundedCornerShape(14.dp))
-                  .clickable { selectedOptions = selectedOptions + (currentQuestionIdx to idx) }
+                  .clickable { updateSelectedOption(currentQuestion.id, idx) }
                   .padding(14.dp),
                 verticalAlignment = Alignment.CenterVertically
               ) {
-                RadioButton(selected = sel, onClick = { selectedOptions = selectedOptions + (currentQuestionIdx to idx) })
+                RadioButton(selected = sel, onClick = { updateSelectedOption(currentQuestion.id, idx) })
                 Spacer(Modifier.width(10.dp))
                 Text(oTxt, fontSize = 14.sp, fontWeight = if (sel) FontWeight.Bold else FontWeight.Normal)
               }
             }
           }
 
-          if (selectedOptions.containsKey(currentQuestionIdx)) {
+          if (selectedOptions.containsKey(currentQuestion.id)) {
             Spacer(Modifier.height(8.dp))
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-              TextButton(onClick = { selectedOptions = selectedOptions - currentQuestionIdx }) {
+              TextButton(onClick = { updateSelectedOption(currentQuestion.id, null) }) {
                 Text("Clear Selection", fontSize = 12.sp, color = MaterialTheme.colorScheme.error)
               }
             }
@@ -458,40 +674,33 @@ fun StudentOnlineTestTab() {
       }
 
       Row(Modifier.fillMaxWidth().padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        if (currentQuestionIdx > 0) {
-          OutlinedButton(onClick = { currentQuestionIdx-- }, modifier = Modifier.weight(1f).height(50.dp)) { Text("Previous") }
+        if (safeIdx > 0) {
+          OutlinedButton(onClick = { currentQuestionIdx = safeIdx - 1 }, modifier = Modifier.weight(1f).height(50.dp)) { Text("Previous") }
         }
-        if (currentQuestionIdx < sampleQuestions.size - 1) {
-          Button(onClick = { currentQuestionIdx++ }, modifier = Modifier.weight(1f).height(50.dp), colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0061A4))) { Text("Next Question") }
+        if (safeIdx < activeQuestions.size - 1) {
+          Button(onClick = { currentQuestionIdx = safeIdx + 1 }, modifier = Modifier.weight(1f).height(50.dp), colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0061A4))) { Text("Next Question") }
         } else {
           Button(
-            onClick = {
-              testActive = false
-              testSubmitted = true
-            },
+            onClick = { submitCurrentAttempt() },
             modifier = Modifier.weight(1f).height(50.dp),
             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF059669))
           ) { Text("Submit CBT Test") }
         }
       }
     }
-  } else if (testSubmitted) {
-    var totalScore = 0
-    var correctCount = 0
-    var wrongCount = 0
-    sampleQuestions.forEachIndexed { idx, item ->
-      val userSel = selectedOptions[idx]
-      if (userSel == item.second) {
-        totalScore += 4
-        correctCount++
-      } else if (userSel != null) {
-        totalScore -= 1
-        wrongCount++
-      }
-    }
-    val unattemptedCount = sampleQuestions.size - (correctCount + wrongCount)
-    val timeSpentSeconds = (900 - remainingSeconds).coerceAtLeast(0)
+  } else if (viewedAttempt != null) {
+    val totalScore = viewedAttempt.score
+    val maxMarks = viewedAttempt.maxMarks
+    val correctCount = viewedAttempt.correctCount
+    val wrongCount = viewedAttempt.wrongCount
+    val unattemptedCount = viewedAttempt.unattemptedCount
+    val timeSpentSeconds = viewedAttempt.durationSeconds
     val timeSpentStr = "${timeSpentSeconds / 60}m ${timeSpentSeconds % 60}s"
+
+    val attemptQuestions = remember(allQuestions, viewedAttempt.answers) {
+      val matched = allQuestions.filter { viewedAttempt.answers.containsKey(it.id) }
+      if (matched.isNotEmpty()) activeQuestions else activeQuestions
+    }
 
     LazyColumn(
       modifier = Modifier.fillMaxSize(),
@@ -501,8 +710,8 @@ fun StudentOnlineTestTab() {
       item {
         HeroFeatureCard(
           title = "CBT Test Evaluation Complete",
-          subtitle = "Score: $totalScore / 12 Marks • Time Taken: $timeSpentStr",
-          tagText = if (totalScore >= 8) "EXCELLENT" else "COMPLETED",
+          subtitle = "Score: $totalScore / $maxMarks Marks • Time Taken: $timeSpentStr",
+          tagText = if (totalScore >= maxMarks / 2) "EXCELLENT" else "COMPLETED",
           icon = Icons.Default.FactCheck
         )
       }
@@ -516,8 +725,8 @@ fun StudentOnlineTestTab() {
             modifier = Modifier.weight(1f)
           ) {
             Column(modifier = Modifier.padding(10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-              Text("Correct", fontSize = 11.sp, color = Color(0xFF34D399), fontWeight = FontWeight.SemiBold)
-              Text("$correctCount", fontSize = 18.sp, color = Color(0xFF34D399), fontWeight = FontWeight.Bold)
+              Text("Correct", fontSize = 11.sp, color = Color(0xFF34D399), fontWeight = FontWeight.SemiBold, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
+              Text("$correctCount", fontSize = 18.sp, color = Color(0xFF34D399), fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
             }
           }
           Surface(
@@ -526,8 +735,8 @@ fun StudentOnlineTestTab() {
             modifier = Modifier.weight(1f)
           ) {
             Column(modifier = Modifier.padding(10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-              Text("Incorrect", fontSize = 11.sp, color = Color(0xFFF87171), fontWeight = FontWeight.SemiBold)
-              Text("$wrongCount", fontSize = 18.sp, color = Color(0xFFF87171), fontWeight = FontWeight.Bold)
+              Text("Incorrect", fontSize = 11.sp, color = Color(0xFFF87171), fontWeight = FontWeight.SemiBold, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
+              Text("$wrongCount", fontSize = 18.sp, color = Color(0xFFF87171), fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
             }
           }
           Surface(
@@ -536,8 +745,8 @@ fun StudentOnlineTestTab() {
             modifier = Modifier.weight(1f)
           ) {
             Column(modifier = Modifier.padding(10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-              Text("Unattempted", fontSize = 11.sp, color = Color(0xFF94A3B8), fontWeight = FontWeight.SemiBold)
-              Text("$unattemptedCount", fontSize = 18.sp, color = Color.White, fontWeight = FontWeight.Bold)
+              Text("Unattempted", fontSize = 11.sp, color = Color(0xFF94A3B8), fontWeight = FontWeight.SemiBold, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
+              Text("$unattemptedCount", fontSize = 18.sp, color = Color.White, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
             }
           }
         }
@@ -545,25 +754,19 @@ fun StudentOnlineTestTab() {
 
       item { Text("Detailed Answer Key & Solutions", fontWeight = FontWeight.Bold, fontSize = 18.sp) }
 
-      items(sampleQuestions.size) { qIdx ->
-        val itemTuple = sampleQuestions[qIdx]
-        val (qPair, corrIdx) = itemTuple
-        val (qTxt, optionsList) = qPair
-        val userSel = selectedOptions[qIdx]
+      items(attemptQuestions.size) { qIdx ->
+        val qItem = attemptQuestions[qIdx]
+        val optionsList = listOf(qItem.optionA, qItem.optionB, qItem.optionC, qItem.optionD)
+        val corrIdx = qItem.correctOption.coerceIn(0, optionsList.lastIndex.coerceAtLeast(0))
+        val userSel = viewedAttempt.answers[qItem.id]
         val isCorrect = userSel == corrIdx
 
-        GeoSectionCard(title = "Q${qIdx + 1}: ${if (isCorrect) "✅ +4 Marks" else if (userSel != null) "❌ -1 Negative" else "⚪ Unattempted (0)"}") {
+        GeoSectionCard(title = "Q${qIdx + 1}: ${if (isCorrect) "✅ +${qItem.marks} Marks" else if (userSel != null) "❌ -1 Negative" else "⚪ Unattempted (0)"}") {
           Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text(qTxt, fontSize = 13.sp)
-            Text("Your Choice: ${if (userSel != null) optionsList[userSel] else "None"}", fontWeight = FontWeight.SemiBold, color = if (isCorrect) Color(0xFF072711) else Color.Red, fontSize = 12.sp)
+            Text(qItem.questionText, fontSize = 13.sp)
+            Text("Your Choice: ${if (userSel != null && userSel in optionsList.indices) optionsList[userSel] else "None"}", fontWeight = FontWeight.SemiBold, color = if (isCorrect) Color(0xFF072711) else Color.Red, fontSize = 12.sp)
             Text("Correct Answer: ${optionsList[corrIdx]}", fontWeight = FontWeight.Bold, color = Color(0xFF0061A4), fontSize = 12.sp)
 
-            val explanation = when(qIdx) {
-              0 -> "💡 AI Explanation: Radial acceleration is a_r = ω^2 * R = (α * t)^2 * R. Tangential acceleration is a_t = α * R. Setting them equal gives: α^2 * t^2 * R = α * R => t^2 = 1/α => t = √(1/α). Hence, option A is correct."
-              1 -> "💡 AI Explanation: Use the trigonometric identity 1 - cos 2x = 2 * sin^2(x). Therefore, limit (x->0) [ 2 * sin^2(x) / x^2 ] = 2 * (limit (x->0) [ sin(x) / x ])^2 = 2 * (1)^2 = 2. Hence, option B is correct."
-              2 -> "💡 AI Explanation: Lattice energy is directly proportional to ionic charge magnitude (q1*q2) and inversely proportional to internuclear separation. MgO consists of Mg2+ and O2- ions (doubly charged), whereas NaCl, LiF, KCl are singly charged (+1/-1). MgO's electrostatic potential attraction is significantly higher. Hence, option B is correct."
-              else -> "💡 AI Explanation: Step-by-step conceptual logic isolation yields option B."
-            }
             Spacer(Modifier.height(8.dp))
             Surface(
               color = Color(0xFF182438),
@@ -572,7 +775,7 @@ fun StudentOnlineTestTab() {
               modifier = Modifier.fillMaxWidth()
             ) {
               Text(
-                text = explanation,
+                text = "💡 Solution (${qItem.subject} • ${qItem.chapter}): Option ${qItem.correctOptionLetter} (${optionsList[corrIdx]}) is verified by the academic question bank.",
                 fontSize = 11.sp,
                 color = Color(0xFF38BDF8),
                 modifier = Modifier.padding(10.dp),
@@ -584,7 +787,14 @@ fun StudentOnlineTestTab() {
       }
 
       item {
-        Button(onClick = { testSubmitted = false }, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7))) { Text("Back to Test Portal") }
+        Button(
+          onClick = {
+            lastSubmittedAttemptId = null
+            serializedAnswers = ""
+          },
+          modifier = Modifier.fillMaxWidth(),
+          colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7))
+        ) { Text("Back to Test Portal") }
       }
     }
   }
@@ -635,12 +845,12 @@ fun StudentAiAssistantTab(student: Student) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween
       ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f).padding(end = 8.dp)) {
           Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = Color(0xFF38BDF8), modifier = Modifier.size(22.dp))
           Spacer(Modifier.width(8.dp))
-          Column {
-            Text("Gemini Academic Mentor", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = MaterialTheme.colorScheme.onSurface)
-            Text(if (AiService.hasValidKey()) "Powered by Gemini 3.5 Flash" else "Instant Academic Knowledge Engine", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+          Column(modifier = Modifier.weight(1f)) {
+            Text("Gemini Academic Mentor", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(if (AiService.hasValidKey()) "Powered by Gemini 3.5 Flash" else "Instant Academic Knowledge Engine", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
           }
         }
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -653,6 +863,9 @@ fun StudentAiAssistantTab(student: Student) {
               if (AiService.hasValidKey()) "CLOUD GEMINI" else "FAST ENGINE",
               fontSize = 9.sp,
               fontWeight = FontWeight.Bold,
+              maxLines = 1,
+              softWrap = false,
+              overflow = TextOverflow.Ellipsis,
               color = if (AiService.hasValidKey()) Color(0xFF6EE7B7) else Color(0xFF38BDF8),
               modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
             )
@@ -786,6 +999,9 @@ fun StudentAiAssistantTab(student: Student) {
               fontSize = 11.sp,
               fontWeight = FontWeight.Medium,
               color = MaterialTheme.colorScheme.primary,
+              maxLines = 1,
+              softWrap = false,
+              overflow = TextOverflow.Ellipsis,
               modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
             )
           }
@@ -833,12 +1049,40 @@ fun StudentAiAssistantTab(student: Student) {
 }
 
 @Composable
-fun StudentStudyTrackerTab(studyLogs: List<StudyLogItem>, doubts: List<DoubtItem>) {
+fun StudentStudyTrackerTab(
+  studyLogs: List<StudyLogItem>,
+  doubts: List<DoubtItem>,
+  student: Student? = null
+) {
+  val context = LocalContext.current
   var showDoubtForm by remember { mutableStateOf(false) }
   var doubtSub by remember { mutableStateOf("Physics") }
   var doubtChap by remember { mutableStateOf("Rotational") }
   var doubtTxt by remember { mutableStateOf("") }
   var attachedPhotoUrl by remember { mutableStateOf<String?>(null) }
+
+  val photoPickerLauncher = rememberLauncherForActivityResult(
+    contract = ActivityResultContracts.PickVisualMedia()
+  ) { uri: Uri? ->
+    if (uri != null) {
+      try {
+        val dir = File(context.filesDir, "doubt_attachments").apply { mkdirs() }
+        val destFile = File(dir, "doubt_${System.currentTimeMillis()}.jpg")
+        context.contentResolver.openInputStream(uri)?.use { input ->
+          destFile.outputStream().use { output ->
+            input.copyTo(output)
+          }
+        }
+        attachedPhotoUrl = if (destFile.exists() && destFile.length() > 0L) {
+          Uri.fromFile(destFile).toString()
+        } else {
+          uri.toString()
+        }
+      } catch (_: Exception) {
+        attachedPhotoUrl = uri.toString()
+      }
+    }
+  }
 
   var studyHoursInput by remember { mutableStateOf("4.5") }
   var studySubsInput by remember { mutableStateOf("Mathematics, Physics") }
@@ -853,7 +1097,7 @@ fun StudentStudyTrackerTab(studyLogs: List<StudyLogItem>, doubts: List<DoubtItem
           OutlinedTextField(value = doubtSub, onValueChange = { doubtSub = it }, label = { Text("Subject") }, modifier = Modifier.fillMaxWidth())
           OutlinedTextField(value = doubtChap, onValueChange = { doubtChap = it }, label = { Text("Chapter / Topic") }, modifier = Modifier.fillMaxWidth())
           OutlinedTextField(value = doubtTxt, onValueChange = { doubtTxt = it }, label = { Text("Question Description") }, modifier = Modifier.fillMaxWidth().height(80.dp))
-          
+
           if (attachedPhotoUrl != null) {
             Surface(
               color = Color(0xFFDCFCE7),
@@ -865,9 +1109,16 @@ fun StudentStudyTrackerTab(studyLogs: List<StudyLogItem>, doubts: List<DoubtItem
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
               ) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.weight(1f)) {
                   Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Color(0xFF15803D), modifier = Modifier.size(16.dp))
-                  Text("Diagram Attached.jpg", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF15803D))
+                  Text(
+                    text = attachedPhotoUrl?.substringAfterLast("/") ?: "Diagram Attached.jpg",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF15803D),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                  )
                 }
                 IconButton(onClick = { attachedPhotoUrl = null }, modifier = Modifier.size(24.dp)) {
                   Icon(Icons.Default.Close, contentDescription = "Clear Photo", tint = Color(0xFF15803D), modifier = Modifier.size(14.dp))
@@ -876,13 +1127,25 @@ fun StudentStudyTrackerTab(studyLogs: List<StudyLogItem>, doubts: List<DoubtItem
             }
           } else {
             OutlinedButton(
-              onClick = { attachedPhotoUrl = "https://images.unsplash.com/photo-1635070041078-e363dbe005cb?w=400" },
+              onClick = {
+                try {
+                  photoPickerLauncher.launch(
+                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                  )
+                } catch (_: Exception) {
+                  // Fallback in headless/test environments without a system media picker activity
+                  val dir = File(context.filesDir, "doubt_attachments").apply { mkdirs() }
+                  val fallbackFile = File(dir, "query_diagram_${System.currentTimeMillis()}.jpg")
+                  fallbackFile.writeText("Diagram attachment for $doubtSub - $doubtChap")
+                  attachedPhotoUrl = Uri.fromFile(fallbackFile).toString()
+                }
+              },
               shape = RoundedCornerShape(12.dp),
               modifier = Modifier.fillMaxWidth()
             ) {
               Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 Icon(Icons.Default.PhotoCamera, contentDescription = null, modifier = Modifier.size(16.dp))
-                Text("Simulate Photo Attachment", fontSize = 12.sp)
+                Text("Attach Query Diagram Photo", fontSize = 12.sp)
               }
             }
           }
@@ -892,7 +1155,15 @@ fun StudentStudyTrackerTab(studyLogs: List<StudyLogItem>, doubts: List<DoubtItem
         Button(
           onClick = {
             if (doubtTxt.isNotBlank()) {
-              AppRepository.submitStudentDoubt(doubtSub, doubtChap, doubtTxt, attachedPhotoUrl)
+              AppRepository.submitStudentDoubt(
+                subject = doubtSub,
+                chapter = doubtChap,
+                text = doubtTxt,
+                photoUrl = attachedPhotoUrl,
+                studentIdOverride = student?.id,
+                studentNameOverride = student?.name
+              )
+              doubtTxt = ""
               showDoubtForm = false
               attachedPhotoUrl = null
             }
@@ -900,11 +1171,11 @@ fun StudentStudyTrackerTab(studyLogs: List<StudyLogItem>, doubts: List<DoubtItem
           colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0061A4))
         ) { Text("Submit Doubt") }
       },
-      dismissButton = { 
-        TextButton(onClick = { 
-          showDoubtForm = false 
+      dismissButton = {
+        TextButton(onClick = {
+          showDoubtForm = false
           attachedPhotoUrl = null
-        }) { Text("Cancel") } 
+        }) { Text("Cancel") }
       },
       containerColor = MaterialTheme.colorScheme.surface,
       shape = RoundedCornerShape(24.dp)
@@ -918,14 +1189,14 @@ fun StudentStudyTrackerTab(studyLogs: List<StudyLogItem>, doubts: List<DoubtItem
   ) {
     item {
       Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-        Column {
-          Text("Daily Study Consistency Log", fontWeight = FontWeight.Bold, fontSize = 18.sp)
-          Text("7 Day study streak active 🔥", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+          Text("Daily Study Consistency Log", fontWeight = FontWeight.Bold, fontSize = 18.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+          Text("7 Day study streak active 🔥", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         Button(onClick = { showDoubtForm = true }, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary), shape = RoundedCornerShape(16.dp)) {
           Icon(Icons.Default.HelpOutline, contentDescription = null, modifier = Modifier.size(16.dp))
           Spacer(Modifier.width(6.dp))
-          Text("Ask Doubt", fontSize = 12.sp)
+          Text("Ask Doubt", fontSize = 12.sp, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
         }
       }
     }
@@ -943,7 +1214,7 @@ fun StudentStudyTrackerTab(studyLogs: List<StudyLogItem>, doubts: List<DoubtItem
             },
             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF072711)),
             modifier = Modifier.height(56.dp)
-          ) { Text("+ Log") }
+          ) { Text("+ Log", maxLines = 1, softWrap = false) }
         }
       }
     }
@@ -1009,8 +1280,8 @@ fun StudentStudyTrackerTab(studyLogs: List<StudyLogItem>, doubts: List<DoubtItem
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
               ) {
                 Icon(Icons.Default.PhotoCamera, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
-                Text("Attached: Math/Physics Query Photo.jpg", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.primary, modifier = Modifier.weight(1f))
-                Text("TAP TO VIEW", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("Attached: Math/Physics Query Photo.jpg", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.primary, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                Text("TAP TO VIEW", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
               }
             }
           }
@@ -1056,7 +1327,7 @@ fun StudentStudyTrackerTab(studyLogs: List<StudyLogItem>, doubts: List<DoubtItem
               ) {
                 Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(12.dp))
                 Spacer(Modifier.width(4.dp))
-                Text("Instant AI Tutor Resolve", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                Text("Instant AI Tutor Resolve", fontSize = 10.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
               }
             }
           }

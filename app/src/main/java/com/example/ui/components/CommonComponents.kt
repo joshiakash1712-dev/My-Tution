@@ -106,7 +106,7 @@ fun GeoHeader(
           )
         }
 
-        Column {
+        Column(modifier = Modifier.weight(1f)) {
           Text(
             text = instituteConfig.instituteName.ifBlank { "Fadat Science Institute" },
             fontWeight = FontWeight.Bold,
@@ -114,6 +114,7 @@ fun GeoHeader(
             letterSpacing = (-0.2).sp,
             color = MaterialTheme.colorScheme.onSurface,
             maxLines = 1,
+            softWrap = false,
             overflow = TextOverflow.Ellipsis
           )
           Text(
@@ -122,6 +123,7 @@ fun GeoHeader(
             letterSpacing = (-0.1).sp,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             maxLines = 1,
+            softWrap = false,
             overflow = TextOverflow.Ellipsis
           )
         }
@@ -155,16 +157,20 @@ fun GeoHeader(
             Box(
               modifier = Modifier
                 .offset(x = 2.dp, y = (-2).dp)
-                .size(16.dp)
+                .defaultMinSize(minWidth = 16.dp, minHeight = 16.dp)
                 .clip(CircleShape)
-                .background(Color(0xFFEF4444)),
+                .background(Color(0xFFEF4444))
+                .padding(horizontal = 3.dp),
               contentAlignment = Alignment.Center
             ) {
               Text(
                 text = "$unreadCount",
                 color = Color.White,
                 fontSize = 9.sp,
-                fontWeight = FontWeight.Bold
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Ellipsis
               )
             }
           }
@@ -217,7 +223,8 @@ fun GeoHeader(
                 color = MaterialTheme.colorScheme.onSurface,
                 lineHeight = 12.sp,
                 maxLines = 1,
-                softWrap = false
+                softWrap = false,
+                overflow = TextOverflow.Ellipsis
               )
               Row(
                 verticalAlignment = Alignment.CenterVertically,
@@ -235,7 +242,8 @@ fun GeoHeader(
                   color = MaterialTheme.colorScheme.onSurfaceVariant,
                   fontWeight = FontWeight.Medium,
                   maxLines = 1,
-                  softWrap = false
+                  softWrap = false,
+                  overflow = TextOverflow.Ellipsis
                 )
               }
             }
@@ -301,6 +309,9 @@ fun HeroFeatureCard(
             color = MaterialTheme.colorScheme.onPrimaryContainer,
             fontSize = 10.sp,
             fontWeight = FontWeight.Bold,
+            maxLines = 1,
+            softWrap = false,
+            overflow = TextOverflow.Ellipsis,
             modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
           )
         }
@@ -437,6 +448,7 @@ fun GeoSectionCard(
           fontSize = 11.sp,
           fontWeight = FontWeight.Bold,
           maxLines = 1,
+          softWrap = false,
           overflow = TextOverflow.Ellipsis,
           modifier = Modifier.clickable { onActionClick() }
         )
@@ -595,7 +607,7 @@ fun MetricBox(title: String, bigVal: String, subVal: String, bg: Color, tx: Colo
       .padding(16.dp)
   ) {
     Column {
-      Text(title, fontSize = 12.sp, fontWeight = FontWeight.Medium, color = Color(0xFF94A3B8), maxLines = 1, overflow = TextOverflow.Ellipsis)
+      Text(title, fontSize = 12.sp, fontWeight = FontWeight.Medium, color = Color(0xFF94A3B8), maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
       Spacer(Modifier.height(6.dp))
       HeroStatText(text = bigVal, color = if (tx == Color(0xFF001D36) || tx == Color(0xFF0F172A) || tx == Color(0xFF072711) || tx == Color(0xFF2B1236)) Color(0xFF38BDF8) else tx, maxLines = 1, overflow = TextOverflow.Ellipsis)
       Spacer(Modifier.height(2.dp))
@@ -656,7 +668,8 @@ fun NotificationsModalDialog(onDismiss: () -> Unit) {
       ) {
         Row(
           verticalAlignment = Alignment.CenterVertically,
-          horizontalArrangement = Arrangement.spacedBy(10.dp)
+          horizontalArrangement = Arrangement.spacedBy(10.dp),
+          modifier = Modifier.weight(1f)
         ) {
           Box(
             modifier = Modifier
@@ -672,7 +685,7 @@ fun NotificationsModalDialog(onDismiss: () -> Unit) {
               modifier = Modifier.size(22.dp)
             )
           }
-          Column {
+          Column(modifier = Modifier.weight(1f)) {
             Row(
               verticalAlignment = Alignment.CenterVertically,
               horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -681,7 +694,11 @@ fun NotificationsModalDialog(onDismiss: () -> Unit) {
                 text = "Notification Center",
                 fontWeight = FontWeight.Bold,
                 fontSize = 18.sp,
-                color = MaterialTheme.colorScheme.onSurface
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false)
               )
               if (unreadCount > 0) {
                 Surface(
@@ -693,6 +710,9 @@ fun NotificationsModalDialog(onDismiss: () -> Unit) {
                     fontSize = 10.sp,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onError,
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                   )
                 }
@@ -701,7 +721,9 @@ fun NotificationsModalDialog(onDismiss: () -> Unit) {
             Text(
               text = "Institute Alerts, Updates & Academic Notices",
               fontSize = 11.sp,
-              color = MaterialTheme.colorScheme.onSurfaceVariant
+              color = MaterialTheme.colorScheme.onSurfaceVariant,
+              maxLines = 1,
+              overflow = TextOverflow.Ellipsis
             )
           }
         }
@@ -784,11 +806,14 @@ fun NotificationsModalDialog(onDismiss: () -> Unit) {
               tint = if (isLowBandwidthMode) Color(0xFF34D399) else MaterialTheme.colorScheme.primary,
               modifier = Modifier.size(17.dp)
             )
-            Column {
+            Column(modifier = Modifier.weight(1f)) {
               Text(
                 text = if (isLowBandwidthMode) "⚡ Data Saver Active (Low-Bandwidth Mode)" else "Data Saver: Off (Standard Bandwidth)",
                 fontSize = 11.sp,
                 fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Ellipsis,
                 color = if (isLowBandwidthMode) Color.White else MaterialTheme.colorScheme.onSurface
               )
               Text(
@@ -840,6 +865,9 @@ fun NotificationsModalDialog(onDismiss: () -> Unit) {
               text = "Mark All Read",
               fontSize = 12.sp,
               fontWeight = FontWeight.Bold,
+              maxLines = 1,
+              softWrap = false,
+              overflow = TextOverflow.Ellipsis,
               color = if (unreadCount > 0) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
             )
           }
@@ -869,6 +897,9 @@ fun NotificationsModalDialog(onDismiss: () -> Unit) {
               text = "Delete All",
               fontSize = 12.sp,
               fontWeight = FontWeight.Bold,
+              maxLines = 1,
+              softWrap = false,
+              overflow = TextOverflow.Ellipsis,
               color = if (notifications.isNotEmpty()) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
             )
           }
@@ -903,6 +934,9 @@ fun NotificationsModalDialog(onDismiss: () -> Unit) {
                 text = filterName,
                 fontSize = 12.sp,
                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Ellipsis,
                 color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
               )
               if (count > 0) {
@@ -914,6 +948,9 @@ fun NotificationsModalDialog(onDismiss: () -> Unit) {
                     text = "$count",
                     fontSize = 10.sp,
                     fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Ellipsis,
                     color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.primary,
                     modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp)
                   )
@@ -1007,7 +1044,8 @@ fun NotificationsModalDialog(onDismiss: () -> Unit) {
               ) {
                 Row(
                   verticalAlignment = Alignment.CenterVertically,
-                  horizontalArrangement = Arrangement.spacedBy(6.dp)
+                  horizontalArrangement = Arrangement.spacedBy(6.dp),
+                  modifier = Modifier.weight(1f)
                 ) {
                   Icon(
                     imageVector = Icons.Default.CloudDone,
@@ -1019,6 +1057,9 @@ fun NotificationsModalDialog(onDismiss: () -> Unit) {
                     text = "LIVE CLOUD BROADCASTS (${activeAnnouncements.size})",
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Ellipsis,
                     color = Color(0xFF0284C7)
                   )
                 }
@@ -1032,6 +1073,9 @@ fun NotificationsModalDialog(onDismiss: () -> Unit) {
                       text = "⚡ Cached (Zero Latency)",
                       fontSize = 9.sp,
                       fontWeight = FontWeight.Bold,
+                      maxLines = 1,
+                      softWrap = false,
+                      overflow = TextOverflow.Ellipsis,
                       color = Color(0xFF0369A1),
                       modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                     )
@@ -1100,9 +1144,13 @@ fun NotificationsModalDialog(onDismiss: () -> Unit) {
                           text = annc.title,
                           fontWeight = FontWeight.Bold,
                           fontSize = 13.sp,
-                          color = MaterialTheme.colorScheme.onSurface
+                          color = MaterialTheme.colorScheme.onSurface,
+                          maxLines = 1,
+                          overflow = TextOverflow.Ellipsis,
+                          modifier = Modifier.weight(1f, fill = false)
                         )
                       }
+                      Spacer(modifier = Modifier.width(6.dp))
                       Surface(
                         color = audienceBg,
                         shape = RoundedCornerShape(6.dp)
@@ -1112,6 +1160,9 @@ fun NotificationsModalDialog(onDismiss: () -> Unit) {
                           fontSize = 9.sp,
                           fontWeight = FontWeight.Bold,
                           color = audienceTextColor,
+                          maxLines = 1,
+                          softWrap = false,
+                          overflow = TextOverflow.Ellipsis,
                           modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                         )
                       }
@@ -1133,12 +1184,19 @@ fun NotificationsModalDialog(onDismiss: () -> Unit) {
                         text = "Sender: ${annc.sender}",
                         fontSize = 10.sp,
                         fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
                       )
+                      Spacer(modifier = Modifier.width(8.dp))
                       Text(
                         text = annc.dateStr.ifBlank { "Live Broadcast" },
                         fontSize = 10.sp,
-                        color = MaterialTheme.colorScheme.outline
+                        color = MaterialTheme.colorScheme.outline,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis
                       )
                     }
                   }
@@ -1174,6 +1232,9 @@ fun NotificationsModalDialog(onDismiss: () -> Unit) {
                         text = "Loading older broadcasts...",
                         fontSize = 11.sp,
                         fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis,
                         color = MaterialTheme.colorScheme.primary
                       )
                     } else {
@@ -1188,6 +1249,9 @@ fun NotificationsModalDialog(onDismiss: () -> Unit) {
                         text = "Load Older Broadcasts (Page ${announcementsPagination.currentPage + 1})",
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis,
                         color = MaterialTheme.colorScheme.primary
                       )
                     }
@@ -1215,6 +1279,9 @@ fun NotificationsModalDialog(onDismiss: () -> Unit) {
                     text = "LOCAL NOTIFICATIONS & ALERTS (${filteredList.size})",
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Ellipsis,
                     color = MaterialTheme.colorScheme.primary
                   )
                 }
@@ -1316,6 +1383,9 @@ fun NotificationsModalDialog(onDismiss: () -> Unit) {
                           fontSize = 9.sp,
                           fontWeight = FontWeight.Bold,
                           color = categoryColor,
+                          maxLines = 1,
+                          softWrap = false,
+                          overflow = TextOverflow.Ellipsis,
                           modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                         )
                       }
@@ -1329,6 +1399,9 @@ fun NotificationsModalDialog(onDismiss: () -> Unit) {
                             fontSize = 8.sp,
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.onPrimary,
+                            maxLines = 1,
+                            softWrap = false,
+                            overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
                           )
                         }
@@ -1384,7 +1457,10 @@ fun NotificationsModalDialog(onDismiss: () -> Unit) {
                       Text(
                         text = item.time,
                         fontSize = 10.sp,
-                        color = MaterialTheme.colorScheme.outline
+                        color = MaterialTheme.colorScheme.outline,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis
                       )
                     }
 
@@ -1393,13 +1469,19 @@ fun NotificationsModalDialog(onDismiss: () -> Unit) {
                         text = "Tap to mark read",
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Medium,
-                        color = MaterialTheme.colorScheme.primary
+                        color = MaterialTheme.colorScheme.primary,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis
                       )
                     } else {
                       Text(
                         text = "Read",
                         fontSize = 10.sp,
-                        color = MaterialTheme.colorScheme.outline
+                        color = MaterialTheme.colorScheme.outline,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis
                       )
                     }
                   }
@@ -1560,7 +1642,8 @@ fun GlobalSearchDialog(onDismiss: () -> Unit) {
         ) {
           Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            modifier = Modifier.weight(1f)
           ) {
             Box(
               modifier = Modifier
@@ -1576,17 +1659,23 @@ fun GlobalSearchDialog(onDismiss: () -> Unit) {
                 modifier = Modifier.size(22.dp)
               )
             }
-            Column {
+            Column(modifier = Modifier.weight(1f)) {
               Text(
                 text = "Global Institute Search",
                 fontWeight = FontWeight.Bold,
                 fontSize = 17.sp,
-                color = Color.White
+                color = Color.White,
+                maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Ellipsis
               )
               Text(
                 text = "Search across students, staff, batches & fee dues",
                 fontSize = 11.sp,
-                color = Color(0xFF94A3B8)
+                color = Color(0xFF94A3B8),
+                maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Ellipsis
               )
             }
           }
@@ -1654,6 +1743,9 @@ fun GlobalSearchDialog(onDismiss: () -> Unit) {
                 fontSize = 12.sp,
                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                 color = if (isSelected) Color.White else Color(0xFF94A3B8),
+                maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
               )
             }
@@ -1689,7 +1781,7 @@ fun GlobalSearchDialog(onDismiss: () -> Unit) {
                   horizontalArrangement = Arrangement.SpaceBetween,
                   verticalAlignment = Alignment.CenterVertically
                 ) {
-                  Text("STUDENTS (${filteredStudents.size})", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF60A5FA))
+                  Text("STUDENTS (${filteredStudents.size})", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF60A5FA), maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
                 }
               }
               items(filteredStudents) { student ->
@@ -1721,14 +1813,17 @@ fun GlobalSearchDialog(onDismiss: () -> Unit) {
                           student.name.take(1).uppercase(),
                           fontWeight = FontWeight.Bold,
                           color = Color(0xFF93C5FD),
-                          fontSize = 14.sp
+                          fontSize = 14.sp,
+                          maxLines = 1,
+                          softWrap = false
                         )
                       }
-                      Column {
-                        Text(student.name, fontWeight = FontWeight.Bold, color = Color.White, fontSize = 13.sp)
-                        Text("${student.id} • ${student.batch}", color = Color(0xFF94A3B8), fontSize = 11.sp)
+                      Column(modifier = Modifier.weight(1f)) {
+                        Text(student.name, fontWeight = FontWeight.Bold, color = Color.White, fontSize = 13.sp, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
+                        Text("${student.id} • ${student.batch}", color = Color(0xFF94A3B8), fontSize = 11.sp, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
                       }
                     }
+                    Spacer(Modifier.width(8.dp))
 
                     Surface(
                       color = when (student.status) {
@@ -1743,6 +1838,9 @@ fun GlobalSearchDialog(onDismiss: () -> Unit) {
                         color = Color.White,
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                       )
                     }
@@ -1755,7 +1853,7 @@ fun GlobalSearchDialog(onDismiss: () -> Unit) {
             if (filteredTeachers.isNotEmpty()) {
               item {
                 Spacer(modifier = Modifier.height(4.dp))
-                Text("FACULTY & STAFF (${filteredTeachers.size})", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF38BDF8))
+                Text("FACULTY & STAFF (${filteredTeachers.size})", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF38BDF8), maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
               }
               items(filteredTeachers) { teacher ->
                 Surface(
@@ -1783,11 +1881,12 @@ fun GlobalSearchDialog(onDismiss: () -> Unit) {
                       ) {
                         Icon(Icons.Default.Badge, contentDescription = null, tint = Color(0xFF7DD3FC), modifier = Modifier.size(18.dp))
                       }
-                      Column {
-                        Text(teacher.name, fontWeight = FontWeight.Bold, color = Color.White, fontSize = 13.sp)
-                        Text("${teacher.subject} • ${teacher.contact}", color = Color(0xFF94A3B8), fontSize = 11.sp)
+                      Column(modifier = Modifier.weight(1f)) {
+                        Text(teacher.name, fontWeight = FontWeight.Bold, color = Color.White, fontSize = 13.sp, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
+                        Text("${teacher.subject} • ${teacher.contact}", color = Color(0xFF94A3B8), fontSize = 11.sp, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
                       }
                     }
+                    Spacer(Modifier.width(8.dp))
 
                     Surface(
                       color = Color(0xFF075985),
@@ -1798,6 +1897,9 @@ fun GlobalSearchDialog(onDismiss: () -> Unit) {
                         color = Color.White,
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                       )
                     }
@@ -1810,7 +1912,7 @@ fun GlobalSearchDialog(onDismiss: () -> Unit) {
             if (filteredBatches.isNotEmpty()) {
               item {
                 Spacer(modifier = Modifier.height(4.dp))
-                Text("ACADEMIC BATCHES (${filteredBatches.size})", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFFFBBF24))
+                Text("ACADEMIC BATCHES (${filteredBatches.size})", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFFFBBF24), maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
               }
               items(filteredBatches) { batch ->
                 Surface(
@@ -1838,11 +1940,12 @@ fun GlobalSearchDialog(onDismiss: () -> Unit) {
                       ) {
                         Icon(Icons.Default.Class, contentDescription = null, tint = Color(0xFFFBBF24), modifier = Modifier.size(18.dp))
                       }
-                      Column {
-                        Text(batch.name, fontWeight = FontWeight.Bold, color = Color.White, fontSize = 13.sp)
-                        Text("${batch.schedule} • ${batch.teacherName}", color = Color(0xFF94A3B8), fontSize = 11.sp)
+                      Column(modifier = Modifier.weight(1f)) {
+                        Text(batch.name, fontWeight = FontWeight.Bold, color = Color.White, fontSize = 13.sp, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
+                        Text("${batch.schedule} • ${batch.teacherName}", color = Color(0xFF94A3B8), fontSize = 11.sp, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
                       }
                     }
+                    Spacer(Modifier.width(8.dp))
 
                     Surface(
                       color = Color(0xFF78350F),
@@ -1853,6 +1956,9 @@ fun GlobalSearchDialog(onDismiss: () -> Unit) {
                         color = Color.White,
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                       )
                     }
@@ -1865,7 +1971,7 @@ fun GlobalSearchDialog(onDismiss: () -> Unit) {
             if (filteredFees.isNotEmpty()) {
               item {
                 Spacer(modifier = Modifier.height(4.dp))
-                Text("FEE LEDGERS & DUES (${filteredFees.size})", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFFF87171))
+                Text("FEE LEDGERS & DUES (${filteredFees.size})", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFFF87171), maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
               }
               items(filteredFees) { fee ->
                 Surface(
@@ -1893,11 +1999,12 @@ fun GlobalSearchDialog(onDismiss: () -> Unit) {
                       ) {
                         Icon(Icons.Default.AccountBalanceWallet, contentDescription = null, tint = Color(0xFFF87171), modifier = Modifier.size(18.dp))
                       }
-                      Column {
-                        Text(fee.studentName, fontWeight = FontWeight.Bold, color = Color.White, fontSize = 13.sp)
-                        Text("Due: ₹${String.format(Locale.US, "%,d", fee.pendingAmount)} • Total: ₹${String.format(Locale.US, "%,d", fee.feeAmount)}", color = Color(0xFFCBD5E1), fontSize = 11.sp)
+                      Column(modifier = Modifier.weight(1f)) {
+                        Text(fee.studentName, fontWeight = FontWeight.Bold, color = Color.White, fontSize = 13.sp, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
+                        Text("Due: ₹${String.format(Locale.US, "%,d", fee.pendingAmount)} • Total: ₹${String.format(Locale.US, "%,d", fee.feeAmount)}", color = Color(0xFFCBD5E1), fontSize = 11.sp, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
                       }
                     }
+                    Spacer(Modifier.width(8.dp))
 
                     Surface(
                       color = if (fee.paymentStatus == "Overdue") Color(0xFF991B1B) else Color(0xFF854D0E),
@@ -1908,6 +2015,9 @@ fun GlobalSearchDialog(onDismiss: () -> Unit) {
                         color = Color.White,
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                       )
                     }
@@ -2056,6 +2166,9 @@ fun SectionEmptyState(
                 text = actionLabel,
                 fontSize = 12.sp,
                 fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Ellipsis,
                 color = if (accentColor == Color(0xFF38BDF8) || accentColor == Color(0xFF4ADE80) || accentColor == Color(0xFFFBBF24)) Color(0xFF0F172A) else Color.White
               )
             }
@@ -2073,7 +2186,10 @@ fun SectionEmptyState(
               Text(
                 text = secondaryActionLabel,
                 fontSize = 12.sp,
-                fontWeight = FontWeight.SemiBold
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Ellipsis
               )
             }
           }

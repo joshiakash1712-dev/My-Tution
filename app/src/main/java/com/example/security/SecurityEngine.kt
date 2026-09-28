@@ -2,10 +2,14 @@ package com.example.security
 
 import android.util.Log
 import com.example.data.UserRole
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.withContext
+import java.security.MessageDigest
+import java.security.SecureRandom
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -39,20 +43,48 @@ data class SaltedCredential(
 
 object SecurityEngine {
   private const val TAG = "SecurityEngine"
+  private const val SESSION_TTL_MS = 7L * 24 * 60 * 60 * 1000L // 7 days
 
   // Brute Force Protection Tracking
-  private val failedAttempts = mutableMapOf<String, Int>()
-  private val lockoutUntil = mutableMapOf<String, Long>()
+  private val failedAttempts = java.util.concurrent.ConcurrentHashMap<String, Int>()
+  private val lockoutUntil = java.util.concurrent.ConcurrentHashMap<String, Long>()
 
   // Cryptographic BCrypt Salted Credential Vault (No Plaintext Passwords Stored)
-  private val credentialVault = mutableMapOf<String, SaltedCredential>()
+  private val credentialVault = java.util.concurrent.ConcurrentHashMap<String, SaltedCredential>()
   private const val PREFS_VAULT = "fsi_security_credential_vault"
+  private const val KEY_ACTIVE_SESSION = "active_session_record"
   private var prefs: android.content.SharedPreferences? = null
+  private val secureRandom = SecureRandom()
+
+  @Volatile
+  private var activeSessionRecord: SessionTokenRecord? = null
+
+  private data class SessionTokenRecord(
+    val identifier: String,
+    val tokenSha256: String,
+    val role: UserRole,
+    val expiresAt: Long
+  )
 
   fun initialize(context: android.content.Context) {
     if (prefs == null) {
       prefs = context.applicationContext.getSharedPreferences(PREFS_VAULT, android.content.Context.MODE_PRIVATE)
-      loadPersistedCredentials()
+    }
+    purgeLegacyPlaintextCacheKeys()
+    loadPersistedCredentials()
+    loadPersistedSessionRecord()
+  }
+
+  /**
+   * Purges any legacy keys that ever used a prefix like "def_hash_" from SharedPreferences.
+   */
+  private fun purgeLegacyPlaintextCacheKeys() {
+    val p = prefs ?: return
+    val legacyKeys = p.all.keys.filter { it.startsWith("def_hash_") }
+    if (legacyKeys.isNotEmpty()) {
+      val editor = p.edit()
+      legacyKeys.forEach { editor.remove(it) }
+      editor.apply()
     }
   }
 
@@ -80,6 +112,98 @@ object SecurityEngine {
     }
   }
 
+  private fun loadPersistedSessionRecord() {
+    val p = prefs ?: return
+    val raw = p.getString(KEY_ACTIVE_SESSION, null) ?: return
+    val parts = raw.split("|||")
+    if (parts.size == 4) {
+      val id = parts[0]
+      val hash = parts[1]
+      val role = try { UserRole.valueOf(parts[2]) } catch (_: Exception) { return }
+      val expiresAt = parts[3].toLongOrNull() ?: return
+      if (System.currentTimeMillis() < expiresAt) {
+        activeSessionRecord = SessionTokenRecord(id, hash, role, expiresAt)
+      } else {
+        p.edit().remove(KEY_ACTIVE_SESSION).apply()
+      }
+    }
+  }
+
+  private fun sha256Hex(input: String): String {
+    val digest = MessageDigest.getInstance("SHA-256").digest(input.toByteArray(Charsets.UTF_8))
+    return digest.joinToString("") { "%02x".format(it) }
+  }
+
+  /**
+   * Issues a cryptographically random session token bound to the authenticated identifier and role.
+   */
+  fun issueSessionToken(identifier: String, role: UserRole): String {
+    val cleanId = identifier.trim().lowercase()
+    val bytes = ByteArray(32)
+    secureRandom.nextBytes(bytes)
+    val rawToken = bytes.joinToString("") { "%02x".format(it) }
+    val tokenHash = sha256Hex(rawToken)
+    val expiresAt = System.currentTimeMillis() + SESSION_TTL_MS
+    val record = SessionTokenRecord(
+      identifier = cleanId,
+      tokenSha256 = tokenHash,
+      role = role,
+      expiresAt = expiresAt
+    )
+    activeSessionRecord = record
+    prefs?.edit()?.putString(
+      KEY_ACTIVE_SESSION,
+      "$cleanId|||$tokenHash|||${role.name}|||$expiresAt"
+    )?.apply()
+    return rawToken
+  }
+
+  /**
+   * Verifies a session token against the active cryptographic session record.
+   * Returns the verified UserRole if valid and unexpired, or null otherwise.
+   */
+  fun verifySessionToken(identifier: String, rawToken: String): UserRole? {
+    val cleanId = identifier.trim().lowercase()
+    if (cleanId.isBlank() || rawToken.isBlank()) return null
+    val record = activeSessionRecord ?: run {
+      loadPersistedSessionRecord()
+      activeSessionRecord
+    } ?: return null
+
+    if (System.currentTimeMillis() >= record.expiresAt) {
+      revokeSessionToken()
+      return null
+    }
+    val candidateHash = sha256Hex(rawToken)
+    if (record.identifier != cleanId || !MessageDigest.isEqual(
+        record.tokenSha256.toByteArray(Charsets.UTF_8),
+        candidateHash.toByteArray(Charsets.UTF_8)
+      )
+    ) {
+      return null
+    }
+    return record.role
+  }
+
+  /**
+   * Invalidates the active session token upon logout or session expiration.
+   */
+  fun revokeSessionToken() {
+    activeSessionRecord = null
+    prefs?.edit()?.remove(KEY_ACTIVE_SESSION)?.apply()
+  }
+
+  /**
+   * Clears all stored credentials and session tokens (used when resetting app data).
+   */
+  fun clearAllCredentials() {
+    credentialVault.clear()
+    failedAttempts.clear()
+    lockoutUntil.clear()
+    activeSessionRecord = null
+    prefs?.edit()?.clear()?.apply()
+  }
+
   // Audit Logs Stream
   private val _auditLogs = MutableStateFlow<List<SecurityAuditLog>>(emptyList())
   val auditLogs: StateFlow<List<SecurityAuditLog>> = _auditLogs.asStateFlow()
@@ -97,32 +221,41 @@ object SecurityEngine {
     )
   }
 
-  // --- CRYPTOGRAPHIC BCRYPT SALTING & HASHING ENGINE ---
+  // --- CRYPTOGRAPHIC BCRYPT SALTING & HASHING ENGINE (OFF MAIN THREAD) ---
 
   /**
-   * Hashes a raw password using BCrypt with automatic cryptographically secure salting (cost 10).
-   * Result format: $2a$10$[22-char salt][31-char hash]
+   * Hashes a raw password using BCrypt with automatic cryptographically secure salting (cost 10)
+   * on Dispatchers.Default so expensive key stretching never blocks the UI thread.
    */
-  fun hashPasswordWithBCrypt(rawPassword: String): String {
-    return at.favre.lib.crypto.bcrypt.BCrypt.withDefaults()
-      .hashToString(10, rawPassword.toCharArray())
+  suspend fun hashPasswordWithBCrypt(rawPassword: String): String = withContext(Dispatchers.Default) {
+    val chars = rawPassword.toCharArray()
+    try {
+      at.favre.lib.crypto.bcrypt.BCrypt.withDefaults().hashToString(10, chars)
+    } finally {
+      chars.fill('\u0000')
+    }
   }
 
   /**
-   * Verifies a raw password against a BCrypt salted hash string.
+   * Verifies a raw password against a BCrypt salted hash string on Dispatchers.Default.
    */
-  fun verifyBCryptPassword(rawPassword: String, bcryptHash: String): Boolean {
-    if (rawPassword.isEmpty() || bcryptHash.isEmpty()) return false
-    val result = at.favre.lib.crypto.bcrypt.BCrypt.verifyer()
-      .verify(rawPassword.toCharArray(), bcryptHash.toCharArray())
-    return result.verified
+  suspend fun verifyBCryptPassword(rawPassword: String, bcryptHash: String): Boolean = withContext(Dispatchers.Default) {
+    if (rawPassword.isEmpty() || bcryptHash.isEmpty()) return@withContext false
+    val pwdChars = rawPassword.toCharArray()
+    val hashChars = bcryptHash.toCharArray()
+    try {
+      val result = at.favre.lib.crypto.bcrypt.BCrypt.verifyer().verify(pwdChars, hashChars)
+      result.verified
+    } finally {
+      pwdChars.fill('\u0000')
+    }
   }
 
   /**
-   * Registers or updates an account credential in the vault with BCrypt salting & hashing.
-   * Plaintext passwords are NEVER retained in memory or database storage.
+   * Registers or updates an account credential in the vault with BCrypt salting & hashing
+   * on a background dispatcher. Plaintext passwords are NEVER retained in memory or storage.
    */
-  fun registerUserCredential(
+  suspend fun registerUserCredential(
     identifier: String,
     rawPassword: String,
     role: UserRole,
@@ -131,14 +264,14 @@ object SecurityEngine {
     registerSaltedCredential(identifier, rawPassword, role, fullName)
   }
 
-  fun registerSaltedCredential(
+  suspend fun registerSaltedCredential(
     identifier: String,
     rawPassword: String,
     role: UserRole,
     fullName: String = ""
-  ) {
+  ) = withContext(Dispatchers.Default) {
     val cleanKey = identifier.trim().lowercase()
-    if (cleanKey.isBlank()) return
+    if (cleanKey.isBlank() || rawPassword.isBlank()) return@withContext
 
     val bcryptHash = hashPasswordWithBCrypt(rawPassword)
 
@@ -156,7 +289,7 @@ object SecurityEngine {
       severity = SecuritySeverity.INFO,
       eventType = "CREDENTIAL_BCRYPT_STORED",
       actor = cleanKey,
-      details = "Account credential salted & BCrypt hashed into secure vault. Hash: ${bcryptHash.take(20)}..."
+      details = "Account credential salted & BCrypt hashed into secure vault."
     )
   }
 
@@ -165,18 +298,35 @@ object SecurityEngine {
    */
   fun hasRegisteredAccount(identifier: String): Boolean {
     val cleanKey = identifier.trim().lowercase()
-    return credentialVault.containsKey(cleanKey)
+    if (cleanKey.isBlank()) return false
+    if (credentialVault.containsKey(cleanKey)) return true
+    val stored = prefs?.getString("cred_$cleanKey", null)
+    return !stored.isNullOrBlank()
+  }
+
+  fun getVerifiedRole(identifier: String): UserRole? {
+    val cleanKey = identifier.trim().lowercase()
+    if (cleanKey.isBlank()) return null
+    credentialVault[cleanKey]?.let { return it.role }
+    val stored = prefs?.getString("cred_$cleanKey", null)
+    if (stored != null) {
+      val parts = stored.split("|||")
+      if (parts.size >= 4) {
+        return try { UserRole.valueOf(parts[1]) } catch (_: Exception) { null }
+      }
+    }
+    return null
   }
 
   /**
-   * Verifies provided password against stored BCrypt salted hash.
+   * Verifies provided password against stored BCrypt salted hash on Dispatchers.Default.
    * Returns Pair(isValidPassword, UserRole?)
    */
-  fun verifySaltedCredential(identifier: String, rawPassword: String): Pair<Boolean, UserRole?> {
+  suspend fun verifySaltedCredential(identifier: String, rawPassword: String): Pair<Boolean, UserRole?> = withContext(Dispatchers.Default) {
     val cleanKey = identifier.trim().lowercase()
+    if (cleanKey.isBlank() || rawPassword.isEmpty()) return@withContext Pair(false, null)
     var cred = credentialVault[cleanKey]
     if (cred == null) {
-      // Check if saved in prefs
       val stored = prefs?.getString("cred_$cleanKey", null)
       if (stored != null) {
         val parts = stored.split("|||")
@@ -193,7 +343,7 @@ object SecurityEngine {
         }
       }
     }
-    if (cred == null) return Pair(false, null)
+    if (cred == null) return@withContext Pair(false, null)
 
     val isMatch = verifyBCryptPassword(rawPassword, cred.bcryptHash)
 
@@ -204,7 +354,7 @@ object SecurityEngine {
         actor = cleanKey,
         details = "BCrypt Salted Hash matched successfully for role ${cred.role.name}."
       )
-      return Pair(true, cred.role)
+      Pair(true, cred.role)
     } else {
       logEvent(
         severity = SecuritySeverity.WARNING,
@@ -212,49 +362,11 @@ object SecurityEngine {
         actor = cleanKey,
         details = "BCrypt password verification failed for $cleanKey."
       )
-      return Pair(false, null)
+      Pair(false, null)
     }
   }
 
   fun getRegisteredAccountCount(): Int = credentialVault.size
-
-  /**
-   * Seeds master admins, faculty, and student credentials with salted hashes.
-   */
-  fun seedDefaultCredentials(students: List<com.example.data.Student>, teachers: List<com.example.data.Teacher>) {
-    // Master Admins
-    registerSaltedCredential("joshiakash1209@gmail.com", "Trillionaire@1209", UserRole.ADMIN, "Akash Joshi (Admin)")
-    registerSaltedCredential("joshiakash1712@gmail.com", "Trillionaire@1712", UserRole.ADMIN, "Akash Joshi (Director)")
-    registerSaltedCredential("admin@fsi.com", "admin123", UserRole.ADMIN, "FSI Institute Administrator")
-    registerSaltedCredential("admin", "admin123", UserRole.ADMIN, "Admin Portal")
-
-    // Faculty Teachers
-    teachers.forEach { t ->
-      if (t.email.isNotBlank()) {
-        registerSaltedCredential(t.email, "Teacher@123", UserRole.TEACHER, t.name)
-      }
-      if (t.id.isNotBlank()) {
-        registerSaltedCredential(t.id, "Teacher@123", UserRole.TEACHER, t.name)
-      }
-    }
-
-    // Students & Parents
-    students.forEach { s ->
-      if (s.email.isNotBlank()) {
-        registerSaltedCredential(s.email, "Student@123", UserRole.STUDENT, s.name)
-        val parentEmail = "parent_${s.id.lowercase()}@mytuition.com"
-        registerSaltedCredential(parentEmail, "Parent@123", UserRole.PARENT, "Parent of ${s.name}")
-      }
-      if (s.id.isNotBlank()) {
-        registerSaltedCredential(s.id, "Student@123", UserRole.STUDENT, s.name)
-      }
-    }
-
-    // Portal generic aliases
-    registerSaltedCredential("teacher@mytuition.com", "Teacher@123", UserRole.TEACHER, "Faculty Portal")
-    registerSaltedCredential("student@mytuition.com", "Student@123", UserRole.STUDENT, "Student Portal")
-    registerSaltedCredential("parent@mytuition.com", "Parent@123", UserRole.PARENT, "Parent Portal")
-  }
 
   fun setPiiMasking(enabled: Boolean) {
     _piiMaskingEnabled.value = enabled

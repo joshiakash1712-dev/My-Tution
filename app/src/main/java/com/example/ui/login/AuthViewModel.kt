@@ -369,27 +369,36 @@ class AuthViewModel : ViewModel() {
   }
 
   fun performPasswordReset(email: String, onResult: (Boolean, String) -> Unit) {
-    if (email.isBlank() || !email.contains("@")) {
+    val cleanEmail = email.trim()
+    if (cleanEmail.isBlank() || !cleanEmail.contains("@")) {
       onResult(false, "Please provide a valid registered email address.")
       return
     }
 
-    recordStructuredLog(
-      rawIdentifier = email,
-      targetRole = null,
-      status = AuthStatus.SUCCESS,
-      failureReason = null,
-      severity = SecuritySeverity.INFO,
-      appCheckVerified = true,
-      customTag = "PASSWORD_RESET_REQUESTED"
-    )
-
     FirebaseAuthService.sendPasswordResetEmail(
-      email = email.trim(),
+      email = cleanEmail,
       onSuccess = {
-        onResult(true, "Password reset link sent to $email. Check your inbox.")
+        recordStructuredLog(
+          rawIdentifier = cleanEmail,
+          targetRole = null,
+          status = AuthStatus.SUCCESS,
+          failureReason = null,
+          severity = SecuritySeverity.INFO,
+          appCheckVerified = true,
+          customTag = "PASSWORD_RESET_SENT"
+        )
+        onResult(true, "Password reset link sent to $cleanEmail. Check your inbox.")
       },
       onFailure = { err ->
+        recordStructuredLog(
+          rawIdentifier = cleanEmail,
+          targetRole = null,
+          status = AuthStatus.FAILED_INVALID_CREDENTIALS,
+          failureReason = err,
+          severity = SecuritySeverity.WARNING,
+          appCheckVerified = true,
+          customTag = "PASSWORD_RESET_FAILED"
+        )
         onResult(false, "Failed to send reset email: $err")
       }
     )
@@ -414,7 +423,6 @@ class AuthViewModel : ViewModel() {
     // Detect if this attempt targeted or involved an Admin role
     val isAdminTarget = targetRole == UserRole.ADMIN ||
       rawIdentifier.lowercase().contains("admin") ||
-      rawIdentifier.lowercase().contains("joshiakash") ||
       rawIdentifier.lowercase().contains("director")
 
     val isUnauthorizedAdmin = isAdminTarget && status != AuthStatus.SUCCESS

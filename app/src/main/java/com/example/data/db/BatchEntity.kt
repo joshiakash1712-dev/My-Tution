@@ -11,6 +11,8 @@ data class BatchEntity(
   val schedule: String,
   val studentCount: Int,
   val teacherName: String,
+  val teacherId: String = "",
+  val instituteId: String = "FSI_MAIN",
   val syncedToFirestore: Boolean = false,
   val lastUpdated: Long = System.currentTimeMillis()
 ) {
@@ -20,7 +22,9 @@ data class BatchEntity(
       name = name,
       schedule = schedule,
       studentCount = studentCount,
-      teacherName = teacherName
+      teacherName = teacherName,
+      teacherId = teacherId,
+      instituteId = instituteId
     )
   }
 
@@ -32,6 +36,8 @@ data class BatchEntity(
         schedule = batch.schedule,
         studentCount = batch.studentCount,
         teacherName = batch.teacherName,
+        teacherId = batch.teacherId,
+        instituteId = batch.instituteId,
         syncedToFirestore = synced
       )
     }

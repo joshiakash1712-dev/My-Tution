@@ -365,4 +365,34 @@ object InvoiceGenerator {
             Toast.makeText(context, "Could not share invoice: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
         }
     }
+
+    fun generateAndShareFeeInvoice(
+        context: Context,
+        studentName: String,
+        studentId: String,
+        batchName: String,
+        amountPaid: Int,
+        totalFee: Int,
+        pendingBalance: Int,
+        paymentMethod: String,
+        receiptNumber: String,
+        dateStr: String
+    ) {
+        val status = if (pendingBalance <= 0) "Paid" else "Partial"
+        val payment = StudentFeePayment(
+            id = "PAY_${System.currentTimeMillis()}",
+            studentId = studentId,
+            studentName = studentName,
+            amount = amountPaid.toDouble(),
+            paymentDate = dateStr,
+            paymentStatus = status,
+            feeType = "Tuition Fee ($batchName)",
+            paymentMode = paymentMethod,
+            receiptNo = receiptNumber,
+            month = "Academic Session 2026-27",
+            remarks = "Total Fee: ₹$totalFee | Pending Balance: ₹$pendingBalance",
+            recordedBy = "Online Portal"
+        )
+        shareInvoice(context, payment)
+    }
 }

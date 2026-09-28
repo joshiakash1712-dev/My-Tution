@@ -80,18 +80,19 @@ class ExampleRobolectricTest {
       }
     }
 
-    // 5. Verify AppRepository.reconcileFacultyName properly resolves variations
-    assertEquals("Dr. Faisal Patel", com.example.data.AppRepository.reconcileFacultyName("Prof. Patil"))
-    assertEquals("Prof. Akash Joshi", com.example.data.AppRepository.reconcileFacultyName("Er. Kulkarni"))
-    assertEquals("Prof. Shrirang Deshmukh", com.example.data.AppRepository.reconcileFacultyName("Dr. Shinde", "Foundation Target"))
-    assertEquals("Dr. Faisal Patel", com.example.data.AppRepository.reconcileFacultyName("Dr. Shinde", "NEET Zenith"))
-    assertEquals("Prof. Shrirang Deshmukh", com.example.data.AppRepository.reconcileFacultyName("Prof. Deshmukh"))
-    assertEquals("Prof. Akash Joshi", com.example.data.AppRepository.reconcileFacultyName("Prof. Joshi"))
+    // 5. Verify AppRepository.reconcileFacultyName properly resolves by teacher ID, batch, subject, and preserves custom faculty
+    assertEquals("Prof. Shrirang Deshmukh", com.example.data.AppRepository.reconcileFacultyName("FAC_01"))
+    assertEquals("Dr. Faisal Patel", com.example.data.AppRepository.reconcileFacultyName("FAC_02"))
+    assertEquals("Prof. Akash Joshi", com.example.data.AppRepository.reconcileFacultyName("FAC_03"))
+    assertEquals("Prof. Shrirang Deshmukh", com.example.data.AppRepository.reconcileFacultyName("Faculty", "Foundation Target"))
+    assertEquals("Dr. Faisal Patel", com.example.data.AppRepository.reconcileFacultyName("Subject Faculty", "NEET Zenith"))
+    assertEquals("Prof. Akash Joshi", com.example.data.AppRepository.reconcileFacultyName(null, null, "Mathematics"))
+    assertEquals("Dr. Ananya Sharma", com.example.data.AppRepository.reconcileFacultyName("Dr. Ananya Sharma"))
 
-    // 6. Verify isSameFaculty correctly detects matching identity
-    assert(com.example.data.AppRepository.isSameFaculty("Prof. Shrirang Deshmukh", "Prof. Deshmukh"))
-    assert(com.example.data.AppRepository.isSameFaculty("Dr. Faisal Patel", "Prof. Patil"))
-    assert(com.example.data.AppRepository.isSameFaculty("Prof. Akash Joshi", "Er. Kulkarni"))
+    // 6. Verify isSameFaculty correctly detects matching identity across ID, name, and email
+    assert(com.example.data.AppRepository.isSameFaculty("Prof. Shrirang Deshmukh", "FAC_01"))
+    assert(com.example.data.AppRepository.isSameFaculty("Dr. Faisal Patel", "FAC_02"))
+    assert(com.example.data.AppRepository.isSameFaculty("Prof. Akash Joshi", "FAC_03"))
   }
 
   @Test
@@ -274,5 +275,157 @@ class ExampleRobolectricTest {
     assertEquals("Devendra Singh", reStudent?.name)
     assertEquals("Dr. Ananya Sharma", reTeacher?.name)
     assertEquals("Present", reAttendance?.status)
+  }
+
+  @Test
+  fun `verify security authorization guards and strict identity binding without fallback`() = kotlinx.coroutines.runBlocking {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    com.example.security.SecurityEngine.initialize(context)
+    com.example.data.AppRepository.initialize(context)
+    com.example.data.AppRepository.logout()
+
+    // 1. Verify fresh or logged-out session is not logged in
+    org.junit.Assert.assertFalse("Logged out state must require authentication", com.example.data.AppRepository.isLoggedIn.value)
+
+    // 2. Log in as a specific Student (STU1001 - Rahul Sharma)
+    com.example.data.AppRepository.login(
+      identifier = "rahul.sharma@mytuition.com",
+      role = com.example.data.UserRole.STUDENT,
+      linkedEntityId = "STU1001"
+    )
+    assertEquals(com.example.data.UserRole.STUDENT, com.example.data.AppRepository.currentRole.value)
+
+    // 3. Verify Student cannot escalate role to ADMIN via setRole
+    com.example.data.AppRepository.setRole(com.example.data.UserRole.ADMIN)
+    assertEquals(
+      "Student must not be able to escalate role to ADMIN",
+      com.example.data.UserRole.STUDENT,
+      com.example.data.AppRepository.currentRole.value
+    )
+
+    // 4. Verify strict identity resolution binds to STU1001
+    val boundStudent = com.example.data.AppRepository.getActiveStudentForCurrentSession()
+    org.junit.Assert.assertNotNull("Bound student must resolve for STU1001", boundStudent)
+    assertEquals("STU1001", boundStudent?.id)
+
+    // 5. Verify an unlinked student identifier does NOT fall back to firstOrNull()
+    com.example.data.AppRepository.login(
+      identifier = "unknown.student@nowhere.com",
+      role = com.example.data.UserRole.STUDENT,
+      linkedEntityId = "STU_NON_EXISTENT"
+    )
+    val unboundStudent = com.example.data.AppRepository.getActiveStudentForCurrentSession()
+    org.junit.Assert.assertNull("Unmatched student session must not fall back to firstOrNull()", unboundStudent)
+
+    // 6. Verify Parent identity binding resolves strictly to linked children
+    com.example.data.AppRepository.login(
+      identifier = "parent.sharma@mytuition.com",
+      role = com.example.data.UserRole.PARENT,
+      linkedEntityId = "STU1001",
+      linkedStudentIds = listOf("STU1001")
+    )
+    val linkedChildren = com.example.data.AppRepository.getLinkedStudentsForCurrentParent()
+    assertEquals(1, linkedChildren.size)
+    assertEquals("STU1001", linkedChildren.first().id)
+
+    // 7. Verify Student cannot spoof another student's ID via caller-supplied linkedEntityId
+    com.example.data.AppRepository.login(
+      identifier = "rahul.sharma@mytuition.com",
+      role = com.example.data.UserRole.STUDENT,
+      linkedEntityId = "STU1002" // Attempted spoofing of Ananya Singh's ID
+    )
+    val antiSpoofStudent = com.example.data.AppRepository.getActiveStudentForCurrentSession()
+    assertEquals("STU1001", antiSpoofStudent?.id)
+  }
+
+  @Test
+  fun `verify no default credentials, no plaintext password keys, passwordless switch blocked, reset failure surfaced, and session token security`() = kotlinx.coroutines.runBlocking {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    com.example.security.SecurityEngine.initialize(context)
+    com.example.security.SecurityEngine.clearAllCredentials()
+    com.example.data.AppRepository.initialize(context)
+    com.example.data.AppRepository.logoutAllAccounts()
+
+    // 1. Verify zero pre-seeded credentials exist on startup
+    assertEquals(0, com.example.security.SecurityEngine.getRegisteredAccountCount())
+    val (adminDefaultValid, _) = com.example.security.SecurityEngine.verifySaltedCredential("admin@fsi.com", "admin123")
+    org.junit.Assert.assertFalse("Hardcoded default admin credential must not exist", adminDefaultValid)
+
+    // 2. Register an explicit test account and verify no raw password or def_hash_ key is stored in SharedPreferences
+    val rawTestPwd = "MyUniqueTestSecret#2026"
+    com.example.security.SecurityEngine.registerSaltedCredential(
+      identifier = "verified.teacher@mytuition.com",
+      rawPassword = rawTestPwd,
+      role = com.example.data.UserRole.TEACHER,
+      fullName = "Verified Teacher"
+    )
+    val vaultPrefs = context.getSharedPreferences("fsi_security_credential_vault", Context.MODE_PRIVATE)
+    val hasPlaintextKeyOrValue = vaultPrefs.all.any { (k, v) ->
+      k.startsWith("def_hash_") || k.contains(rawTestPwd) || (v?.toString()?.contains(rawTestPwd) == true)
+    }
+    org.junit.Assert.assertFalse("Raw password or def_hash_ key must never be stored in SharedPreferences", hasPlaintextKeyOrValue)
+
+    // 3. Verify password reset reports failure when Firebase Auth is unavailable
+    var resetSucceeded = true
+    var resetMessage = ""
+    com.example.data.FirebaseAuthService.sendPasswordResetEmail(
+      email = "verified.teacher@mytuition.com",
+      onSuccess = { resetSucceeded = true },
+      onFailure = { err ->
+        resetSucceeded = false
+        resetMessage = err
+      }
+    )
+    org.junit.Assert.assertFalse("Password reset must fail when Firebase is unavailable", resetSucceeded)
+    org.junit.Assert.assertTrue("Error message must be non-empty", resetMessage.isNotBlank())
+
+    var repoResetOk = true
+    com.example.data.AppRepository.resetUserPassword("verified.teacher@mytuition.com") { ok, _ ->
+      repoResetOk = ok
+    }
+    org.junit.Assert.assertFalse("AppRepository.resetUserPassword must report failure when Firebase is unavailable", repoResetOk)
+    org.junit.Assert.assertTrue(
+      "passwordResetNotice must indicate failure",
+      com.example.data.AppRepository.passwordResetNotice.value?.contains("failed", ignoreCase = true) == true
+    )
+
+    // 4. Verify passwordless switchAccount cannot bypass authentication
+    com.example.data.AppRepository.login("rahul.sharma@mytuition.com", com.example.data.UserRole.STUDENT)
+    assertEquals("rahul.sharma@mytuition.com", com.example.data.AppRepository.currentUserIdentifier.value)
+
+    val targetSaved = com.example.data.SavedAccount(
+      identifier = "verified.teacher@mytuition.com",
+      role = com.example.data.UserRole.TEACHER,
+      displayName = "Verified Teacher"
+    )
+    val switchedWithoutPassword = com.example.data.AppRepository.switchAccount(targetSaved)
+    org.junit.Assert.assertFalse("Passwordless switchAccount must be rejected", switchedWithoutPassword)
+    assertEquals(
+      "Active user must remain unchanged after blocked passwordless switch",
+      "rahul.sharma@mytuition.com",
+      com.example.data.AppRepository.currentUserIdentifier.value
+    )
+
+    // 5. Verify logout followed by app restart (initialize) does NOT restore an authenticated session
+    com.example.data.AppRepository.logout()
+    org.junit.Assert.assertFalse(com.example.data.AppRepository.isLoggedIn.value)
+    com.example.data.AppRepository.initialize(context)
+    org.junit.Assert.assertFalse("Re-initializing after logout must not restore a session", com.example.data.AppRepository.isLoggedIn.value)
+
+    // 6. Verify tampering with SharedPreferences (is_logged_in=true, user_role=ADMIN) without a valid session token is rejected
+    val appPrefs = context.getSharedPreferences("my_tuition_fsi_prefs", Context.MODE_PRIVATE)
+    appPrefs.edit()
+      .putBoolean("is_logged_in", true)
+      .putBoolean("has_explicit_auth_session", true)
+      .putString("user_identifier", "rahul.sharma@mytuition.com")
+      .putString("user_role", com.example.data.UserRole.ADMIN.name)
+      .putString("session_token", "forged_invalid_token_12345")
+      .commit()
+
+    com.example.data.AppRepository.initialize(context)
+    org.junit.Assert.assertFalse(
+      "Forged SharedPreferences session without valid cryptographic token must be rejected",
+      com.example.data.AppRepository.isLoggedIn.value
+    )
   }
 }

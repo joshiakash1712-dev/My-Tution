@@ -251,7 +251,10 @@ fun MyTuitionApp() {
                     text = currentRole.name,
                     color = Color(0xFF38BDF8),
                     fontSize = 10.sp,
-                    fontWeight = FontWeight.Bold
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Ellipsis
                   )
                 }
               }
@@ -305,6 +308,7 @@ fun MyTuitionApp() {
                     fontSize = 13.sp,
                     fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                     maxLines = 1,
+                    softWrap = false,
                     overflow = TextOverflow.Ellipsis
                   )
                 }
@@ -355,8 +359,11 @@ fun MyTuitionApp() {
 
           // Password notice popup card
           passwordResetNotice?.let { notice ->
+            val isErrorNotice = notice.contains("failed", ignoreCase = true) || notice.contains("unavailable", ignoreCase = true)
+            val containerBg = if (isErrorNotice) Color(0xFFFEE2E2) else Color(0xFFE0F2FE)
+            val contentTint = if (isErrorNotice) Color(0xFFB91C1C) else Color(0xFF0369A1)
             Card(
-              colors = CardDefaults.cardColors(containerColor = Color(0xFFE0F2FE)),
+              colors = CardDefaults.cardColors(containerColor = containerBg),
               modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp, vertical = 8.dp),
@@ -374,11 +381,15 @@ fun MyTuitionApp() {
                   verticalAlignment = Alignment.CenterVertically,
                   horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                  Icon(Icons.Default.Info, contentDescription = null, tint = Color(0xFF0369A1))
-                  Text(notice, fontSize = 12.sp, color = Color(0xFF0369A1), fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                  Icon(
+                    if (isErrorNotice) Icons.Default.Error else Icons.Default.Info,
+                    contentDescription = null,
+                    tint = contentTint
+                  )
+                  Text(notice, fontSize = 12.sp, color = contentTint, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
                 IconButton(onClick = { AppRepository.clearPasswordNotice() }, modifier = Modifier.size(24.dp)) {
-                  Icon(Icons.Default.Close, contentDescription = "Close notice", tint = Color(0xFF0369A1), modifier = Modifier.size(14.dp))
+                  Icon(Icons.Default.Close, contentDescription = "Close notice", tint = contentTint, modifier = Modifier.size(14.dp))
                 }
               }
             }
@@ -448,8 +459,11 @@ fun MyTuitionApp() {
 
             // Password notice bar
             passwordResetNotice?.let { notice ->
+              val isErrorNotice = notice.contains("failed", ignoreCase = true) || notice.contains("unavailable", ignoreCase = true)
+              val containerBg = if (isErrorNotice) Color(0xFFFEE2E2) else Color(0xFFE0F2FE)
+              val contentTint = if (isErrorNotice) Color(0xFFB91C1C) else Color(0xFF0369A1)
               Card(
-                colors = CardDefaults.cardColors(containerColor = Color(0xFFE0F2FE)),
+                colors = CardDefaults.cardColors(containerColor = containerBg),
                 modifier = Modifier
                   .fillMaxWidth()
                   .padding(horizontal = 16.dp, vertical = 4.dp),
@@ -467,11 +481,15 @@ fun MyTuitionApp() {
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                   ) {
-                    Icon(Icons.Default.Info, contentDescription = null, tint = Color(0xFF0369A1))
-                    Text(notice, fontSize = 11.sp, color = Color(0xFF0369A1), fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Icon(
+                      if (isErrorNotice) Icons.Default.Error else Icons.Default.Info,
+                      contentDescription = null,
+                      tint = contentTint
+                    )
+                    Text(notice, fontSize = 11.sp, color = contentTint, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                   }
                   IconButton(onClick = { AppRepository.clearPasswordNotice() }, modifier = Modifier.size(20.dp)) {
-                    Icon(Icons.Default.Close, contentDescription = "Close notice", tint = Color(0xFF0369A1), modifier = Modifier.size(12.dp))
+                    Icon(Icons.Default.Close, contentDescription = "Close notice", tint = contentTint, modifier = Modifier.size(12.dp))
                   }
                 }
               }
@@ -543,6 +561,7 @@ fun ProfileScreen(
   var showLogoutConfirm by remember { mutableStateOf(false) }
   var showLogoutAllConfirm by remember { mutableStateOf(false) }
   var showAddAccountDialog by remember { mutableStateOf(false) }
+  var targetSwitchAccount by remember { mutableStateOf<SavedAccount?>(null) }
 
   val savedAccounts by AppRepository.savedAccounts.collectAsState()
   val darkThemeModeState by AppRepository.darkThemeMode.collectAsState()
@@ -600,26 +619,34 @@ fun ProfileScreen(
   }
 
   if (showAddAccountDialog) {
-    var addEmail by remember { mutableStateOf("") }
-    var addPassword by remember { mutableStateOf("") }
+    var addEmail by remember(targetSwitchAccount) { mutableStateOf(targetSwitchAccount?.identifier ?: "") }
+    var addPassword by remember(targetSwitchAccount) { mutableStateOf("") }
     var addErrorMsg by remember { mutableStateOf<String?>(null) }
     var isSubmitting by remember { mutableStateOf(false) }
 
     AlertDialog(
-      onDismissRequest = { if (!isSubmitting) showAddAccountDialog = false },
+      onDismissRequest = {
+        if (!isSubmitting) {
+          showAddAccountDialog = false
+          targetSwitchAccount = null
+        }
+      },
       title = {
         Row(
           verticalAlignment = Alignment.CenterVertically,
           horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
           Icon(Icons.Default.AccountCircle, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-          Text("Add Account (Log In)", fontWeight = FontWeight.Bold)
+          Text(
+            if (targetSwitchAccount != null) "Verify Password to Switch" else "Add Account (Log In)",
+            fontWeight = FontWeight.Bold
+          )
         }
       },
       text = {
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
           Text(
-            "Log in to another account by entering its registered email/ID and password. Just like Instagram, you can switch between active accounts at any time.",
+            "Enter the account's registered email/ID and password to authenticate and establish a new secure session.",
             fontSize = 12.sp,
             color = MaterialTheme.colorScheme.onSurfaceVariant
           )
@@ -663,13 +690,18 @@ fun ProfileScreen(
           onClick = {
             isSubmitting = true
             addErrorMsg = null
-            FirebaseAuthService.signIn(
-              email = addEmail,
+            val targetAcc = targetSwitchAccount ?: SavedAccount(
+              identifier = addEmail.trim(),
+              role = UserRole.STUDENT,
+              displayName = addEmail.trim().substringBefore("@")
+            )
+            AppRepository.switchAccount(
+              account = targetAcc.copy(identifier = addEmail.trim()),
               password = addPassword,
-              onSuccess = { detectedRole, loggedEmail ->
+              onSuccess = {
                 isSubmitting = false
-                AppRepository.login(loggedEmail, detectedRole)
                 showAddAccountDialog = false
+                targetSwitchAccount = null
               },
               onFailure = { errorReason ->
                 isSubmitting = false
@@ -681,14 +713,17 @@ fun ProfileScreen(
           if (isSubmitting) {
             CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Color.White, strokeWidth = 2.dp)
           } else {
-            Text("Log In & Switch")
+            Text("Authenticate & Switch")
           }
         }
       },
       dismissButton = {
         TextButton(
           enabled = !isSubmitting,
-          onClick = { showAddAccountDialog = false }
+          onClick = {
+            showAddAccountDialog = false
+            targetSwitchAccount = null
+          }
         ) {
           Text("Cancel")
         }
@@ -732,7 +767,10 @@ fun ProfileScreen(
                 text = "Back to Navigation",
                 fontSize = 12.sp,
                 fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onPrimaryContainer
+                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Ellipsis
               )
             }
           }
@@ -804,7 +842,10 @@ fun ProfileScreen(
                 text = currentRole.displayName + " Account",
                 fontSize = 11.sp,
                 fontWeight = FontWeight.Bold,
-                color = Color.White
+                color = Color.White,
+                maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Ellipsis
               )
             }
           }
@@ -875,7 +916,7 @@ fun ProfileScreen(
                     )
                   }
 
-                  Column {
+                  Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
                     Row(
                       verticalAlignment = Alignment.CenterVertically,
                       horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -884,7 +925,10 @@ fun ProfileScreen(
                         text = acc.displayName,
                         fontWeight = FontWeight.Bold,
                         fontSize = 13.sp,
-                        color = MaterialTheme.colorScheme.onSurface
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false)
                       )
                       Surface(
                         color = MaterialTheme.colorScheme.surfaceVariant,
@@ -895,6 +939,9 @@ fun ProfileScreen(
                           fontSize = 9.sp,
                           fontWeight = FontWeight.Bold,
                           color = MaterialTheme.colorScheme.onSurfaceVariant,
+                          maxLines = 1,
+                          softWrap = false,
+                          overflow = TextOverflow.Ellipsis,
                           modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
                         )
                       }
@@ -902,7 +949,9 @@ fun ProfileScreen(
                     Text(
                       text = acc.identifier,
                       fontSize = 11.sp,
-                      color = MaterialTheme.colorScheme.onSurfaceVariant
+                      color = MaterialTheme.colorScheme.onSurfaceVariant,
+                      maxLines = 1,
+                      overflow = TextOverflow.Ellipsis
                     )
                   }
                 }
@@ -922,17 +971,20 @@ fun ProfileScreen(
                         horizontalArrangement = Arrangement.spacedBy(4.dp)
                       ) {
                         Icon(Icons.Default.Check, contentDescription = null, tint = Color(0xFF166534), modifier = Modifier.size(12.dp))
-                        Text("Active", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFF166534))
+                        Text("Active", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFF166534), maxLines = 1, softWrap = false)
                       }
                     }
                   } else {
                     Button(
-                      onClick = { AppRepository.switchAccount(acc) },
+                      onClick = {
+                        targetSwitchAccount = acc
+                        showAddAccountDialog = true
+                      },
                       shape = RoundedCornerShape(8.dp),
                       contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
                       modifier = Modifier.height(32.dp)
                     ) {
-                      Text("Switch", fontSize = 11.sp)
+                      Text("Switch", fontSize = 11.sp, maxLines = 1, softWrap = false)
                     }
                   }
 
@@ -956,7 +1008,10 @@ fun ProfileScreen(
 
           // Add Account Action Button
           OutlinedButton(
-            onClick = { showAddAccountDialog = true },
+            onClick = {
+              targetSwitchAccount = null
+              showAddAccountDialog = true
+            },
             shape = RoundedCornerShape(12.dp),
             modifier = Modifier.fillMaxWidth()
           ) {
@@ -980,20 +1035,29 @@ fun ProfileScreen(
       ) {
         when (currentRole) {
           UserRole.STUDENT -> {
-            MetricBox("My Batch", "JEE Batch A", "Active Enrollment", Color(0xFFEFF6FF), Color(0xFF1E40AF), Modifier.weight(1f))
-            MetricBox("Doubts Resolved", "12 / 14", "Last 30 Days", Color(0xFFFAF5FF), Color(0xFF6B21A8), Modifier.weight(1f))
+            val activeStudent = AppRepository.getActiveStudentForCurrentSession()
+            val studentDoubts = AppRepository.doubts.collectAsState().value.filter {
+              activeStudent != null && (it.studentId.equals(activeStudent.id, ignoreCase = true) || it.studentName.equals(activeStudent.name, ignoreCase = true))
+            }
+            val resolvedCount = studentDoubts.count { it.isResolved }
+            MetricBox("My Batch", activeStudent?.batch ?: "Enrolled", "Active Enrollment", Color(0xFFEFF6FF), Color(0xFF1E40AF), Modifier.weight(1f))
+            MetricBox("Doubts Resolved", "$resolvedCount / ${studentDoubts.size}", "Submitted Doubts", Color(0xFFFAF5FF), Color(0xFF6B21A8), Modifier.weight(1f))
           }
           UserRole.PARENT -> {
-            val linkedStudentName = AppRepository.students.collectAsState().value.firstOrNull()?.name ?: "No Child Linked"
-            MetricBox("Child Enrolled", linkedStudentName, "Student Profile", Color(0xFFEFF6FF), Color(0xFF1E40AF), Modifier.weight(1f))
-            MetricBox("Fee Status", "Real-Time", "Up-to-date", Color(0xFFECFDF5), Color(0xFF065F46), Modifier.weight(1f))
+            val linkedChildren = AppRepository.getLinkedStudentsForCurrentParent()
+            val linkedStudentName = linkedChildren.firstOrNull()?.name ?: "No Child Linked"
+            val childSub = if (linkedChildren.size > 1) "${linkedChildren.size} Linked Children" else "Student Profile"
+            MetricBox("Child Enrolled", linkedStudentName, childSub, Color(0xFFEFF6FF), Color(0xFF1E40AF), Modifier.weight(1f))
+            MetricBox("Fee Status", linkedChildren.firstOrNull()?.feeStatus ?: "Verified", "Up-to-date", Color(0xFFECFDF5), Color(0xFF065F46), Modifier.weight(1f))
           }
           UserRole.TEACHER -> {
-            MetricBox("My Subjects", "Mathematics, Physics", "Secondary Level", Color(0xFFEFF6FF), Color(0xFF1E40AF), Modifier.weight(1f))
-            MetricBox("Doubts Handled", "42 Solved", "All Batches", Color(0xFFECFDF5), Color(0xFF065F46), Modifier.weight(1f))
+            val activeTeacher = AppRepository.getActiveTeacherForCurrentSession()
+            val resolvedDoubts = AppRepository.doubts.collectAsState().value.count { it.isResolved }
+            MetricBox("My Subjects", activeTeacher?.subjects ?: "Assigned Faculty", activeTeacher?.qualification ?: "Faculty", Color(0xFFEFF6FF), Color(0xFF1E40AF), Modifier.weight(1f))
+            MetricBox("Doubts Handled", "$resolvedDoubts Solved", "All Batches", Color(0xFFECFDF5), Color(0xFF065F46), Modifier.weight(1f))
           }
           UserRole.ADMIN -> {
-            MetricBox("System Status", "Healthy", "ERP Cloud Online", Color(0xFFECFDF5), Color(0xFF065F46), Modifier.weight(1f))
+            MetricBox("System Status", "Healthy", "ERP Cloud + Room", Color(0xFFECFDF5), Color(0xFF065F46), Modifier.weight(1f))
             MetricBox("Control Level", "Full Admin", "My Tuition FSI", Color(0xFFFFFBEB), Color(0xFF92400E), Modifier.weight(1f))
           }
         }
@@ -1018,15 +1082,18 @@ fun ProfileScreen(
         ) {
           ProfileInfoRow(label = "Official Institution", value = "My Tuition Center (FSI)", icon = Icons.Default.School)
           HorizontalDivider(color = Color(0xFFF1F5F9))
-          ProfileInfoRow(label = "Primary Email ID", value = userIdentifier, icon = Icons.Default.Email)
+          ProfileInfoRow(label = "Primary Identifier", value = userIdentifier, icon = Icons.Default.Email)
           HorizontalDivider(color = Color(0xFFF1F5F9))
           ProfileInfoRow(
             label = "Registration ID",
             value = when (currentRole) {
               UserRole.ADMIN -> "ADM-2026-FSI90"
-              UserRole.TEACHER -> "TCH-2026-PHY42"
-              UserRole.STUDENT -> "STU-2026-JEE101"
-              UserRole.PARENT -> "PAR-2026-KUM29"
+              UserRole.TEACHER -> AppRepository.getActiveTeacherForCurrentSession()?.id ?: "TCH-VERIFIED"
+              UserRole.STUDENT -> AppRepository.getActiveStudentForCurrentSession()?.id ?: "STU-VERIFIED"
+              UserRole.PARENT -> {
+                val childId = AppRepository.getLinkedStudentsForCurrentParent().firstOrNull()?.id
+                if (childId != null) "PAR-$childId" else "PAR-VERIFIED"
+              }
             },
             icon = Icons.Default.Badge
           )
@@ -1093,7 +1160,10 @@ fun ProfileScreen(
                     text = label,
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Bold,
-                    color = if (isSel) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
+                    color = if (isSel) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Ellipsis
                   )
                 }
               }

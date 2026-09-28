@@ -21,12 +21,14 @@ data class TeacherEntity(
   val incentives: Int,
   val deductions: Int,
   val status: String,
-  val email: String = "faculty@mytuition.com",
+  val email: String = "",
   val gender: String = "Male",
   val dob: String = "12/04/1988",
   val joiningDate: String = "01/06/2024",
-  val activationCode: String = "891420",
-  val isActivated: Boolean = true,
+  val activationCode: String = "",
+  val isActivated: Boolean = false,
+  val assignedBatchIdsSerialized: String = "",
+  val instituteId: String = "FSI_MAIN",
   val lastUpdated: Long = System.currentTimeMillis()
 ) {
   fun toDomain(): Teacher {
@@ -34,6 +36,11 @@ data class TeacherEntity(
       emptyList()
     } else {
       assignedBatchesSerialized.split("|||")
+    }
+    val batchIds = if (assignedBatchIdsSerialized.isBlank()) {
+      emptyList()
+    } else {
+      assignedBatchIdsSerialized.split("|||")
     }
 
     return Teacher(
@@ -57,13 +64,16 @@ data class TeacherEntity(
       dob = dob,
       joiningDate = joiningDate,
       activationCode = activationCode,
-      isActivated = isActivated
+      isActivated = isActivated,
+      assignedBatchIds = batchIds,
+      instituteId = instituteId
     )
   }
 
   companion object {
     fun fromDomain(teacher: Teacher): TeacherEntity {
       val batchesSerialized = teacher.assignedBatches.joinToString("|||")
+      val batchIdsSerialized = teacher.assignedBatchIds.joinToString("|||")
       return TeacherEntity(
         id = teacher.id,
         name = teacher.name,
@@ -85,7 +95,9 @@ data class TeacherEntity(
         dob = teacher.dob,
         joiningDate = teacher.joiningDate,
         activationCode = teacher.activationCode,
-        isActivated = teacher.isActivated
+        isActivated = teacher.isActivated,
+        assignedBatchIdsSerialized = batchIdsSerialized,
+        instituteId = teacher.instituteId
       )
     }
   }

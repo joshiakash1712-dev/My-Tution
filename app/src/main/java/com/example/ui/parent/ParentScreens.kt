@@ -31,58 +31,126 @@ import java.util.*
 @Composable
 fun ParentMainContent(currentTab: Int, onTabChange: (Int) -> Unit = {}) {
   val students by AppRepository.students.collectAsState()
-  val child = remember(students) {
-    students.firstOrNull() ?: Student(
-      id = "STU-000",
-      name = "No Linked Student",
-      photo = "",
-      mobile = "-",
-      parentName = "-",
-      parentContact = "-",
-      email = "-",
-      dob = "-",
-      gender = "-",
-      address = "-",
-      school = "-",
-      className = "-",
-      batch = "No Active Batch",
-      stream = "-",
-      admissionDate = "-",
-      status = "Inactive",
-      attendancePercent = 0,
-      overallAvg = 0,
-      rank = 0,
-      strongestSubject = "-",
-      weakestSubject = "-",
-      recentScores = emptyList()
-    )
+  val currentUserId by AppRepository.currentUserIdentifier.collectAsState()
+  val currentAccount by AppRepository.currentUserAccount.collectAsState()
+  val selectedChildId by AppRepository.selectedChildIdForParent.collectAsState()
+
+  val linkedChildren = remember(students, currentUserId, currentAccount) {
+    AppRepository.getLinkedStudentsForCurrentParent()
   }
-  val tests by AppRepository.tests.collectAsState()
-  val fees by AppRepository.fees.collectAsState()
-  val childFee = remember(fees, child) {
-    fees.find { it.studentName.contains(child.name, true) }
-      ?: fees.firstOrNull()
-      ?: FeeRecord(
-        id = "F000",
-        studentName = child.name,
-        feeAmount = 0,
-        dueDate = "N/A",
-        paidAmount = 0,
-        pendingAmount = 0,
-        paymentStatus = "No Dues",
-        month = "N/A"
+
+  val child = remember(linkedChildren, selectedChildId) {
+    linkedChildren.find { it.id == selectedChildId }
+      ?: linkedChildren.firstOrNull()
+      ?: Student(
+        id = "STU-000",
+        name = "No Linked Student",
+        photo = "",
+        mobile = "-",
+        parentName = "-",
+        parentContact = "-",
+        email = "-",
+        dob = "-",
+        gender = "-",
+        address = "-",
+        school = "-",
+        className = "-",
+        batch = "No Active Batch",
+        stream = "-",
+        admissionDate = "-",
+        status = "Inactive",
+        attendancePercent = 0,
+        overallAvg = 0,
+        rank = 0,
+        strongestSubject = "-",
+        weakestSubject = "-",
+        recentScores = emptyList()
       )
   }
-  val meetings by AppRepository.meetings.collectAsState()
-  val notifications by AppRepository.notifications.collectAsState()
 
-  when (currentTab) {
-    0 -> ParentDashboardTab(child, childFee, notifications, tests, onTabChange)
-    1 -> ParentAttendanceTab(child)
-    2 -> ParentTestPerformanceTab(child, tests)
-    3 -> ParentFeeStatusTab(childFee)
-    4 -> DynamicTimetableScreen()
-    else -> ParentDashboardTab(child, childFee, notifications, tests, onTabChange)
+  val tests by AppRepository.tests.collectAsState()
+  val childTests = remember(tests, child.id, child.batch, child.batchId) {
+    tests.filter {
+      (child.batchId.isNotBlank() && it.batchId.equals(child.batchId, ignoreCase = true)) ||
+        it.batch.equals(child.batch, ignoreCase = true) ||
+        it.studentMarks.containsKey(child.id)
+    }
+  }
+
+  val homework by AppRepository.homework.collectAsState()
+  val childHomework = remember(homework, child.id, child.batch, child.batchId) {
+    AppRepository.getHomeworkForCurrentStudent(child)
+  }
+
+  val allMeetings by AppRepository.meetings.collectAsState()
+  val childMeetings = remember(allMeetings, child.id, currentUserId, currentAccount) {
+    AppRepository.getMeetingsForCurrentParent().filter {
+      it.studentId.isBlank() || it.studentId.equals(child.id, ignoreCase = true)
+    }
+  }
+
+  val fees by AppRepository.fees.collectAsState()
+  val childFee = remember(fees, child.id) {
+    fees.find {
+      it.studentId.equals(child.id, ignoreCase = true)
+    } ?: FeeRecord(
+      id = "F_${child.id}",
+      studentName = child.name,
+      feeAmount = 0,
+      dueDate = "N/A",
+      paidAmount = 0,
+      pendingAmount = 0,
+      paymentStatus = "No Dues",
+      month = "Current Term",
+      studentId = child.id,
+      batchName = child.batch,
+      batchId = child.batchId
+    )
+  }
+
+  val allNotifications by AppRepository.notifications.collectAsState()
+  val parentNotifications = remember(allNotifications, child.id, child.batch) {
+    allNotifications.filter { n ->
+      val roleOk = n.recipientRole.equals("All", ignoreCase = true) ||
+        n.recipientRole.equals("Everyone", ignoreCase = true) ||
+        n.recipientRole.contains("Parent", ignoreCase = true)
+      val studentOk = n.targetStudentId.isBlank() || n.targetStudentId.equals(child.id, ignoreCase = true)
+      val batchOk = n.targetBatchName.isBlank() || n.targetBatchName.equals(child.batch, ignoreCase = true)
+      roleOk && studentOk && batchOk
+    }
+  }
+
+  Column(modifier = Modifier.fillMaxSize()) {
+    if (linkedChildren.size > 1) {
+      Row(
+        modifier = Modifier
+          .fillMaxWidth()
+          .padding(horizontal = 16.dp, vertical = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically
+      ) {
+        Text("Ward:", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        linkedChildren.forEach { ward ->
+          val isSelected = ward.id == child.id
+          FilterChip(
+            selected = isSelected,
+            onClick = { AppRepository.setSelectedChildForParent(ward.id) },
+            label = { Text("${ward.name} (${ward.id})", fontSize = 11.sp) }
+          )
+        }
+      }
+    }
+
+    Box(modifier = Modifier.weight(1f)) {
+      when (currentTab) {
+        0 -> ParentDashboardTab(child, childFee, parentNotifications, childTests, childHomework, childMeetings, onTabChange)
+        1 -> ParentAttendanceTab(child)
+        2 -> ParentTestPerformanceTab(child, childTests)
+        3 -> ParentFeeStatusTab(childFee, child)
+        4 -> DynamicTimetableScreen()
+        else -> ParentDashboardTab(child, childFee, parentNotifications, childTests, childHomework, childMeetings, onTabChange)
+      }
+    }
   }
 }
 
@@ -92,11 +160,48 @@ fun ParentDashboardTab(
   feeRecord: FeeRecord,
   notifications: List<NotificationItem>,
   tests: List<TestRecord>,
+  homework: List<HomeworkItem> = emptyList(),
+  meetings: List<ParentMeetingItem> = emptyList(),
   onTabChange: (Int) -> Unit = {}
 ) {
   var showReportDialog by remember { mutableStateOf(false) }
+  var showScheduleMeetingDialog by remember { mutableStateOf(false) }
+  var teacherInput by remember { mutableStateOf("Prof. Shrirang Deshmukh") }
+  var dateInput by remember { mutableStateOf(AppRepository.getCurrentDateStr()) }
+  var timeInput by remember { mutableStateOf("05:00 PM") }
+  var notesInput by remember { mutableStateOf("Discuss ${child.name}'s academic progress") }
+
   if (showReportDialog) {
     ReportCardDialog(child) { showReportDialog = false }
+  }
+
+  if (showScheduleMeetingDialog) {
+    AlertDialog(
+      onDismissRequest = { showScheduleMeetingDialog = false },
+      title = { Text("Schedule 1-on-1 Faculty Meeting", fontWeight = FontWeight.Bold) },
+      text = {
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+          OutlinedTextField(value = teacherInput, onValueChange = { teacherInput = it }, label = { Text("Mentor Faculty") }, modifier = Modifier.fillMaxWidth())
+          OutlinedTextField(value = dateInput, onValueChange = { dateInput = it }, label = { Text("Preferred Date (dd/mm/yyyy)") }, modifier = Modifier.fillMaxWidth())
+          OutlinedTextField(value = timeInput, onValueChange = { timeInput = it }, label = { Text("Preferred Time Slot") }, modifier = Modifier.fillMaxWidth())
+          OutlinedTextField(value = notesInput, onValueChange = { notesInput = it }, label = { Text("Agenda / Discussion Notes") }, modifier = Modifier.fillMaxWidth().height(80.dp))
+        }
+      },
+      confirmButton = {
+        Button(
+          onClick = {
+            if (teacherInput.isNotBlank()) {
+              AppRepository.scheduleParentMeeting(teacherInput, dateInput, timeInput, notesInput, child.id)
+              showScheduleMeetingDialog = false
+            }
+          },
+          colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0061A4))
+        ) { Text("Confirm Meeting") }
+      },
+      dismissButton = { TextButton(onClick = { showScheduleMeetingDialog = false }) { Text("Cancel") } },
+      containerColor = MaterialTheme.colorScheme.surface,
+      shape = RoundedCornerShape(24.dp)
+    )
   }
 
   LazyColumn(
@@ -108,7 +213,7 @@ fun ParentDashboardTab(
     item {
       HeroFeatureCard(
         title = "Child Academic Passport",
-        subtitle = "${child.name} • Class 12 JEE • Rank #${child.rank}",
+        subtitle = "${child.name} • ${child.batch} • Rank #${child.rank}",
         tagText = "GUARDIAN ACCESS",
         icon = Icons.Default.FamilyRestroom
       )
@@ -122,7 +227,7 @@ fun ParentDashboardTab(
         card1Click = { showReportDialog = true },
         card2Title = "Schedule Meeting",
         card2Icon = Icons.Default.Groups,
-        card2Click = { onTabChange(4) }
+        card2Click = { showScheduleMeetingDialog = true }
       )
     }
 
@@ -144,11 +249,11 @@ fun ParentDashboardTab(
               horizontalArrangement = Arrangement.SpaceBetween,
               verticalAlignment = Alignment.Top
             ) {
-              Column(Modifier.weight(1f)) {
+              Column(Modifier.weight(1f).padding(end = 8.dp)) {
                 Text(notif.title, fontWeight = FontWeight.Bold, fontSize = 13.sp, color = if (notif.type == "Absence") Color(0xFFEF4444) else MaterialTheme.colorScheme.onSurface)
                 Text(notif.message, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 2.dp))
               }
-              Text(notif.time, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+              Text(notif.time, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, softWrap = false)
             }
           }
         }
@@ -178,12 +283,12 @@ fun ParentDashboardTab(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
           ) {
-            Column(modifier = Modifier.weight(1f)) {
-              Text("Target: AIR < 100 JEE Advanced", fontWeight = FontWeight.Bold, fontSize = 13.sp)
-              Text("Day-by-Day sync with ${child.batch} schedule", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+              Text("Target: AIR < 100 JEE Advanced", fontWeight = FontWeight.Bold, fontSize = 13.sp, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+              Text("Day-by-Day sync with ${child.batch} schedule", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
             }
             Surface(color = Color(0xFF0284C7).copy(alpha = 0.15f), shape = RoundedCornerShape(8.dp)) {
-              Text("Active Goal", color = Color(0xFF0284C7), fontSize = 11.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
+              Text("Active Goal", color = Color(0xFF0284C7), fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
             }
           }
 
@@ -218,13 +323,78 @@ fun ParentDashboardTab(
         }
       }
     }
+
+    // 7. Ward Homework Assignments
+    if (homework.isNotEmpty()) {
+      item {
+        GeoSectionCard(title = "${child.name}'s Homework (${homework.size})") {
+          Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            homework.forEach { hw ->
+              val isDone = hw.completedByStudentIds.contains(child.id) || hw.status.equals("Submitted", ignoreCase = true)
+              Row(
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .clip(RoundedCornerShape(10.dp))
+                  .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f))
+                  .padding(10.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+              ) {
+                Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                  Text("${hw.subject}: ${hw.title}", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                  Text("Due: ${hw.dueDate} • ${hw.assignedBy}", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Text(
+                  text = if (isDone) "DONE ✓" else "PENDING",
+                  fontSize = 10.sp,
+                  fontWeight = FontWeight.Bold,
+                  color = if (isDone) Color(0xFF16A34A) else Color(0xFFD97706)
+                )
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // 8. Scheduled Parent-Teacher Meetings (PTM)
+    if (meetings.isNotEmpty()) {
+      item {
+        GeoSectionCard(title = "Parent-Teacher Meetings (${meetings.size})") {
+          Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            meetings.forEach { m ->
+              Row(
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .clip(RoundedCornerShape(10.dp))
+                  .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f))
+                  .padding(10.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+              ) {
+                Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                  Text("${m.teacherName} • ${m.date} at ${m.time}", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                  Text("Agenda: ${m.notes}", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Text(m.status, fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0284C7))
+              }
+            }
+          }
+        }
+      }
+    }
   }
 }
 
 @Composable
 fun ParentAttendanceTab(child: Student) {
   val attendanceList by AppRepository.attendance.collectAsState()
-  val childAttendance = remember(attendanceList, child) { attendanceList.filter { it.studentId == child.id || it.studentName == child.name } }
+  val childAttendance = remember(attendanceList, child.id) {
+    attendanceList.filter { it.studentId.equals(child.id, ignoreCase = true) }
+  }
+  val presentDays = remember(childAttendance) { childAttendance.count { it.status.equals("Present", ignoreCase = true) } }
+  val absentDays = remember(childAttendance) { childAttendance.count { it.status.equals("Absent", ignoreCase = true) } }
+  val lateDays = remember(childAttendance) { childAttendance.count { it.status.equals("Late", ignoreCase = true) } }
   var isParentAttendanceLoading by remember { mutableStateOf(false) }
 
   LazyColumn(
@@ -235,7 +405,7 @@ fun ParentAttendanceTab(child: Student) {
     item {
       Column {
         Text("${child.name}'s Attendance Audit", fontWeight = FontWeight.Bold, fontSize = 18.sp)
-        Text("Punctuality index is ${child.attendancePercent}%. Absence triggers SMS.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("Punctuality index is ${child.attendancePercent}%. Absence triggers instant alert.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
       }
     }
 
@@ -243,16 +413,16 @@ fun ParentAttendanceTab(child: Student) {
       GeoSectionCard(title = "Monthly Punctuality Summary") {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceAround) {
           Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text("Present", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text("24 Days", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color(0xFF22C55E))
+            Text("Present", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, softWrap = false)
+            Text("$presentDays Days", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color(0xFF22C55E), maxLines = 1, softWrap = false)
           }
           Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text("Absent", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text("1 Day", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color(0xFFEF4444))
+            Text("Absent", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, softWrap = false)
+            Text("$absentDays Days", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color(0xFFEF4444), maxLines = 1, softWrap = false)
           }
           Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text("Late", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text("0 Days", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+            Text("Late", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, softWrap = false)
+            Text("$lateDays Days", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary, maxLines = 1, softWrap = false)
           }
         }
       }
@@ -348,19 +518,28 @@ fun ParentTestPerformanceTab(child: Student, tests: List<TestRecord>) {
 }
 
 @Composable
-fun ParentFeeStatusTab(feeRecord: FeeRecord) {
+fun ParentFeeStatusTab(feeRecord: FeeRecord, child: Student? = null) {
   var showPaymentGateway by remember { mutableStateOf(false) }
   var showReceiptDialog by remember { mutableStateOf(false) }
   var completedPaymentAmount by remember { mutableStateOf(0) }
+  var completedPaymentMethod by remember { mutableStateOf("Online") }
+  val allFeePayments by AppRepository.feePayments.collectAsState()
+  val targetStudentId = child?.id?.ifBlank { feeRecord.studentId } ?: feeRecord.studentId
+  val childPayments = remember(allFeePayments, targetStudentId) {
+    allFeePayments.filter { p ->
+      targetStudentId.isNotBlank() && p.studentId.equals(targetStudentId, ignoreCase = true)
+    }
+  }
 
   if (showPaymentGateway) {
     SimulatedPaymentGatewayDialog(
       amount = feeRecord.pendingAmount,
       feeId = feeRecord.id,
       onDismiss = { showPaymentGateway = false },
-      onPaymentSuccess = { payAmt ->
-        AppRepository.recordFeePayment(feeRecord.id, payAmt)
+      onPaymentSuccess = { payAmt, method ->
+        AppRepository.recordFeePayment(feeRecord.id, payAmt, method)
         completedPaymentAmount = payAmt
+        completedPaymentMethod = method
         showPaymentGateway = false
         showReceiptDialog = true
       }
@@ -371,6 +550,7 @@ fun ParentFeeStatusTab(feeRecord: FeeRecord) {
     ParentReceiptDialog(
       feeRecord = feeRecord,
       payAmt = completedPaymentAmount,
+      paymentMethod = completedPaymentMethod,
       onDismiss = { showReceiptDialog = false }
     )
   }
@@ -413,17 +593,50 @@ fun ParentFeeStatusTab(feeRecord: FeeRecord) {
 
     item { Text("Payment Receipt History", fontWeight = FontWeight.Bold, fontSize = 16.sp) }
     
-    if (feeRecord.paidAmount > 0) {
-      item {
-        GeoSectionCard(title = "Term 1 Installment Receipt #RCP1092", actionText = "PAID") {
+    if (childPayments.isNotEmpty()) {
+      items(childPayments, key = { it.id }) { payment ->
+        GeoSectionCard(title = "Installment Receipt #${payment.id}", actionText = payment.status.uppercase()) {
           Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
           ) {
-            Column {
-              Text("Amount: ₹${feeRecord.paidAmount} • Mode: UPI Secure Online", fontSize = 12.sp, color = Color(0xFF94A3B8))
-              Text("Transaction: TXN-${feeRecord.id.takeLast(6).uppercase()}", fontSize = 10.sp, color = Color(0xFF64748B))
+            Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+              Text(
+                "Amount: ₹${payment.amountPaid.toInt()} • Mode: ${payment.paymentMethod}",
+                fontSize = 12.sp,
+                color = Color(0xFF94A3B8),
+                maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+              )
+              Text(
+                "Date: ${payment.paymentDate}${if (payment.remarks.isNotBlank()) " • ${payment.remarks}" else ""}",
+                fontSize = 10.sp,
+                color = Color(0xFF64748B),
+                maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+              )
+            }
+            IconButton(onClick = {
+              completedPaymentAmount = payment.amountPaid.toInt()
+              showReceiptDialog = true
+            }) {
+              Icon(Icons.Default.ReceiptLong, contentDescription = "View Receipt", tint = Color(0xFF38BDF8))
+            }
+          }
+        }
+      }
+    } else if (feeRecord.paidAmount > 0) {
+      item {
+        GeoSectionCard(title = "Installment Receipt #RCP-${feeRecord.id.takeLast(4).uppercase()}", actionText = "PAID") {
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+          ) {
+            Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+              Text("Amount: ₹${feeRecord.paidAmount} • Mode: UPI Secure Online", fontSize = 12.sp, color = Color(0xFF94A3B8), maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+              Text("Transaction: TXN-${feeRecord.id.takeLast(6).uppercase()}", fontSize = 10.sp, color = Color(0xFF64748B), maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
             }
             IconButton(onClick = { 
               completedPaymentAmount = feeRecord.paidAmount
@@ -454,7 +667,7 @@ fun SimulatedPaymentGatewayDialog(
   amount: Int,
   feeId: String,
   onDismiss: () -> Unit,
-  onPaymentSuccess: (payAmt: Int) -> Unit
+  onPaymentSuccess: (payAmt: Int, method: String) -> Unit
 ) {
   var paymentStep by remember { mutableStateOf(0) } // 0: Select Method, 1: Process Payment, 2: Success
   var selectedMethod by remember { mutableStateOf("UPI") } // "UPI", "Card", "Netbanking"
@@ -474,7 +687,7 @@ fun SimulatedPaymentGatewayDialog(
   if (paymentStep == 1) {
     LaunchedEffect(Unit) {
       kotlinx.coroutines.delay(350L)
-      onPaymentSuccess(amount)
+      onPaymentSuccess(amount, selectedMethod)
       paymentStep = 2
     }
   }
@@ -539,13 +752,16 @@ fun SimulatedPaymentGatewayDialog(
                   .clickable { selectedMethod = method }
               ) {
                 Box(
-                  modifier = Modifier.padding(vertical = 10.dp),
+                  modifier = Modifier.padding(horizontal = 4.dp, vertical = 10.dp),
                   contentAlignment = Alignment.Center
                 ) {
                   Text(
                     text = method,
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                     color = if (isSel) Color.White else Color(0xFF94A3B8)
                   )
                 }
@@ -636,7 +852,7 @@ fun SimulatedPaymentGatewayDialog(
                       .clickable { selectedBank = bank }
                   ) {
                     Box(modifier = Modifier.padding(10.dp), contentAlignment = Alignment.Center) {
-                      Text(bank, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = if (isSel) Color.White else Color(0xFF94A3B8))
+                      Text(bank, fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, color = if (isSel) Color.White else Color(0xFF94A3B8))
                     }
                   }
                 }
@@ -660,7 +876,7 @@ fun SimulatedPaymentGatewayDialog(
                       .clickable { selectedBank = bank }
                   ) {
                     Box(modifier = Modifier.padding(10.dp), contentAlignment = Alignment.Center) {
-                      Text(bank, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = if (isSel) Color.White else Color(0xFF94A3B8))
+                      Text(bank, fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, color = if (isSel) Color.White else Color(0xFF94A3B8))
                     }
                   }
                 }
@@ -736,8 +952,13 @@ fun SimulatedPaymentGatewayDialog(
 fun ParentReceiptDialog(
   feeRecord: FeeRecord,
   payAmt: Int,
+  paymentMethod: String = "Online",
   onDismiss: () -> Unit
 ) {
+  val context = androidx.compose.ui.platform.LocalContext.current
+  val receiptNo = remember(feeRecord.id, payAmt) {
+    "REC-${feeRecord.id.takeLast(4).uppercase()}-${System.currentTimeMillis().toString().takeLast(4)}"
+  }
   AlertDialog(
     onDismissRequest = onDismiss,
     title = {
@@ -758,16 +979,16 @@ fun ParentReceiptDialog(
       ) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
           Text("Receipt No:", fontSize = 11.sp, color = Color(0xFF94A3B8))
-          Text("REC-${System.currentTimeMillis().toString().takeLast(8).uppercase()}", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF38BDF8))
+          Text(receiptNo, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF38BDF8))
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-          Text("Date & Time:", fontSize = 11.sp, color = Color(0xFF94A3B8))
-          Text(AppRepository.getCurrentDateStr() + " • Online", fontSize = 11.sp, color = Color(0xFFF8FAFC))
+          Text("Date & Mode:", fontSize = 11.sp, color = Color(0xFF94A3B8))
+          Text("${AppRepository.getCurrentDateStr()} • $paymentMethod", fontSize = 11.sp, color = Color(0xFFF8FAFC))
         }
         HorizontalDivider(color = Color(0xFF1E2D42))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
           Text("Student Name:", fontSize = 12.sp, color = Color(0xFF94A3B8))
-          Text(feeRecord.studentName, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFFF8FAFC))
+          Text("${feeRecord.studentName} (${feeRecord.studentId})", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFFF8FAFC))
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
           Text("Session Term:", fontSize = 12.sp, color = Color(0xFF94A3B8))
@@ -797,6 +1018,9 @@ fun ParentReceiptDialog(
             fontSize = 10.sp,
             fontWeight = FontWeight.ExtraBold,
             color = Color(0xFF6EE7B7),
+            maxLines = 1,
+            softWrap = false,
+            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
           )
         }
@@ -804,7 +1028,21 @@ fun ParentReceiptDialog(
     },
     confirmButton = {
       Button(
-        onClick = onDismiss,
+        onClick = {
+          com.example.utils.InvoiceGenerator.generateAndShareFeeInvoice(
+            context = context,
+            studentName = feeRecord.studentName,
+            studentId = feeRecord.studentId.ifBlank { "STU001" },
+            batchName = feeRecord.batchName.ifBlank { "General Batch" },
+            amountPaid = payAmt,
+            totalFee = feeRecord.feeAmount,
+            pendingBalance = feeRecord.pendingAmount.coerceAtLeast(0),
+            paymentMethod = paymentMethod,
+            receiptNumber = receiptNo,
+            dateStr = AppRepository.getCurrentDateStr()
+          )
+          onDismiss()
+        },
         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7)),
         shape = RoundedCornerShape(12.dp),
         modifier = Modifier.fillMaxWidth()
@@ -864,14 +1102,14 @@ fun ParentMeetingSchedulerTab(meetings: List<ParentMeetingItem>) {
   ) {
     item {
       Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-        Column {
-          Text("Parent-Teacher Meeting Scheduler", fontWeight = FontWeight.Bold, fontSize = 18.sp)
-          Text("Schedule direct discussions with course faculty.", fontSize = 12.sp, color = Color(0xFF74777F))
+        Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+          Text("Parent-Teacher Meeting Scheduler", fontWeight = FontWeight.Bold, fontSize = 18.sp, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+          Text("Schedule direct discussions with course faculty.", fontSize = 12.sp, color = Color(0xFF74777F), maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
         }
         Button(onClick = { showMeetingDialog = true }, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0061A4)), shape = RoundedCornerShape(16.dp)) {
           Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
           Spacer(Modifier.width(4.dp))
-          Text("Schedule", fontSize = 12.sp)
+          Text("Schedule", fontSize = 12.sp, maxLines = 1, softWrap = false, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
         }
       }
     }
