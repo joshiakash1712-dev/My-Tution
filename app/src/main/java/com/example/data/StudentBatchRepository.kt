@@ -6,6 +6,9 @@ import com.example.data.db.AppRoomDatabase
 import com.example.data.db.BatchEnrollmentEntity
 import com.example.data.db.BatchEntity
 import com.example.data.db.StudentEntity
+import com.example.data.db.SyncOperationType
+import com.example.data.db.SyncQueueEntity
+import com.example.data.db.SyncQueueStatus
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -40,8 +43,21 @@ class StudentBatchRepository(private val context: Context) {
   private val studentGoalDao = database.studentGoalDao()
   private val parentMeetingDao = database.parentMeetingDao()
   private val weeklyTimetableDao = database.weeklyTimetableDao()
+  private val syncQueueDao = database.syncQueueDao()
+
+  init {
+    AppRepository.bindStudentBatchRepository(context, this)
+  }
+
+  internal fun isDatabaseOpenAndCurrent(): Boolean {
+    return database.isOpen && AppRoomDatabase.getInstanceOrNull() === database
+  }
 
   val allStudents: Flow<List<Student>> = studentDao.getAllStudents().map { entities ->
+    entities.map { it.toDomain() }
+  }
+
+  val allStudentsIncludingInactive: Flow<List<Student>> = studentDao.getAllStudentsIncludingInactive().map { entities ->
     entities.map { it.toDomain() }
   }
 
@@ -125,6 +141,78 @@ class StudentBatchRepository(private val context: Context) {
     entities.map { it.toDomain() }
   }
 
+  val pendingSyncQueueItems: Flow<List<SyncQueueEntity>> = syncQueueDao.observePendingItems()
+  val allSyncQueueItems: Flow<List<SyncQueueEntity>> = syncQueueDao.observeAllItems()
+  val pendingSyncQueueCount: Flow<Int> = syncQueueDao.observePendingCount()
+
+  private suspend fun ensureStudentExistsForForeignKey(
+    studentId: String,
+    studentName: String = "",
+    batchName: String = "",
+    batchId: String = "",
+    instituteId: String = AppRepository.getCurrentInstituteId()
+  ) {
+    val cleanId = studentId.trim()
+    if (cleanId.isBlank()) return
+    val existing = studentDao.getStudentByIdOnce(cleanId)
+    if (existing == null) {
+      studentDao.insertStudentIgnore(
+        StudentEntity(
+          id = cleanId,
+          name = studentName.ifBlank { "Student $cleanId" },
+          photo = "",
+          mobile = "",
+          parentName = "",
+          parentContact = "",
+          email = "",
+          dob = "",
+          gender = "",
+          address = "",
+          school = "",
+          className = "",
+          batch = batchName,
+          stream = "",
+          admissionDate = "",
+          status = "Active",
+          attendancePercent = 0,
+          overallAvg = 0,
+          rank = 0,
+          strongestSubject = "",
+          weakestSubject = "",
+          recentScoresSerialized = "",
+          batchId = batchId,
+          instituteId = instituteId.ifBlank { AppRepository.getCurrentInstituteId() }
+        )
+      )
+    }
+  }
+
+  private suspend fun ensureBatchExistsForForeignKey(
+    batchId: String,
+    batchName: String = "",
+    instituteId: String = AppRepository.getCurrentInstituteId()
+  ) {
+    val cleanId = batchId.trim()
+    if (cleanId.isBlank()) return
+    val existing = batchDao.getBatchByIdOnce(cleanId)
+    if (existing == null) {
+      batchDao.insertBatchIgnore(
+        BatchEntity(
+          id = cleanId,
+          name = batchName.ifBlank { cleanId },
+          schedule = "",
+          studentCount = 0,
+          teacherName = "",
+          instituteId = instituteId.ifBlank { AppRepository.getCurrentInstituteId() }
+        )
+      )
+    }
+  }
+
+  suspend fun getStudentCount(): Int = studentDao.getTotalCountIncludingInactive()
+
+  suspend fun getAttendanceCount(): Int = attendanceDao.getCount()
+
   suspend fun insertQuestion(item: QuestionItem) {
     questionDao.insertQuestion(com.example.data.db.QuestionEntity.fromDomain(item))
   }
@@ -138,19 +226,41 @@ class StudentBatchRepository(private val context: Context) {
   }
 
   suspend fun insertStudentAttempt(attempt: StudentTestAttempt) {
-    studentAttemptDao.insertAttempt(com.example.data.db.StudentAttemptEntity.fromDomain(attempt))
+    val entity = com.example.data.db.StudentAttemptEntity.fromDomain(attempt)
+    ensureStudentExistsForForeignKey(
+      studentId = entity.studentId,
+      studentName = entity.studentName,
+      instituteId = entity.instituteId
+    )
+    studentAttemptDao.insertAttempt(entity)
   }
 
   suspend fun insertStudyLog(log: StudyLogItem) {
-    studyLogDao.insertStudyLog(com.example.data.db.StudyLogEntity.fromDomain(log))
+    val entity = com.example.data.db.StudyLogEntity.fromDomain(log)
+    ensureStudentExistsForForeignKey(
+      studentId = entity.studentId,
+      instituteId = entity.instituteId
+    )
+    studyLogDao.insertStudyLog(entity)
   }
 
   suspend fun insertStudentGoal(goal: GoalItem) {
-    studentGoalDao.insertGoal(com.example.data.db.StudentGoalEntity.fromDomain(goal))
+    val entity = com.example.data.db.StudentGoalEntity.fromDomain(goal)
+    ensureStudentExistsForForeignKey(
+      studentId = entity.studentId,
+      instituteId = entity.instituteId
+    )
+    studentGoalDao.insertGoal(entity)
   }
 
   suspend fun insertParentMeeting(meeting: ParentMeetingItem) {
-    parentMeetingDao.insertMeeting(com.example.data.db.ParentMeetingEntity.fromDomain(meeting))
+    val entity = com.example.data.db.ParentMeetingEntity.fromDomain(meeting)
+    ensureStudentExistsForForeignKey(
+      studentId = entity.studentId,
+      studentName = entity.studentName,
+      instituteId = entity.instituteId
+    )
+    parentMeetingDao.insertMeeting(entity)
   }
 
   suspend fun insertWeeklyTimetableEntry(entry: TimetableItem) {
@@ -180,15 +290,41 @@ class StudentBatchRepository(private val context: Context) {
   }
 
   suspend fun insertFeeInvoice(invoice: FeeRecord) {
-    feeInvoiceDao.insertInvoice(com.example.data.db.FeeInvoiceEntity.fromDomain(invoice))
+    val entity = com.example.data.db.FeeInvoiceEntity.fromDomain(invoice)
+    ensureStudentExistsForForeignKey(
+      studentId = entity.studentId,
+      studentName = entity.studentName,
+      batchName = entity.batchName,
+      batchId = entity.batchId,
+      instituteId = entity.instituteId
+    )
+    feeInvoiceDao.insertInvoice(entity)
   }
 
   suspend fun updateFeeInvoice(invoice: FeeRecord) {
-    feeInvoiceDao.insertInvoice(com.example.data.db.FeeInvoiceEntity.fromDomain(invoice))
+    val entity = com.example.data.db.FeeInvoiceEntity.fromDomain(invoice)
+    ensureStudentExistsForForeignKey(
+      studentId = entity.studentId,
+      studentName = entity.studentName,
+      batchName = entity.batchName,
+      batchId = entity.batchId,
+      instituteId = entity.instituteId
+    )
+    feeInvoiceDao.insertInvoice(entity)
   }
 
   suspend fun insertFeeInvoices(invoices: List<FeeRecord>) {
-    feeInvoiceDao.insertInvoices(invoices.map { com.example.data.db.FeeInvoiceEntity.fromDomain(it) })
+    val entities = invoices.map { com.example.data.db.FeeInvoiceEntity.fromDomain(it) }
+    entities.forEach { entity ->
+      ensureStudentExistsForForeignKey(
+        studentId = entity.studentId,
+        studentName = entity.studentName,
+        batchName = entity.batchName,
+        batchId = entity.batchId,
+        instituteId = entity.instituteId
+      )
+    }
+    feeInvoiceDao.insertInvoices(entities)
   }
 
   suspend fun deleteFeeInvoice(invoiceId: String) {
@@ -212,15 +348,41 @@ class StudentBatchRepository(private val context: Context) {
   }
 
   suspend fun insertDoubt(item: DoubtItem) {
-    doubtDao.insertDoubt(com.example.data.db.DoubtEntity.fromDomain(item))
+    val entity = com.example.data.db.DoubtEntity.fromDomain(item)
+    ensureStudentExistsForForeignKey(
+      studentId = entity.studentId,
+      studentName = entity.studentName,
+      batchName = entity.batchName,
+      batchId = entity.batchId,
+      instituteId = entity.instituteId
+    )
+    doubtDao.insertDoubt(entity)
   }
 
   suspend fun updateDoubt(item: DoubtItem) {
-    doubtDao.insertDoubt(com.example.data.db.DoubtEntity.fromDomain(item))
+    val entity = com.example.data.db.DoubtEntity.fromDomain(item)
+    ensureStudentExistsForForeignKey(
+      studentId = entity.studentId,
+      studentName = entity.studentName,
+      batchName = entity.batchName,
+      batchId = entity.batchId,
+      instituteId = entity.instituteId
+    )
+    doubtDao.insertDoubt(entity)
   }
 
   suspend fun insertDoubts(items: List<DoubtItem>) {
-    doubtDao.insertDoubts(items.map { com.example.data.db.DoubtEntity.fromDomain(it) })
+    val entities = items.map { com.example.data.db.DoubtEntity.fromDomain(it) }
+    entities.forEach { entity ->
+      ensureStudentExistsForForeignKey(
+        studentId = entity.studentId,
+        studentName = entity.studentName,
+        batchName = entity.batchName,
+        batchId = entity.batchId,
+        instituteId = entity.instituteId
+      )
+    }
+    doubtDao.insertDoubts(entities)
   }
 
   suspend fun insertTest(item: TestRecord) {
@@ -309,16 +471,33 @@ class StudentBatchRepository(private val context: Context) {
 
   suspend fun insertFeePayment(payment: StudentFeePayment) {
     val entity = com.example.data.db.FeePaymentEntity.fromDomain(payment)
+    ensureStudentExistsForForeignKey(
+      studentId = entity.studentId,
+      studentName = entity.studentName,
+      instituteId = entity.instituteId
+    )
     feePaymentDao.insertPayment(entity)
   }
 
   suspend fun insertFeePayments(payments: List<StudentFeePayment>) {
     val entities = payments.map { com.example.data.db.FeePaymentEntity.fromDomain(it) }
+    entities.forEach { entity ->
+      ensureStudentExistsForForeignKey(
+        studentId = entity.studentId,
+        studentName = entity.studentName,
+        instituteId = entity.instituteId
+      )
+    }
     feePaymentDao.insertPayments(entities)
   }
 
   suspend fun updateFeePayment(payment: StudentFeePayment) {
     val entity = com.example.data.db.FeePaymentEntity.fromDomain(payment)
+    ensureStudentExistsForForeignKey(
+      studentId = entity.studentId,
+      studentName = entity.studentName,
+      instituteId = entity.instituteId
+    )
     feePaymentDao.updatePayment(entity)
   }
 
@@ -340,25 +519,44 @@ class StudentBatchRepository(private val context: Context) {
 
   suspend fun insertAttendance(record: AttendanceRecord) {
     val entity = com.example.data.db.AttendanceRecordEntity.fromDomain(record)
+    ensureStudentExistsForForeignKey(
+      studentId = entity.studentId,
+      studentName = entity.studentName,
+      batchName = entity.batchName,
+      batchId = entity.batchId,
+      instituteId = entity.instituteId
+    )
     attendanceDao.insertAttendance(entity)
   }
 
   suspend fun insertAttendanceList(records: List<AttendanceRecord>) {
     val entities = records.map { com.example.data.db.AttendanceRecordEntity.fromDomain(it) }
+    entities.forEach { entity ->
+      ensureStudentExistsForForeignKey(
+        studentId = entity.studentId,
+        studentName = entity.studentName,
+        batchName = entity.batchName,
+        batchId = entity.batchId,
+        instituteId = entity.instituteId
+      )
+    }
     attendanceDao.insertAttendanceList(entities)
   }
 
   suspend fun updateAttendance(record: AttendanceRecord) {
     val entity = com.example.data.db.AttendanceRecordEntity.fromDomain(record)
+    ensureStudentExistsForForeignKey(
+      studentId = entity.studentId,
+      studentName = entity.studentName,
+      batchName = entity.batchName,
+      batchId = entity.batchId,
+      instituteId = entity.instituteId
+    )
     attendanceDao.updateAttendance(entity)
   }
 
   suspend fun deleteAttendance(recordId: String) {
     attendanceDao.deleteAttendanceById(recordId)
-  }
-
-  suspend fun purgeExpiredAttendance(cutoffTimestamp: Long): Int {
-    return attendanceDao.deleteExpiredAttendance(cutoffTimestamp)
   }
 
   suspend fun deleteAllAttendance() {
@@ -399,117 +597,338 @@ class StudentBatchRepository(private val context: Context) {
   }
 
   suspend fun deleteTeacher(teacherId: String) {
+    batchDao.unassignTeacherFromBatches(teacherId)
     teacherDao.deleteTeacherById(teacherId)
-    userAccountDao.deleteAccountsByLinkedEntities(listOf(teacherId))
+    userAccountDao.deactivateAccountsByLinkedEntities(listOf(teacherId))
   }
 
   suspend fun deleteAllTeachers() {
     teacherDao.deleteAllTeachers()
   }
 
-  suspend fun insertStudent(student: Student) {
-    val entity = StudentEntity.fromDomain(student)
+  suspend fun insertStudent(student: Student, syncToCloud: Boolean = true) {
+    val activeInstituteId = AppRepository.getCurrentInstituteId()
+    val existingEntity = studentDao.getStudentByIdOnce(student.id)
+    val existingInstituteId = existingEntity?.instituteId ?: AppRepository.findExistingStudentInstituteId(student.id)
+    val requestedInstituteId = student.instituteId.trim().ifBlank { existingInstituteId ?: activeInstituteId }
+    if (!com.example.security.SecurityEngine.isValidInstituteId(requestedInstituteId)) {
+      com.example.security.SecurityEngine.logEvent(
+        severity = com.example.security.SecuritySeverity.ALERT,
+        eventType = "INVALID_INSTITUTE_SYNC_BLOCKED",
+        actor = AppRepository.currentUserIdentifier.value.ifBlank { "System" },
+        details = "Blocked insertStudent for '${student.id}' with invalid instituteId '${student.instituteId}'."
+      )
+      return
+    }
+    if (existingInstituteId != null && !existingInstituteId.equals(requestedInstituteId, ignoreCase = true)) {
+      com.example.security.SecurityEngine.logEvent(
+        severity = com.example.security.SecuritySeverity.ALERT,
+        eventType = "INSTITUTE_REASSIGNMENT_BLOCKED",
+        actor = AppRepository.currentUserIdentifier.value.ifBlank { "System" },
+        details = "Blocked insertStudent institute reassignment for '${student.id}' from '$existingInstituteId' to '$requestedInstituteId'."
+      )
+      return
+    }
+    if (existingInstituteId != null && !existingInstituteId.equals(activeInstituteId, ignoreCase = true)) {
+      com.example.security.SecurityEngine.logEvent(
+        severity = com.example.security.SecuritySeverity.ALERT,
+        eventType = "CROSS_TENANT_WRITE_BLOCKED",
+        actor = AppRepository.currentUserIdentifier.value.ifBlank { "System" },
+        details = "Blocked cross-institute insertStudent for '${student.id}' belonging to '$existingInstituteId' from active institute '$activeInstituteId'."
+      )
+      return
+    }
+    if (AppRepository.isLoggedIn.value && !requestedInstituteId.equals(activeInstituteId, ignoreCase = true)) {
+      com.example.security.SecurityEngine.logEvent(
+        severity = com.example.security.SecuritySeverity.ALERT,
+        eventType = "CROSS_TENANT_WRITE_BLOCKED",
+        actor = AppRepository.currentUserIdentifier.value.ifBlank { "System" },
+        details = "Blocked cross-institute insertStudent for '${student.id}' targeting '$requestedInstituteId' while active institute is '$activeInstituteId'."
+      )
+      return
+    }
+
+    val resolvedBatchId = student.batchId.ifBlank { "BATCH_${student.batch.replace(" ", "_")}" }
+    val normalizedStudent = student.copy(
+      batchId = resolvedBatchId,
+      instituteId = existingInstituteId ?: requestedInstituteId
+    )
+    val entity = StudentEntity.fromDomain(normalizedStudent)
     studentDao.insertStudent(entity)
 
+    ensureBatchExistsForForeignKey(
+      batchId = resolvedBatchId,
+      batchName = normalizedStudent.batch,
+      instituteId = normalizedStudent.instituteId
+    )
+
     val enrollment = BatchEnrollmentEntity(
-      id = "ENR_${student.id}_${student.batch.replace(" ", "_")}",
-      studentId = student.id,
-      studentName = student.name,
-      batchId = student.batchId.ifBlank { "BATCH_${student.batch.replace(" ", "_")}" },
-      batchName = student.batch,
-      className = student.className,
-      stream = student.stream,
-      enrollmentDate = student.admissionDate,
-      feeStatus = student.feeStatus,
-      status = student.status
+      id = "ENR_${normalizedStudent.id}_${normalizedStudent.batch.replace(" ", "_")}",
+      studentId = normalizedStudent.id,
+      studentName = normalizedStudent.name,
+      batchId = resolvedBatchId,
+      batchName = normalizedStudent.batch,
+      className = normalizedStudent.className,
+      stream = normalizedStudent.stream,
+      enrollmentDate = normalizedStudent.admissionDate,
+      feeStatus = normalizedStudent.feeStatus,
+      status = normalizedStudent.status
     )
     enrollmentDao.insertEnrollment(enrollment)
+    AppRepository.onLocalStudentUpserted(normalizedStudent, enrollment)
 
-    syncStudentToFirestore(student)
-    syncEnrollmentToFirestore(enrollment)
-  }
-
-  suspend fun updateStudent(student: Student) {
-    val entity = StudentEntity.fromDomain(student)
-    studentDao.updateStudent(entity)
-    val enrollment = BatchEnrollmentEntity(
-      id = "ENR_${student.id}_${student.batch.replace(" ", "_")}",
-      studentId = student.id,
-      studentName = student.name,
-      batchId = student.batchId.ifBlank { "BATCH_${student.batch.replace(" ", "_")}" },
-      batchName = student.batch,
-      className = student.className,
-      stream = student.stream,
-      enrollmentDate = student.admissionDate,
-      feeStatus = student.feeStatus,
-      status = student.status
-    )
-    enrollmentDao.insertEnrollment(enrollment)
-    syncStudentToFirestore(student)
-  }
-
-  suspend fun deleteStudent(studentId: String) {
-    studentDao.deleteStudentById(studentId)
-    enrollmentDao.deleteEnrollmentsByStudent(studentId)
-    feeInvoiceDao.deleteInvoicesByStudentIds(listOf(studentId))
-    userAccountDao.deleteAccountsByLinkedEntities(listOf(studentId))
-    FirestoreService.deleteStudentProfile(studentId, {}, {})
-  }
-
-  suspend fun deleteStudents(studentIds: List<String>) {
-    if (studentIds.isEmpty()) return
-    studentDao.deleteStudentsByIds(studentIds)
-    studentIds.forEach { id ->
-      enrollmentDao.deleteEnrollmentsByStudent(id)
-      FirestoreService.deleteStudentProfile(id, {}, {})
+    if (syncToCloud) {
+      syncStudentToFirestore(normalizedStudent, SyncOperationType.CREATE)
+      syncEnrollmentToFirestore(enrollment)
     }
-    feeInvoiceDao.deleteInvoicesByStudentIds(studentIds)
-    userAccountDao.deleteAccountsByLinkedEntities(studentIds)
+  }
+
+  suspend fun updateStudent(student: Student, syncToCloud: Boolean = true) {
+    val activeInstituteId = AppRepository.getCurrentInstituteId()
+    val existingEntity = studentDao.getStudentByIdOnce(student.id)
+    val existingInstituteId = existingEntity?.instituteId ?: AppRepository.findExistingStudentInstituteId(student.id)
+    val requestedInstituteId = student.instituteId.trim().ifBlank { existingInstituteId ?: activeInstituteId }
+    if (!com.example.security.SecurityEngine.isValidInstituteId(requestedInstituteId)) {
+      com.example.security.SecurityEngine.logEvent(
+        severity = com.example.security.SecuritySeverity.ALERT,
+        eventType = "INVALID_INSTITUTE_SYNC_BLOCKED",
+        actor = AppRepository.currentUserIdentifier.value.ifBlank { "System" },
+        details = "Blocked updateStudent for '${student.id}' with invalid instituteId '${student.instituteId}'."
+      )
+      return
+    }
+    if (existingInstituteId != null && !existingInstituteId.equals(requestedInstituteId, ignoreCase = true)) {
+      com.example.security.SecurityEngine.logEvent(
+        severity = com.example.security.SecuritySeverity.ALERT,
+        eventType = "INSTITUTE_REASSIGNMENT_BLOCKED",
+        actor = AppRepository.currentUserIdentifier.value.ifBlank { "System" },
+        details = "Blocked updateStudent institute reassignment for '${student.id}' from '$existingInstituteId' to '$requestedInstituteId'."
+      )
+      return
+    }
+    if (existingInstituteId != null && !existingInstituteId.equals(activeInstituteId, ignoreCase = true)) {
+      com.example.security.SecurityEngine.logEvent(
+        severity = com.example.security.SecuritySeverity.ALERT,
+        eventType = "CROSS_TENANT_WRITE_BLOCKED",
+        actor = AppRepository.currentUserIdentifier.value.ifBlank { "System" },
+        details = "Blocked cross-institute updateStudent for '${student.id}' belonging to '$existingInstituteId' from active institute '$activeInstituteId'."
+      )
+      return
+    }
+    if (AppRepository.isLoggedIn.value && !requestedInstituteId.equals(activeInstituteId, ignoreCase = true)) {
+      com.example.security.SecurityEngine.logEvent(
+        severity = com.example.security.SecuritySeverity.ALERT,
+        eventType = "CROSS_TENANT_WRITE_BLOCKED",
+        actor = AppRepository.currentUserIdentifier.value.ifBlank { "System" },
+        details = "Blocked cross-institute updateStudent for '${student.id}' targeting '$requestedInstituteId' while active institute is '$activeInstituteId'."
+      )
+      return
+    }
+
+    val resolvedBatchId = student.batchId.ifBlank { "BATCH_${student.batch.replace(" ", "_")}" }
+    val normalizedStudent = student.copy(
+      batchId = resolvedBatchId,
+      instituteId = existingInstituteId ?: requestedInstituteId
+    )
+    val entity = StudentEntity.fromDomain(normalizedStudent)
+    if (existingEntity != null) {
+      studentDao.updateStudent(entity)
+    } else {
+      studentDao.insertStudent(entity)
+    }
+    ensureBatchExistsForForeignKey(
+      batchId = resolvedBatchId,
+      batchName = normalizedStudent.batch,
+      instituteId = normalizedStudent.instituteId
+    )
+    if (existingEntity != null &&
+      (!existingEntity.batch.equals(normalizedStudent.batch, ignoreCase = true) ||
+        (existingEntity.batchId.isNotBlank() && !existingEntity.batchId.equals(resolvedBatchId, ignoreCase = true)))
+    ) {
+      enrollmentDao.deactivateEnrollmentsByStudent(normalizedStudent.id)
+    }
+    val enrollment = BatchEnrollmentEntity(
+      id = "ENR_${normalizedStudent.id}_${normalizedStudent.batch.replace(" ", "_")}",
+      studentId = normalizedStudent.id,
+      studentName = normalizedStudent.name,
+      batchId = resolvedBatchId,
+      batchName = normalizedStudent.batch,
+      className = normalizedStudent.className,
+      stream = normalizedStudent.stream,
+      enrollmentDate = normalizedStudent.admissionDate,
+      feeStatus = normalizedStudent.feeStatus,
+      status = normalizedStudent.status
+    )
+    enrollmentDao.insertEnrollment(enrollment)
+    AppRepository.onLocalStudentUpserted(normalizedStudent, enrollment)
+    if (syncToCloud) {
+      syncStudentToFirestore(normalizedStudent, SyncOperationType.UPDATE)
+    }
+  }
+
+  /**
+   * Soft-deactivates the student (`status = 'Inactive'`, `isActivated = false`) and their active batch
+   * enrollment and user account while preserving historical student identity and all academic/financial
+   * history (attendance, fee invoices, fee payments, test attempts, doubts, study logs, goals, meetings).
+   */
+  suspend fun deactivateStudent(studentId: String, syncToCloud: Boolean = true) {
+    val cleanId = studentId.trim()
+    if (cleanId.isBlank()) return
+    val activeInstituteId = AppRepository.getCurrentInstituteId()
+    if (!com.example.security.SecurityEngine.isValidInstituteId(activeInstituteId)) {
+      com.example.security.SecurityEngine.logEvent(
+        severity = com.example.security.SecuritySeverity.ALERT,
+        eventType = "INVALID_INSTITUTE_SYNC_BLOCKED",
+        actor = AppRepository.currentUserIdentifier.value.ifBlank { "System" },
+        details = "Blocked deactivateStudent for '$cleanId' with invalid active instituteId '$activeInstituteId'."
+      )
+      return
+    }
+    val existingEntity = studentDao.getStudentByIdOnce(cleanId)
+    val existingInstituteId = existingEntity?.instituteId ?: AppRepository.findExistingStudentInstituteId(cleanId)
+    if (existingInstituteId != null && !existingInstituteId.equals(activeInstituteId, ignoreCase = true)) {
+      com.example.security.SecurityEngine.logEvent(
+        severity = com.example.security.SecuritySeverity.ALERT,
+        eventType = "CROSS_TENANT_DELETE_BLOCKED",
+        actor = AppRepository.currentUserIdentifier.value.ifBlank { "System" },
+        details = "Blocked cross-institute deactivateStudent for '$cleanId' belonging to '$existingInstituteId' from active institute '$activeInstituteId'."
+      )
+      return
+    }
+    studentDao.deactivateStudentById(cleanId)
+    enrollmentDao.deactivateEnrollmentsByStudent(cleanId)
+    userAccountDao.deactivateAccountsByLinkedEntities(listOf(cleanId))
+    AppRepository.onLocalStudentsDeactivated(listOf(cleanId))
+    if (syncToCloud) {
+      FirestoreService.deleteStudentProfile(cleanId, {}, {})
+    }
+  }
+
+  suspend fun deactivateStudents(studentIds: List<String>, syncToCloud: Boolean = true) {
+    if (studentIds.isEmpty()) return
+    val activeInstituteId = AppRepository.getCurrentInstituteId()
+    if (!com.example.security.SecurityEngine.isValidInstituteId(activeInstituteId)) {
+      com.example.security.SecurityEngine.logEvent(
+        severity = com.example.security.SecuritySeverity.ALERT,
+        eventType = "INVALID_INSTITUTE_SYNC_BLOCKED",
+        actor = AppRepository.currentUserIdentifier.value.ifBlank { "System" },
+        details = "Blocked deactivateStudents with invalid active instituteId '$activeInstituteId'."
+      )
+      return
+    }
+    val allowedIds = studentIds.map { it.trim() }.filter { cleanId ->
+      if (cleanId.isBlank()) return@filter false
+      val existingEntity = studentDao.getStudentByIdOnce(cleanId)
+      val existingInstituteId = existingEntity?.instituteId ?: AppRepository.findExistingStudentInstituteId(cleanId)
+      if (existingInstituteId != null && !existingInstituteId.equals(activeInstituteId, ignoreCase = true)) {
+        com.example.security.SecurityEngine.logEvent(
+          severity = com.example.security.SecuritySeverity.ALERT,
+          eventType = "CROSS_TENANT_DELETE_BLOCKED",
+          actor = AppRepository.currentUserIdentifier.value.ifBlank { "System" },
+          details = "Blocked cross-institute deactivateStudents for '$cleanId' belonging to '$existingInstituteId' from active institute '$activeInstituteId'."
+        )
+        false
+      } else {
+        true
+      }
+    }
+    if (allowedIds.isEmpty()) return
+    studentDao.deactivateStudentsByIds(allowedIds)
+    allowedIds.forEach { id ->
+      enrollmentDao.deactivateEnrollmentsByStudent(id)
+      if (syncToCloud) {
+        FirestoreService.deleteStudentProfile(id, {}, {})
+      }
+    }
+    userAccountDao.deactivateAccountsByLinkedEntities(allowedIds)
+    AppRepository.onLocalStudentsDeactivated(allowedIds)
+  }
+
+  suspend fun deleteStudent(studentId: String, syncToCloud: Boolean = true) {
+    deactivateStudent(studentId, syncToCloud)
+  }
+
+  suspend fun deleteStudents(studentIds: List<String>, syncToCloud: Boolean = true) {
+    deactivateStudents(studentIds, syncToCloud)
   }
 
   suspend fun clearAllData() {
-    studentDao.deleteAllStudents()
-    teacherDao.deleteAllTeachers()
-    batchDao.deleteAllBatches()
+    // Delete child tables with foreign keys first, then parent tables
     enrollmentDao.deleteAllEnrollments()
     attendanceDao.deleteAllAttendance()
     feePaymentDao.deleteAllPayments()
-    timetableDao.deleteAllTimetableEntries()
     feeInvoiceDao.deleteAllInvoices()
-    homeworkDao.deleteAllHomeworks()
     doubtDao.deleteAllDoubts()
+    studentAttemptDao.deleteAllAttempts()
+    studyLogDao.deleteAllStudyLogs()
+    studentGoalDao.deleteAllGoals()
+    parentMeetingDao.deleteAllMeetings()
+    timetableDao.deleteAllTimetableEntries()
+    homeworkDao.deleteAllHomeworks()
     testRecordDao.deleteAllTests()
     subjectDao.deleteAllSubjects()
     leadDao.deleteAllLeads()
     onlineFormDao.deleteAllForms()
     notificationDao.deleteAllNotifications()
     questionDao.deleteAllQuestions()
-    studentAttemptDao.deleteAllAttempts()
-    studyLogDao.deleteAllStudyLogs()
-    studentGoalDao.deleteAllGoals()
-    parentMeetingDao.deleteAllMeetings()
     weeklyTimetableDao.deleteAllWeeklyTimetable()
+    batchDao.deleteAllBatches()
+    teacherDao.deleteAllTeachers()
+    studentDao.deleteAllStudents()
   }
 
-  suspend fun bulkInsertStudents(studentsList: List<Student>) {
-    val entities = studentsList.map { StudentEntity.fromDomain(it) }
+  suspend fun bulkInsertStudents(studentsList: List<Student>, syncToCloud: Boolean = false) {
+    val activeInstituteId = AppRepository.getCurrentInstituteId()
+    val allowedStudents = studentsList.mapNotNull { stu ->
+      val reqInst = stu.instituteId.trim().ifBlank { activeInstituteId }
+      if (!com.example.security.SecurityEngine.isValidInstituteId(reqInst)) {
+        null
+      } else if (AppRepository.isLoggedIn.value && !reqInst.equals(activeInstituteId, ignoreCase = true)) {
+        com.example.security.SecurityEngine.logEvent(
+          severity = com.example.security.SecuritySeverity.ALERT,
+          eventType = "CROSS_TENANT_WRITE_BLOCKED",
+          actor = AppRepository.currentUserIdentifier.value.ifBlank { "System" },
+          details = "Blocked cross-institute bulkInsertStudents for '${stu.id}' targeting '$reqInst' while active institute is '$activeInstituteId'."
+        )
+        null
+      } else {
+        val resolvedBatchId = stu.batchId.ifBlank { "BATCH_${stu.batch.replace(" ", "_")}" }
+        stu.copy(batchId = resolvedBatchId, instituteId = reqInst)
+      }
+    }
+    if (allowedStudents.isEmpty()) return
+
+    val entities = allowedStudents.map { StudentEntity.fromDomain(it) }
     studentDao.insertStudents(entities)
 
-    val enrollments = studentsList.map { stu ->
+    val enrollments = allowedStudents.map { stu ->
+      val resolvedBatchId = stu.batchId.ifBlank { "BATCH_${stu.batch.replace(" ", "_")}" }
+      ensureBatchExistsForForeignKey(
+        batchId = resolvedBatchId,
+        batchName = stu.batch,
+        instituteId = stu.instituteId
+      )
       BatchEnrollmentEntity(
         id = "ENR_${stu.id}_${stu.batch.replace(" ", "_")}",
         studentId = stu.id,
         studentName = stu.name,
-        batchId = "BATCH_${stu.batch.replace(" ", "_")}",
+        batchId = resolvedBatchId,
         batchName = stu.batch,
         className = stu.className,
         stream = stu.stream,
         enrollmentDate = stu.admissionDate,
-        feeStatus = "Up-to-Date",
+        feeStatus = stu.feeStatus.ifBlank { "Up-to-Date" },
         status = stu.status
       )
     }
     enrollmentDao.insertEnrollments(enrollments)
+    allowedStudents.zip(enrollments).forEach { (stu, enr) ->
+      AppRepository.onLocalStudentUpserted(stu, enr)
+      if (syncToCloud) {
+        syncStudentToFirestore(stu, SyncOperationType.CREATE)
+        syncEnrollmentToFirestore(enr)
+      }
+    }
   }
 
   suspend fun insertBatch(batch: Batch) {
@@ -517,44 +936,118 @@ class StudentBatchRepository(private val context: Context) {
     batchDao.insertBatch(entity)
   }
 
-  suspend fun enrollStudentInBatch(student: Student, batch: Batch) {
-    val updatedStudent = student.copy(batch = batch.name)
-    studentDao.updateStudent(StudentEntity.fromDomain(updatedStudent))
+  suspend fun enrollStudentInBatch(student: Student, batch: Batch, syncToCloud: Boolean = true) {
+    val activeInstituteId = AppRepository.getCurrentInstituteId()
+    val existingEntity = studentDao.getStudentByIdOnce(student.id)
+    val existingInstituteId = existingEntity?.instituteId ?: AppRepository.findExistingStudentInstituteId(student.id)
+    val requestedStudentInstituteId = student.instituteId.trim().ifBlank { existingInstituteId ?: activeInstituteId }
+    val requestedBatchInstituteId = batch.instituteId.trim().ifBlank { activeInstituteId }
+
+    if (!com.example.security.SecurityEngine.isValidInstituteId(requestedStudentInstituteId) ||
+      !com.example.security.SecurityEngine.isValidInstituteId(requestedBatchInstituteId)
+    ) {
+      com.example.security.SecurityEngine.logEvent(
+        severity = com.example.security.SecuritySeverity.ALERT,
+        eventType = "INVALID_INSTITUTE_SYNC_BLOCKED",
+        actor = AppRepository.currentUserIdentifier.value.ifBlank { "System" },
+        details = "Blocked enrollStudentInBatch for '${student.id}' with invalid instituteId."
+      )
+      return
+    }
+    if (existingInstituteId != null && !existingInstituteId.equals(requestedStudentInstituteId, ignoreCase = true)) {
+      com.example.security.SecurityEngine.logEvent(
+        severity = com.example.security.SecuritySeverity.ALERT,
+        eventType = "INSTITUTE_REASSIGNMENT_BLOCKED",
+        actor = AppRepository.currentUserIdentifier.value.ifBlank { "System" },
+        details = "Blocked enrollStudentInBatch institute reassignment for '${student.id}' from '$existingInstituteId' to '$requestedStudentInstituteId'."
+      )
+      return
+    }
+    if ((existingInstituteId != null && !existingInstituteId.equals(activeInstituteId, ignoreCase = true)) ||
+      (AppRepository.isLoggedIn.value && !requestedStudentInstituteId.equals(activeInstituteId, ignoreCase = true)) ||
+      !requestedBatchInstituteId.equals(existingInstituteId ?: requestedStudentInstituteId, ignoreCase = true)
+    ) {
+      com.example.security.SecurityEngine.logEvent(
+        severity = com.example.security.SecuritySeverity.ALERT,
+        eventType = "CROSS_TENANT_WRITE_BLOCKED",
+        actor = AppRepository.currentUserIdentifier.value.ifBlank { "System" },
+        details = "Blocked cross-institute enrollStudentInBatch for student '${student.id}' ($requestedStudentInstituteId) and batch '${batch.id}' ($requestedBatchInstituteId) while active institute is '$activeInstituteId'."
+      )
+      return
+    }
+
+    val resolvedInstituteId = existingInstituteId ?: requestedStudentInstituteId
+    val resolvedBatchId = batch.id.ifBlank { "BATCH_${batch.name.replace(" ", "_")}" }
+    val updatedStudent = student.copy(
+      batch = batch.name,
+      batchId = resolvedBatchId,
+      instituteId = resolvedInstituteId
+    )
+    val entity = StudentEntity.fromDomain(updatedStudent)
+    if (existingEntity != null) {
+      studentDao.updateStudent(entity)
+      if (!existingEntity.batch.equals(batch.name, ignoreCase = true) ||
+        (existingEntity.batchId.isNotBlank() && !existingEntity.batchId.equals(resolvedBatchId, ignoreCase = true))
+      ) {
+        enrollmentDao.deactivateEnrollmentsByStudent(updatedStudent.id)
+      }
+    } else {
+      studentDao.insertStudent(entity)
+    }
+
+    ensureBatchExistsForForeignKey(
+      batchId = resolvedBatchId,
+      batchName = batch.name,
+      instituteId = resolvedInstituteId
+    )
 
     val enrollment = BatchEnrollmentEntity(
-      id = "ENR_${student.id}_${batch.id}",
-      studentId = student.id,
-      studentName = student.name,
-      batchId = batch.id,
+      id = "ENR_${updatedStudent.id}_${resolvedBatchId}",
+      studentId = updatedStudent.id,
+      studentName = updatedStudent.name,
+      batchId = resolvedBatchId,
       batchName = batch.name,
-      className = student.className,
-      stream = student.stream,
+      className = updatedStudent.className,
+      stream = updatedStudent.stream,
       enrollmentDate = SimpleDateFormat("dd MMM yyyy", Locale.getDefault()).format(Date()),
-      feeStatus = "Up-to-Date",
-      status = "Active"
+      feeStatus = updatedStudent.feeStatus.ifBlank { "Up-to-Date" },
+      status = updatedStudent.status.ifBlank { "Active" }
     )
     enrollmentDao.insertEnrollment(enrollment)
-    syncEnrollmentToFirestore(enrollment)
+    AppRepository.onLocalStudentUpserted(updatedStudent, enrollment)
+
+    if (syncToCloud) {
+      syncStudentToFirestore(updatedStudent, SyncOperationType.UPDATE)
+      syncEnrollmentToFirestore(enrollment)
+    }
   }
 
-  private fun syncStudentToFirestore(student: Student) {
-    val fsStudent = FirestoreStudent(
-      id = student.id,
-      name = student.name,
-      grade = "${student.className} (${student.stream})",
-      subjectsEnrolled = listOf("Physics", "Chemistry", "Mathematics"),
-      contactInfo = student.mobile,
-      parentName = student.parentName,
-      parentContact = student.parentContact
-    )
-    FirestoreService.createStudentProfile(
-      fsStudent,
-      onSuccess = {
-        Log.d("StudentBatchRepository", "Student ${student.name} synced to Firestore.")
-      },
-      onFailure = { e ->
-        Log.w("StudentBatchRepository", "Firestore sync postponed (offline): ${e.message}")
+  private fun syncStudentToFirestore(
+    student: Student,
+    operationType: SyncOperationType = SyncOperationType.UPDATE
+  ) {
+    FirestoreService.syncStudentToCloud(
+      student = student,
+      createdBy = AppRepository.currentUserIdentifier.value.ifBlank { "ADMIN" },
+      operationType = operationType
+    ) { synced ->
+      if (synced) {
+        Log.d("StudentBatchRepository", "Student ${student.name} (${operationType.name}) synced to Firestore.")
+      } else {
+        Log.w("StudentBatchRepository", "Student ${student.name} (${operationType.name}) queued in persistent sync_queue.")
       }
+    }
+  }
+
+  fun toSyncQueueEntity(
+    envelope: FirestoreSyncEnvelope,
+    queueId: String = SyncQueueEntity.generateQueueId(),
+    activeInstituteId: String = AppRepository.getCurrentInstituteId()
+  ): SyncQueueEntity {
+    return FirestoreService.toSyncQueueEntity(
+      envelope = envelope,
+      queueId = queueId,
+      activeInstituteId = activeInstituteId
     )
   }
 
@@ -579,5 +1072,56 @@ class StudentBatchRepository(private val context: Context) {
       .addOnSuccessListener {
         Log.d("StudentBatchRepository", "Batch enrollment ${enrollment.id} synced to Firestore.")
       }
+  }
+
+  // --- PERSISTENT SYNC QUEUE FOUNDATION ---
+  suspend fun insertSyncQueueItem(item: SyncQueueEntity) {
+    syncQueueDao.insertQueueItem(item)
+  }
+
+  suspend fun updateSyncQueueItem(item: SyncQueueEntity) {
+    syncQueueDao.updateQueueItem(item)
+  }
+
+  suspend fun getPendingSyncQueueItems(): List<SyncQueueEntity> {
+    return syncQueueDao.getPendingItems()
+  }
+
+  suspend fun getSyncQueueItemById(queueId: String): SyncQueueEntity? {
+    return syncQueueDao.getItemById(queueId)
+  }
+
+  suspend fun markSyncQueueItemProcessing(
+    queueId: String,
+    attemptAt: Long = System.currentTimeMillis()
+  ): Int {
+    return syncQueueDao.markProcessing(queueId = queueId, attemptAt = attemptAt)
+  }
+
+  suspend fun markSyncQueueItemFailed(
+    queueId: String,
+    errorMessage: String? = null,
+    attemptAt: Long = System.currentTimeMillis()
+  ): Int {
+    return syncQueueDao.markFailed(
+      queueId = queueId,
+      errorMessage = errorMessage,
+      attemptAt = attemptAt
+    )
+  }
+
+  suspend fun markSyncQueueItemCompleted(
+    queueId: String,
+    completedAt: Long = System.currentTimeMillis()
+  ): Int {
+    return syncQueueDao.markCompleted(queueId = queueId, completedAt = completedAt)
+  }
+
+  suspend fun deleteCompletedSyncQueueItem(queueId: String): Int {
+    return syncQueueDao.deleteCompletedItem(queueId = queueId)
+  }
+
+  suspend fun countPendingSyncQueueItems(): Int {
+    return syncQueueDao.countPendingItems()
   }
 }

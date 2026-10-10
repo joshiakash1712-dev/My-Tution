@@ -29,10 +29,14 @@ import androidx.room.TypeConverters
     StudyLogEntity::class,
     StudentGoalEntity::class,
     ParentMeetingEntity::class,
-    WeeklyTimetableEntity::class
+    WeeklyTimetableEntity::class,
+    SyncQueueEntity::class,
+    CourseEntity::class,
+    CourseEnrollmentEntity::class,
+    FeeStructureEntity::class
   ],
-  version = 8,
-  exportSchema = false
+  version = 10,
+  exportSchema = true
 )
 @TypeConverters(RoomConverters::class)
 abstract class AppRoomDatabase : RoomDatabase() {
@@ -59,22 +63,55 @@ abstract class AppRoomDatabase : RoomDatabase() {
   abstract fun studentGoalDao(): StudentGoalDao
   abstract fun parentMeetingDao(): ParentMeetingDao
   abstract fun weeklyTimetableDao(): WeeklyTimetableDao
+  abstract fun syncQueueDao(): SyncQueueDao
+  abstract fun courseDao(): CourseDao
+  abstract fun courseEnrollmentDao(): CourseEnrollmentDao
+  abstract fun feeStructureDao(): FeeStructureDao
 
   companion object {
+    val MIGRATION_1_2 = RoomMigrations.MIGRATION_1_2
+    val MIGRATION_2_3 = RoomMigrations.MIGRATION_2_3
+    val MIGRATION_3_4 = RoomMigrations.MIGRATION_3_4
+    val MIGRATION_4_5 = RoomMigrations.MIGRATION_4_5
+    val MIGRATION_5_6 = RoomMigrations.MIGRATION_5_6
+    val MIGRATION_6_7 = RoomMigrations.MIGRATION_6_7
+    val MIGRATION_7_8 = RoomMigrations.MIGRATION_7_8
+    val MIGRATION_8_9 = RoomMigrations.MIGRATION_8_9
+    val MIGRATION_9_10 = RoomMigrations.MIGRATION_9_10
+    val ALL_MIGRATIONS = RoomMigrations.ALL_MIGRATIONS
+
     @Volatile
     private var INSTANCE: AppRoomDatabase? = null
 
+    fun getInstanceOrNull(): AppRoomDatabase? = INSTANCE
+
     fun getDatabase(context: Context): AppRoomDatabase {
       return INSTANCE ?: synchronized(this) {
-        val instance = Room.databaseBuilder(
-          context.applicationContext,
-          AppRoomDatabase::class.java,
-          "my_tuition_fsi_database"
-        )
-          .fallbackToDestructiveMigration()
-          .build()
-        INSTANCE = instance
-        instance
+        val existing = INSTANCE
+        if (existing != null) {
+          existing
+        } else {
+          val instance = Room.databaseBuilder(
+            context.applicationContext,
+            AppRoomDatabase::class.java,
+            "my_tuition_fsi_database"
+          )
+            .addMigrations(*ALL_MIGRATIONS)
+            .allowMainThreadQueries()
+            .build()
+          INSTANCE = instance
+          instance
+        }
+      }
+    }
+
+    @Synchronized
+    fun closeAndResetInstance() {
+      try {
+        INSTANCE?.close()
+      } catch (_: Exception) {
+      } finally {
+        INSTANCE = null
       }
     }
   }

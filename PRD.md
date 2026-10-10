@@ -62,10 +62,10 @@ Unlike traditional, rigid educational CRMs, **My Tuition (FSI)** places Artifici
 
 ## 4. Comprehensive Feature Scope (Current & Planned)
 
-### 4.1. RBAC Authentication & Smart Onboarding
-* **Universal Login Engine:** Single, intelligent entry screen that dynamically identifies the user role based on email/identifier input (e.g., detecting `@mytuition.com`, `STU101`, or a 10-digit parent phone number).
-* **Developer/Super-Admin Bypass:** Pre-configured secure admin override credential (`joshiakash1209@gmail.com` with password `Trillionaire@1209`) for rapid workspace evaluation.
-* **Demo Credential Banner:** Explicit, copyable credential cards displaying the sandbox environment setup.
+### 4.1. RBAC Authentication & Multi-Institute Onboarding
+* **Universal Login Engine:** Single, intelligent entry screen that resolves the user role and institute membership from verified account records and cryptographic session tokens.
+* **Zero Hardcoded Credentials:** All accounts require explicit activation and BCrypt-salted authentication or Firebase Authentication.
+* **Tenant Isolation:** Each institute operates in an isolated tenant scope (`instituteId`) enforced by Firestore Security Rules and repository guards.
 
 ### 4.2. Admin Operations Workspace
 * **BI Dashboard:** Unified summary cards of total active students, average performance metrics, outstanding revenue, and pending CRM leads.

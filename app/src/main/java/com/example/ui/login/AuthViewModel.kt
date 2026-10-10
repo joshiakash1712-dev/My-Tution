@@ -9,6 +9,7 @@ import com.example.data.UserRole
 import com.example.security.FirebaseAppCheckManager
 import com.example.security.SecurityEngine
 import com.example.security.SecuritySeverity
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -191,15 +192,37 @@ class AuthViewModel : ViewModel() {
   private val _adminAuditSummary = MutableStateFlow(AdminAccessAuditSummary())
   val adminAuditSummary: StateFlow<AdminAccessAuditSummary> = _adminAuditSummary.asStateFlow()
 
+  private var accountStatusLookupJob: Job? = null
+
   companion object {
     private const val TAG = "AuthViewModelAudit"
+    const val IDENTIFIER_LOOKUP_DEBOUNCE_MS = 300L
   }
 
   fun onIdentifierChanged(value: String) {
     _identifier.value = value
     _loginError.value = null
-    _accountStatus.value = AppRepository.getAccountStatus(value)
-    checkLockoutState(value)
+
+    accountStatusLookupJob?.cancel()
+
+    if (value.isBlank()) {
+      _accountStatus.value = com.example.data.AccountStatusInfo(
+        exists = false,
+        role = null,
+        displayName = "",
+        isActivated = true
+      )
+      checkLockoutState(value)
+      return
+    }
+
+    accountStatusLookupJob = viewModelScope.launch {
+      delay(IDENTIFIER_LOOKUP_DEBOUNCE_MS)
+      if (_identifier.value == value) {
+        _accountStatus.value = AppRepository.getAccountStatus(value)
+        checkLockoutState(value)
+      }
+    }
   }
 
   fun onPasswordChanged(value: String) {

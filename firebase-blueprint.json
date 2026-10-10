@@ -1,0 +1,220 @@
+{
+  "entities": {
+    "students": {
+      "path": "students/{studentId}",
+      "description": "Student academic profile, personal records, and contact information.",
+      "securityRules": {
+        "read": "request.auth != null && (isAdmin() || isSelfStudent(studentId) || isParentOfStudent(studentId) || isTeacherAuthorizedForBatch(resource.data.batchId))",
+        "create": "request.auth != null && isAdmin() && belongsToInstitute(request.resource.data.instituteId)",
+        "update": "request.auth != null && isAdmin() && belongsToInstitute(resource.data.instituteId) && request.resource.data.instituteId == resource.data.instituteId",
+        "delete": "request.auth != null && isAdmin() && belongsToInstitute(resource.data.instituteId)"
+      },
+      "fields": {
+        "id": { "type": "string", "description": "Unique student identifier (e.g., STU1001)" },
+        "name": { "type": "string", "description": "Student full legal name" },
+        "photo": { "type": "string", "description": "Student profile photo URL or base64" },
+        "grade": { "type": "string", "description": "Standard grade format (e.g., Class 12)" },
+        "subjectsEnrolled": { "type": "array", "description": "List of subject names enrolled in" },
+        "contactInfo": { "type": "string", "description": "Student mobile phone number" },
+        "parentName": { "type": "string", "description": "Parent or guardian name" },
+        "parentContact": { "type": "string", "description": "Parent primary phone number" },
+        "parentEmail": { "type": "string", "description": "Parent registered email address" },
+        "email": { "type": "string", "description": "Student institutional email" },
+        "dob": { "type": "string", "description": "Date of birth (DD/MM/YYYY)" },
+        "gender": { "type": "string", "description": "Male, Female, or Other" },
+        "address": { "type": "string", "description": "Residential address" },
+        "school": { "type": "string", "description": "Current school or college" },
+        "className": { "type": "string", "description": "Class standard (e.g., 10th, 11th, 12th)" },
+        "batch": { "type": "string", "description": "Assigned cohort batch name" },
+        "batchId": { "type": "string", "description": "Cohort batch foreign key identifier" },
+        "courseId": { "type": "string", "description": "Primary academic course identifier" },
+        "stream": { "type": "string", "description": "Academic stream (Science, Commerce, Arts)" },
+        "admissionDate": { "type": "string", "description": "Date of admission" },
+        "status": { "type": "string", "description": "Active, Inactive, Suspended, Graduated" },
+        "attendancePercent": { "type": "number", "description": "Current attendance percentage" },
+        "overallAvg": { "type": "number", "description": "Academic average percentage" },
+        "rank": { "type": "number", "description": "Batch class rank" },
+        "parentId": { "type": "string", "description": "Linked parent account entity identifier" },
+        "feeStatus": { "type": "string", "description": "Paid, Pending, Partial, Overdue" },
+        "instituteId": { "type": "string", "description": "Tenant institute identifier (e.g. FSI_MAIN)" },
+        "createdAt": { "type": "number", "description": "Creation timestamp in milliseconds" },
+        "updatedAt": { "type": "number", "description": "Last update timestamp in milliseconds" },
+        "syncStatus": { "type": "string", "description": "SYNCED, PENDING_SYNC, SYNC_FAILED" }
+      }
+    },
+    "courses": {
+      "path": "courses/{courseId}",
+      "description": "Tuition academic coaching courses, entrance exam preparation programs, and curricula.",
+      "securityRules": {
+        "read": "request.auth != null && (isAdmin() || belongsToInstitute(resource.data.instituteId))",
+        "create": "request.auth != null && isAdmin() && belongsToInstitute(request.resource.data.instituteId)",
+        "update": "request.auth != null && isAdmin() && belongsToInstitute(resource.data.instituteId) && request.resource.data.instituteId == resource.data.instituteId",
+        "delete": "request.auth != null && isAdmin() && belongsToInstitute(resource.data.instituteId)"
+      },
+      "fields": {
+        "id": { "type": "string", "description": "Course identifier (e.g. CRS_PHY_12)" },
+        "name": { "type": "string", "description": "Full course title" },
+        "code": { "type": "string", "description": "Course code (e.g. PHY-12-JEE)" },
+        "description": { "type": "string", "description": "Curriculum overview and objectives" },
+        "grade": { "type": "string", "description": "Target grade level (8th, 9th, 10th, 11th, 12th)" },
+        "stream": { "type": "string", "description": "Science, Commerce, Arts, Foundation" },
+        "subjects": { "type": "array", "description": "List of subjects included in the course" },
+        "totalFee": { "type": "number", "description": "Standard base fee for course" },
+        "durationMonths": { "type": "number", "description": "Course length in months" },
+        "hoursPerWeek": { "type": "number", "description": "Weekly teaching hours" },
+        "leadInstructorId": { "type": "string", "description": "Lead faculty teacher identifier" },
+        "leadInstructorName": { "type": "string", "description": "Lead faculty teacher display name" },
+        "status": { "type": "string", "description": "Active, Upcoming, Archived" },
+        "maxCapacity": { "type": "number", "description": "Maximum student enrollment capacity" },
+        "enrolledStudentCount": { "type": "number", "description": "Current active enrollment count" },
+        "syllabusChapters": { "type": "array", "description": "Chapter breakdown syllabus modules" },
+        "instituteId": { "type": "string", "description": "Tenant institute identifier" },
+        "createdAt": { "type": "number", "description": "Creation timestamp in milliseconds" },
+        "updatedAt": { "type": "number", "description": "Last update timestamp in milliseconds" },
+        "syncStatus": { "type": "string", "description": "SYNCED, PENDING_SYNC, SYNC_FAILED" }
+      }
+    },
+    "course_enrollments": {
+      "path": "course_enrollments/{enrollmentId}",
+      "description": "Student enrollments linking students with coaching courses and batches.",
+      "securityRules": {
+        "read": "request.auth != null && (isAdmin() || isSelfStudent(resource.data.studentId) || isParentOfStudent(resource.data.studentId) || isTeacherAuthorizedForBatch(resource.data.batchId))",
+        "create": "request.auth != null && isAdmin() && belongsToInstitute(request.resource.data.instituteId)",
+        "update": "request.auth != null && isAdmin() && belongsToInstitute(resource.data.instituteId) && request.resource.data.instituteId == resource.data.instituteId",
+        "delete": "request.auth != null && isAdmin() && belongsToInstitute(resource.data.instituteId)"
+      },
+      "fields": {
+        "enrollmentId": { "type": "string", "description": "Unique enrollment identifier" },
+        "studentId": { "type": "string", "description": "Enrolled student identifier" },
+        "courseId": { "type": "string", "description": "Course identifier" },
+        "batchId": { "type": "string", "description": "Assigned cohort batch identifier" },
+        "enrolledDate": { "type": "string", "description": "Enrollment date" },
+        "status": { "type": "string", "description": "Active, Completed, Withdrawn" },
+        "discountPercent": { "type": "number", "description": "Scholarship or concession percentage" },
+        "netFee": { "type": "number", "description": "Net payable fee after concessions" },
+        "instituteId": { "type": "string", "description": "Tenant institute identifier" },
+        "createdAt": { "type": "number", "description": "Enrollment timestamp in milliseconds" }
+      }
+    },
+    "attendance": {
+      "path": "attendance/{attendanceId}",
+      "description": "Daily and session attendance tracking logs across students, courses, and batches.",
+      "securityRules": {
+        "read": "request.auth != null && (isAdmin() || isTeacherAuthorizedForBatch(resource.data.batchId) || isSelfStudent(resource.data.studentId) || isParentOfStudent(resource.data.studentId))",
+        "create": "request.auth != null && (isAdmin() || isTeacherAuthorizedForBatch(request.resource.data.batchId)) && belongsToInstitute(request.resource.data.instituteId)",
+        "update": "request.auth != null && (isAdmin() || (isTeacherAuthorizedForBatch(resource.data.batchId) && request.resource.data.batchId == resource.data.batchId)) && belongsToInstitute(resource.data.instituteId) && request.resource.data.instituteId == resource.data.instituteId",
+        "delete": "request.auth != null && isAdmin() && belongsToInstitute(resource.data.instituteId)"
+      },
+      "fields": {
+        "id": { "type": "string", "description": "Deterministic record ID (ATT_YYYYMMDD_BATCH_STUDENTID)" },
+        "date": { "type": "string", "description": "Formatted date DD/MM/YYYY" },
+        "day": { "type": "number", "description": "Day of month (1..31)" },
+        "month": { "type": "number", "description": "Month number (1..12)" },
+        "monthName": { "type": "string", "description": "Full month name (e.g. August)" },
+        "year": { "type": "number", "description": "Four-digit calendar year" },
+        "time": { "type": "string", "description": "Session timestamp formatted (e.g. 10:30 AM)" },
+        "studentId": { "type": "string", "description": "Foreign key reference to student" },
+        "studentName": { "type": "string", "description": "Denormalized student full name" },
+        "courseId": { "type": "string", "description": "Associated course identifier" },
+        "batchId": { "type": "string", "description": "Associated batch identifier" },
+        "batchName": { "type": "string", "description": "Batch cohort title" },
+        "status": { "type": "string", "description": "Present, Absent, Late, Excused" },
+        "sessionType": { "type": "string", "description": "Regular Class, Extra Lecture, Doubt Session, Mock Exam" },
+        "reason": { "type": "string", "description": "Absence or tardiness justification if provided" },
+        "recordedBy": { "type": "string", "description": "Teacher or Admin name who recorded attendance" },
+        "instituteId": { "type": "string", "description": "Tenant institute identifier" },
+        "timestamp": { "type": "number", "description": "Creation timestamp in milliseconds" },
+        "lastModifiedTimestamp": { "type": "number", "description": "Last updated timestamp in milliseconds" },
+        "syncStatus": { "type": "string", "description": "SYNCED, PENDING_SYNC, SYNC_FAILED" }
+      }
+    },
+    "fees": {
+      "path": "fees/{feeId}",
+      "description": "Student fee invoices, dues, installments, and payment status ledgers.",
+      "securityRules": {
+        "read": "request.auth != null && (isAdmin() || isSelfStudent(resource.data.studentId) || isParentOfStudent(resource.data.studentId))",
+        "create": "request.auth != null && isAdmin() && belongsToInstitute(request.resource.data.instituteId)",
+        "update": "request.auth != null && isAdmin() && belongsToInstitute(resource.data.instituteId) && request.resource.data.instituteId == resource.data.instituteId",
+        "delete": "request.auth != null && isAdmin() && belongsToInstitute(resource.data.instituteId)"
+      },
+      "fields": {
+        "id": { "type": "string", "description": "Invoice number (e.g. INV-2026-001)" },
+        "studentId": { "type": "string", "description": "Student foreign key identifier" },
+        "studentName": { "type": "string", "description": "Student display name" },
+        "courseId": { "type": "string", "description": "Course identifier" },
+        "batchId": { "type": "string", "description": "Batch identifier" },
+        "batchName": { "type": "string", "description": "Batch title" },
+        "feeType": { "type": "string", "description": "Monthly Tuition, Exam Fee, Material Fee, Annual Package" },
+        "feeAmount": { "type": "number", "description": "Total invoice billing amount" },
+        "dueDate": { "type": "string", "description": "Payment due deadline date" },
+        "paidAmount": { "type": "number", "description": "Cumulative amount paid toward invoice" },
+        "pendingAmount": { "type": "number", "description": "Outstanding unpaid balance" },
+        "paymentStatus": { "type": "string", "description": "Paid, Pending, Partial, Overdue" },
+        "month": { "type": "string", "description": "Billing month cycle (e.g. August 2026)" },
+        "remindedCount": { "type": "number", "description": "Count of automated notifications sent" },
+        "lastReminded": { "type": "string", "description": "Timestamp of most recent reminder" },
+        "instituteId": { "type": "string", "description": "Tenant institute identifier" },
+        "createdAt": { "type": "number", "description": "Creation timestamp in milliseconds" },
+        "updatedAt": { "type": "number", "description": "Last update timestamp in milliseconds" },
+        "syncStatus": { "type": "string", "description": "SYNCED, PENDING_SYNC, SYNC_FAILED" }
+      }
+    },
+    "fee_payments": {
+      "path": "fee_payments/{paymentId}",
+      "description": "Financial payment transaction records, receipts, and audit trail.",
+      "securityRules": {
+        "read": "request.auth != null && (isAdmin() || isSelfStudent(resource.data.studentId) || isParentOfStudent(resource.data.studentId))",
+        "create": "request.auth != null && (isAdmin() || isParentOfStudent(request.resource.data.studentId)) && belongsToInstitute(request.resource.data.instituteId)",
+        "update": "request.auth != null && isAdmin() && belongsToInstitute(resource.data.instituteId) && request.resource.data.instituteId == resource.data.instituteId",
+        "delete": "request.auth != null && isAdmin() && belongsToInstitute(resource.data.instituteId)"
+      },
+      "fields": {
+        "id": { "type": "string", "description": "Transaction identifier (e.g. PAY-1001)" },
+        "invoiceId": { "type": "string", "description": "Parent invoice reference identifier" },
+        "studentId": { "type": "string", "description": "Student foreign key identifier" },
+        "studentName": { "type": "string", "description": "Student display name" },
+        "courseId": { "type": "string", "description": "Associated course identifier" },
+        "amount": { "type": "number", "description": "Paid monetary amount" },
+        "paymentDate": { "type": "string", "description": "Date of transaction receipt" },
+        "paymentStatus": { "type": "string", "description": "Paid, Pending, Partial, Refunded" },
+        "feeType": { "type": "string", "description": "Tuition, Exam, Material, Admission" },
+        "paymentMode": { "type": "string", "description": "UPI, Cash, Card, Net Banking, Cheque" },
+        "receiptNo": { "type": "string", "description": "Official receipt serial number" },
+        "transactionId": { "type": "string", "description": "External payment gateway / bank UTR reference" },
+        "month": { "type": "string", "description": "Fee billing month" },
+        "remarks": { "type": "string", "description": "Accounting notes or remarks" },
+        "recordedBy": { "type": "string", "description": "Officer or admin who accepted payment" },
+        "timestamp": { "type": "number", "description": "Transaction epoch milliseconds" },
+        "instituteId": { "type": "string", "description": "Tenant institute identifier" },
+        "syncStatus": { "type": "string", "description": "SYNCED, PENDING_SYNC, SYNC_FAILED" }
+      }
+    },
+    "fee_structures": {
+      "path": "fee_structures/{structureId}",
+      "description": "Standard institute fee schedules, installment breakdowns, and pricing templates.",
+      "securityRules": {
+        "read": "request.auth != null && belongsToInstitute(resource.data.instituteId)",
+        "create": "request.auth != null && isAdmin() && belongsToInstitute(request.resource.data.instituteId)",
+        "update": "request.auth != null && isAdmin() && belongsToInstitute(resource.data.instituteId) && request.resource.data.instituteId == resource.data.instituteId",
+        "delete": "request.auth != null && isAdmin() && belongsToInstitute(resource.data.instituteId)"
+      },
+      "fields": {
+        "id": { "type": "string", "description": "Fee structure identifier" },
+        "courseId": { "type": "string", "description": "Associated course identifier" },
+        "courseName": { "type": "string", "description": "Course title" },
+        "grade": { "type": "string", "description": "Class standard (e.g. 11th, 12th)" },
+        "stream": { "type": "string", "description": "Science, Commerce, Arts" },
+        "baseTuitionFee": { "type": "number", "description": "Base tuition amount" },
+        "examFee": { "type": "number", "description": "Standard exam fee component" },
+        "materialFee": { "type": "number", "description": "Study material and books fee" },
+        "totalFee": { "type": "number", "description": "Cumulative total fee" },
+        "installmentCount": { "type": "number", "description": "Permitted installment count" },
+        "installmentIntervalMonths": { "type": "number", "description": "Interval between installments in months" },
+        "allowDiscount": { "type": "boolean", "description": "Whether scholarship discounts can be applied" },
+        "academicYear": { "type": "string", "description": "Academic fiscal year (e.g. 2026–2027)" },
+        "instituteId": { "type": "string", "description": "Tenant institute identifier" },
+        "createdAt": { "type": "number", "description": "Creation timestamp in milliseconds" }
+      }
+    }
+  }
+}

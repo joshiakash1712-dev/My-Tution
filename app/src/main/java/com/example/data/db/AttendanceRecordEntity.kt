@@ -1,6 +1,8 @@
 package com.example.data.db
 
 import androidx.room.Entity
+import androidx.room.ForeignKey
+import androidx.room.Index
 import androidx.room.PrimaryKey
 import com.example.data.AttendanceRecord
 import java.text.SimpleDateFormat
@@ -8,7 +10,25 @@ import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 
-@Entity(tableName = "attendance_records")
+@Entity(
+  tableName = "attendance_records",
+  foreignKeys = [
+    ForeignKey(
+      entity = StudentEntity::class,
+      parentColumns = ["id"],
+      childColumns = ["studentId"],
+      onDelete = ForeignKey.RESTRICT,
+      onUpdate = ForeignKey.CASCADE,
+      deferred = true
+    )
+  ],
+  indices = [
+    Index(value = ["studentId"]),
+    Index(value = ["batchId"]),
+    Index(value = ["date"]),
+    Index(value = ["instituteId"])
+  ]
+)
 data class AttendanceRecordEntity(
   @PrimaryKey val id: String,
   val date: String, // "dd/MM/yyyy"

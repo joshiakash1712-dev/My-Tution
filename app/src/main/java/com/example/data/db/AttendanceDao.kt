@@ -44,13 +44,6 @@ interface AttendanceDao {
   @Query("DELETE FROM attendance_records WHERE id = :id")
   suspend fun deleteAttendanceById(id: String)
 
-  /**
-   * Non-permanent storage retention cleanup:
-   * Removes attendance records older than the cutoff timestamp (e.g. 60 or 90 days rolling retention).
-   */
-  @Query("DELETE FROM attendance_records WHERE timestamp < :cutoffTimestamp")
-  suspend fun deleteExpiredAttendance(cutoffTimestamp: Long): Int
-
   @Query("DELETE FROM attendance_records")
   suspend fun deleteAllAttendance()
 

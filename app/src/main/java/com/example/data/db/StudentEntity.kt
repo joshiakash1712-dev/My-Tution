@@ -1,10 +1,18 @@
 package com.example.data.db
 
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.PrimaryKey
 import com.example.data.Student
 
-@Entity(tableName = "students")
+@Entity(
+  tableName = "students",
+  indices = [
+    Index(value = ["batchId"]),
+    Index(value = ["instituteId"]),
+    Index(value = ["status"])
+  ]
+)
 data class StudentEntity(
   @PrimaryKey val id: String,
   val name: String,

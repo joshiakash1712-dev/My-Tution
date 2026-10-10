@@ -30,7 +30,8 @@ enum class DarkThemeMode(val displayName: String) {
 data class SavedAccount(
   val identifier: String,
   val role: UserRole,
-  val displayName: String
+  val displayName: String,
+  val instituteId: String = "FSI_MAIN"
 )
 
 data class AccountStatusInfo(
@@ -40,10 +41,12 @@ data class AccountStatusInfo(
   val isActivated: Boolean,
   val expectedActivationCode: String = "",
   val studentId: String? = null,
-  val teacherId: String? = null
+  val teacherId: String? = null,
+  val instituteId: String = "FSI_MAIN"
 )
 
 data class InstituteConfig(
+  val instituteId: String = "FSI_MAIN",
   val instituteName: String = "My Tuition Academy",
   val tagline: String = "Empowering Academic Excellence",
   val founderName: String = "Director",
@@ -78,12 +81,12 @@ data class InstituteConfig(
     "11th" to 55000,
     "12th" to 65000
   ),
-  val adminFullName: String = "Institute Administrator",
+  val adminFullName: String = "Akash Joshi",
   val adminRole: String = "Director",
   val adminGender: String = "Male",
-  val adminDob: String = "15/08/1980",
+  val adminDob: String = "17/12/2000",
   val adminPhone: String = "",
-  val adminEmail: String = "",
+  val adminEmail: String = "joshiakash1712@gmail.com",
   val isSetupCompleted: Boolean = true
 )
 
@@ -122,11 +125,66 @@ data class Student(
   val activationCode: String = "",
   val isActivated: Boolean = false,
   val batchId: String = "",
+  val courseId: String = "",
+  val enrolledCourseIds: List<String> = emptyList(),
   val parentId: String = "",
   val parentEmail: String = "",
   val feeStatus: String = "Pending",
-  val instituteId: String = "FSI_MAIN",
+  val instituteId: String = AppRepository.getCurrentInstituteId(),
   val admissionTimestamp: Long = System.currentTimeMillis()
+)
+
+data class Course(
+  val id: String,
+  val name: String,
+  val code: String = "",
+  val description: String = "",
+  val grade: String = "12th",
+  val stream: String = "Science",
+  val subjects: List<String> = listOf("Physics", "Chemistry", "Mathematics"),
+  val totalFee: Double = 45000.0,
+  val durationMonths: Int = 12,
+  val hoursPerWeek: Int = 10,
+  val leadInstructorId: String = "",
+  val leadInstructorName: String = "",
+  val status: String = "Active", // "Active" | "Upcoming" | "Archived"
+  val maxCapacity: Int = 40,
+  val enrolledStudentCount: Int = 0,
+  val syllabusChapters: List<String> = emptyList(),
+  val instituteId: String = AppRepository.getCurrentInstituteId(),
+  val createdAt: Long = System.currentTimeMillis(),
+  val updatedAt: Long = System.currentTimeMillis()
+)
+
+data class CourseEnrollment(
+  val enrollmentId: String,
+  val studentId: String,
+  val courseId: String,
+  val batchId: String = "",
+  val enrolledDate: String = "",
+  val status: String = "Active", // "Active" | "Completed" | "Withdrawn"
+  val discountPercent: Double = 0.0,
+  val netFee: Double = 0.0,
+  val instituteId: String = AppRepository.getCurrentInstituteId(),
+  val createdAt: Long = System.currentTimeMillis()
+)
+
+data class FeeStructure(
+  val id: String,
+  val courseId: String,
+  val courseName: String,
+  val grade: String = "12th",
+  val stream: String = "Science",
+  val baseTuitionFee: Double = 40000.0,
+  val examFee: Double = 3000.0,
+  val materialFee: Double = 2000.0,
+  val totalFee: Double = 45000.0,
+  val installmentCount: Int = 3,
+  val installmentIntervalMonths: Int = 3,
+  val allowDiscount: Boolean = true,
+  val academicYear: String = "2026–2027",
+  val instituteId: String = AppRepository.getCurrentInstituteId(),
+  val createdAt: Long = System.currentTimeMillis()
 )
 
 data class Teacher(
@@ -196,6 +254,8 @@ data class AttendanceRecord(
   val reason: String? = null,
   val recordedBy: String? = null,
   val batchId: String = "",
+  val courseId: String = "",
+  val sessionType: String = "Regular Class",
   val instituteId: String = "FSI_MAIN"
 )
 
@@ -255,6 +315,8 @@ data class FeeRecord(
   val studentId: String = "",
   val batchName: String = "",
   val batchId: String = "",
+  val courseId: String = "",
+  val feeType: String = "Monthly Tuition",
   val instituteId: String = "FSI_MAIN"
 )
 
@@ -273,6 +335,7 @@ data class StudentFeePayment(
   val recordedBy: String = "Admin",
   val timestamp: Long = System.currentTimeMillis(),
   val invoiceId: String = "",
+  val courseId: String = "",
   val instituteId: String = "FSI_MAIN",
   val transactionId: String = ""
 ) {

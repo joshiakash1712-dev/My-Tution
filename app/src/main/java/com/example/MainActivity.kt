@@ -44,10 +44,19 @@ class MainActivity : ComponentActivity() {
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
     try {
-      AppRepository.initialize(applicationContext)
+      com.example.security.SecurityEngine.initialize(applicationContext)
+    } catch (e: Throwable) {
+      android.util.Log.e("MainActivity", "SecurityEngine initialization error: ${e.message}", e)
+    }
+    try {
       FirebaseAppCheckManager.initialize(applicationContext)
-    } catch (e: Exception) {
-      android.util.Log.e("MainActivity", "Startup initialization error: ${e.message}", e)
+    } catch (e: Throwable) {
+      android.util.Log.e("MainActivity", "FirebaseAppCheckManager initialization error: ${e.message}", e)
+    }
+    try {
+      AppRepository.initialize(applicationContext)
+    } catch (e: Throwable) {
+      android.util.Log.e("MainActivity", "AppRepository initialization error: ${e.message}", e)
     }
 
     try {

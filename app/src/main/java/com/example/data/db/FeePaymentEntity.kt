@@ -1,10 +1,29 @@
 package com.example.data.db
 
 import androidx.room.Entity
+import androidx.room.ForeignKey
+import androidx.room.Index
 import androidx.room.PrimaryKey
 import com.example.data.StudentFeePayment
 
-@Entity(tableName = "fee_payments")
+@Entity(
+  tableName = "fee_payments",
+  foreignKeys = [
+    ForeignKey(
+      entity = StudentEntity::class,
+      parentColumns = ["id"],
+      childColumns = ["studentId"],
+      onDelete = ForeignKey.RESTRICT,
+      onUpdate = ForeignKey.CASCADE,
+      deferred = true
+    )
+  ],
+  indices = [
+    Index(value = ["studentId"]),
+    Index(value = ["invoiceId"]),
+    Index(value = ["instituteId"])
+  ]
+)
 data class FeePaymentEntity(
   @PrimaryKey val id: String,
   val studentId: String,

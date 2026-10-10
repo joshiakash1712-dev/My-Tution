@@ -24,6 +24,9 @@ interface BatchEnrollmentDao {
   @Insert(onConflict = OnConflictStrategy.REPLACE)
   suspend fun insertEnrollments(enrollments: List<BatchEnrollmentEntity>)
 
+  @Query("UPDATE batch_enrollments SET status = 'Inactive', lastUpdated = :timestamp WHERE studentId = :studentId")
+  suspend fun deactivateEnrollmentsByStudent(studentId: String, timestamp: Long = System.currentTimeMillis())
+
   @Query("DELETE FROM batch_enrollments WHERE studentId = :studentId AND batchId = :batchId")
   suspend fun deleteEnrollment(studentId: String, batchId: String)
 

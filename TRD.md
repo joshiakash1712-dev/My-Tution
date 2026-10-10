@@ -113,26 +113,22 @@ data class TestRecord(
 ## 4. Authentication & RBAC Configuration
 Authentication utilizes `FirebaseAuthService` with integrated fallback mechanisms to allow offline development, UI testing, and presentation.
 
-### 4.1. Smart Role Detection (`smartDetectRole`)
-The system analyzes incoming identifier sequences to automatically categorize the user role:
+### 4.1. Authoritative Role & Tenant Resolution (`fetchUserRole` & `smartDetectRole`)
+The system resolves the user's `UserRole` and `instituteId` from Firebase Auth Custom Claims, `/user_roles/{uid}` in Firestore, or the local cryptographic credential vault:
 ```kotlin
 private fun smartDetectRole(email: String): UserRole {
   val clean = email.trim().lowercase()
-  return when {
-    clean == "admin" || clean.contains("admin") || clean == "joshiakash1209@gmail.com" -> UserRole.ADMIN
-    clean.contains("teacher") || clean.contains("faculty") || clean.contains("sharma") -> UserRole.TEACHER
-    clean.contains("parent") || clean == "9811122233" -> UserRole.PARENT
-    else -> UserRole.STUDENT
+  val status = AppRepository.getAccountStatus(clean)
+  if (status.exists && status.role != null) {
+    return status.role
   }
+  return SecurityEngine.getVerifiedRole(clean) ?: UserRole.STUDENT
 }
 ```
 
-### 4.2. Super-Admin Dev Bypass Credentials
-For ease of validation and evaluation, the following hardcoded security override bypasses standard Firebase REST queries:
-* **Admin Email:** `joshiakash1209@gmail.com`
-* **Admin Password:** `Trillionaire@1209`
-
-When these credentials are input on the `UniversalLoginScreen.kt`, the linter overrides verification queries and directly authenticates the session as `UserRole.ADMIN`.
+### 4.2. Multi-Institute Tenant Isolation & Privilege Protection
+* Every institute-owned entity carries a verified `instituteId`.
+* Elevated role assignments (`ADMIN` / `OWNER`) and cross-institute operations are restricted to trusted backend/Admin SDK workflows and never exposed via hardcoded client credentials.
 
 ---
 

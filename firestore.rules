@@ -3,66 +3,905 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Helper function: Check if request is authenticated
+    // =========================================================================
+    // 1. AUTHENTICATION, TENANT ISOLATION & RBAC HELPER FUNCTIONS
+    // =========================================================================
+
     function isAuthenticated() {
-      return request.auth != null;
+      return request.auth != null && request.auth.uid != null;
     }
 
-    // Helper function: Check if authenticated user has ADMIN privileges
-    // Checks Firebase Auth Custom Token Claims, User Role Document in Firestore, or Super Admin Email List
-    function isAdmin() {
-      return isAuthenticated() && (
-        request.auth.token.role == 'ADMIN' ||
-        request.auth.token.admin == true ||
-        (
-          exists(/databases/$(database)/documents/user_roles/$(request.auth.uid)) &&
-          get(/databases/$(database)/documents/user_roles/$(request.auth.uid)).data.role == 'ADMIN'
-        ) ||
-        request.auth.token.email in ['joshiakash1209@gmail.com', 'joshiakash1712@gmail.com']
-      );
-    }
-
-    // Helper function: Check if user owns the document
     function isOwner(userId) {
       return isAuthenticated() && request.auth.uid == userId;
     }
 
-    // --- COLLECTION SECURITY RULES ---
+    function hasUserRoleDoc() {
+      return isAuthenticated() &&
+        exists(/databases/$(database)/documents/user_roles/$(request.auth.uid));
+    }
 
-    // 1. User Roles Collection: Authenticated users can read, ONLY ADMINS CAN WRITE
+    function userRoleDoc() {
+      return get(/databases/$(database)/documents/user_roles/$(request.auth.uid));
+    }
+
+    // Authoritative role resolution from Custom Claims or server-protected user_roles document
+    // Never trusts client-supplied request parameters or hardcoded email addresses.
+    function currentUserRole() {
+      return request.auth.token.role != null
+        ? request.auth.token.role
+        : (hasUserRoleDoc() ? userRoleDoc().data.role : '');
+    }
+
+    // Authoritative instituteId resolution for multi-institute tenant isolation
+    function currentUserInstituteId() {
+      return request.auth.token.instituteId != null
+        ? request.auth.token.instituteId
+        : (hasUserRoleDoc() ? userRoleDoc().data.instituteId : '');
+    }
+
+    // Authoritative linked entity ID (e.g. STU1001 or FAC_01)
+    function currentUserEntityId() {
+      return request.auth.token.linkedEntityId != null
+        ? request.auth.token.linkedEntityId
+        : (hasUserRoleDoc() ? userRoleDoc().data.linkedEntityId : '');
+    }
+
+    // Authoritative linked student IDs for PARENT accounts
+    function currentUserLinkedStudentIds() {
+      return request.auth.token.linkedStudentIds != null
+        ? request.auth.token.linkedStudentIds
+        : (hasUserRoleDoc() && userRoleDoc().data.linkedStudentIds is list
+            ? userRoleDoc().data.linkedStudentIds
+            : []);
+    }
+
+    // Authoritative assigned batch IDs for TEACHER accounts
+    function currentUserAssignedBatchIds() {
+      return request.auth.token.assignedBatchIds != null
+        ? request.auth.token.assignedBatchIds
+        : (hasUserRoleDoc() && userRoleDoc().data.assignedBatchIds is list
+            ? userRoleDoc().data.assignedBatchIds
+            : []);
+    }
+
+    // Authoritative enrolled batch ID for STUDENT accounts
+    function currentUserBatchId() {
+      return request.auth.token.batchId != null
+        ? request.auth.token.batchId
+        : (hasUserRoleDoc() ? userRoleDoc().data.batchId : '');
+    }
+
+    // Authoritative linked batch IDs for PARENT accounts
+    function currentUserLinkedBatchIds() {
+      return request.auth.token.linkedBatchIds != null
+        ? request.auth.token.linkedBatchIds
+        : (hasUserRoleDoc() && userRoleDoc().data.linkedBatchIds is list
+            ? userRoleDoc().data.linkedBatchIds
+            : []);
+    }
+
+    function isAdmin() {
+      return isAuthenticated() &&
+        (currentUserRole() == 'ADMIN' || currentUserRole() == 'OWNER');
+    }
+
+    function isTeacher() {
+      return isAuthenticated() && currentUserRole() == 'TEACHER';
+    }
+
+    function isStudent() {
+      return isAuthenticated() && currentUserRole() == 'STUDENT';
+    }
+
+    function isParent() {
+      return isAuthenticated() && currentUserRole() == 'PARENT';
+    }
+
+    function isValidInstituteId(instId) {
+      return instId is string &&
+        instId.size() > 0 &&
+        instId != 'primary_institute';
+    }
+
+    function belongsToInstitute(instId) {
+      return isAuthenticated() &&
+        isValidInstituteId(instId) &&
+        currentUserInstituteId() == instId;
+    }
+
+    function isSameInstituteResource() {
+      return resource != null &&
+        belongsToInstitute(resource.data.instituteId);
+    }
+
+    function isSameInstituteRequest() {
+      return request.resource != null &&
+        belongsToInstitute(request.resource.data.instituteId);
+    }
+
+    // Prevents cross-tenant reassignment (e.g. changing instituteId from INSTITUTE_A to INSTITUTE_B)
+    function isInstituteUnchanged() {
+      return resource != null &&
+        request.resource != null &&
+        isValidInstituteId(resource.data.instituteId) &&
+        request.resource.data.instituteId == resource.data.instituteId &&
+        belongsToInstitute(resource.data.instituteId);
+    }
+
+    function isSelfStudent(studentId) {
+      return isStudent() &&
+        studentId is string &&
+        studentId.size() > 0 &&
+        (currentUserEntityId() == studentId || request.auth.uid == studentId);
+    }
+
+    function isParentOfStudent(studentId) {
+      return isParent() &&
+        studentId is string &&
+        studentId.size() > 0 &&
+        (studentId in currentUserLinkedStudentIds() || currentUserEntityId() == studentId);
+    }
+
+    function isTeacherAuthorizedForBatch(batchId) {
+      return isTeacher() &&
+        batchId is string &&
+        batchId.size() > 0 &&
+        batchId in currentUserAssignedBatchIds();
+    }
+
+    function isStudentInBatch(batchId) {
+      return isStudent() &&
+        batchId is string &&
+        batchId.size() > 0 &&
+        currentUserBatchId() == batchId;
+    }
+
+    function isParentInBatch(batchId) {
+      return isParent() &&
+        batchId is string &&
+        batchId.size() > 0 &&
+        batchId in currentUserLinkedBatchIds();
+    }
+
+    // =========================================================================
+    // 2. USER ROLES & MEMBERSHIP (/user_roles/{userId})
+    // =========================================================================
+    // Users can read their own role document; Admins can read role documents within their own institute.
+    // Users can NEVER self-assign or escalate to ADMIN/OWNER, change their own role, or change instituteId.
+    // Elevated ADMIN/OWNER provisioning requires trusted backend / Admin SDK execution.
     match /user_roles/{userId} {
-      allow read: if isAuthenticated();
-      allow write: if isAdmin();
+      allow get: if isOwner(userId) || (isAdmin() && isSameInstituteResource());
+      allow list: if isAdmin() && isSameInstituteResource();
+
+      allow create: if isAdmin() &&
+        isSameInstituteRequest() &&
+        request.auth.uid != userId &&
+        request.resource.data.uid == userId &&
+        request.resource.data.role in ['TEACHER', 'STUDENT', 'PARENT'];
+
+      allow update: if isAdmin() &&
+        isSameInstituteResource() &&
+        isInstituteUnchanged() &&
+        request.auth.uid != userId &&
+        request.resource.data.uid == resource.data.uid &&
+        request.resource.data.role in ['TEACHER', 'STUDENT', 'PARENT'];
+
+      allow delete: if isAdmin() &&
+        isSameInstituteResource() &&
+        request.auth.uid != userId &&
+        resource.data.role in ['TEACHER', 'STUDENT', 'PARENT'];
     }
 
-    // 2. Student Profiles: Authenticated users can read, ONLY ADMINS CAN WRITE
+    // =========================================================================
+    // 3. TENANT-SCOPED INSTITUTE CONFIGURATION (/institutes/{instituteId})
+    // =========================================================================
+    // Global 'primary_institute' document is explicitly rejected to prevent cross-institute leakage.
+    match /institutes/{instituteId} {
+      allow get, list: if isValidInstituteId(instituteId) &&
+        belongsToInstitute(instituteId) &&
+        resource.data.instituteId == instituteId;
+
+      allow create: if isValidInstituteId(instituteId) &&
+        isAdmin() &&
+        belongsToInstitute(instituteId) &&
+        request.resource.data.instituteId == instituteId;
+
+      allow update: if isValidInstituteId(instituteId) &&
+        isAdmin() &&
+        belongsToInstitute(instituteId) &&
+        resource.data.instituteId == instituteId &&
+        request.resource.data.instituteId == instituteId;
+
+      allow delete: if false;
+    }
+
+    match /institute_config/{instituteId} {
+      allow get, list: if isValidInstituteId(instituteId) &&
+        belongsToInstitute(instituteId) &&
+        resource.data.instituteId == instituteId;
+
+      allow create: if isValidInstituteId(instituteId) &&
+        isAdmin() &&
+        belongsToInstitute(instituteId) &&
+        request.resource.data.instituteId == instituteId;
+
+      allow update: if isValidInstituteId(instituteId) &&
+        isAdmin() &&
+        belongsToInstitute(instituteId) &&
+        resource.data.instituteId == instituteId &&
+        request.resource.data.instituteId == instituteId;
+
+      allow delete: if false;
+    }
+
+    // =========================================================================
+    // 4. STUDENT PROFILES (/student_profiles/{studentId} & /students/{studentId})
+    // =========================================================================
     match /student_profiles/{studentId} {
-      allow read: if isAuthenticated();
-      allow write: if isAdmin();
+      allow get, list: if isSameInstituteResource() && (
+        isAdmin() ||
+        isSelfStudent(studentId) ||
+        isSelfStudent(resource.data.id) ||
+        isParentOfStudent(studentId) ||
+        isParentOfStudent(resource.data.id) ||
+        isTeacherAuthorizedForBatch(resource.data.batchId)
+      );
+
+      allow create: if isSameInstituteRequest() && isAdmin();
+
+      allow update: if isSameInstituteResource() &&
+        isInstituteUnchanged() && (
+          isAdmin() ||
+          (
+            isTeacherAuthorizedForBatch(resource.data.batchId) &&
+            request.resource.data.id == resource.data.id &&
+            request.resource.data.batchId == resource.data.batchId &&
+            request.resource.data.parentId == resource.data.parentId
+          )
+        );
+
+      allow delete: if isSameInstituteResource() && isAdmin();
     }
 
-    // 3. Attendance Records: Authenticated users can read, ONLY ADMINS CAN WRITE
+    match /students/{studentId} {
+      allow get, list: if isSameInstituteResource() && (
+        isAdmin() ||
+        isSelfStudent(studentId) ||
+        isSelfStudent(resource.data.id) ||
+        isParentOfStudent(studentId) ||
+        isParentOfStudent(resource.data.id) ||
+        isTeacherAuthorizedForBatch(resource.data.batchId)
+      );
+
+      allow create: if isSameInstituteRequest() && isAdmin();
+
+      allow update: if isSameInstituteResource() &&
+        isInstituteUnchanged() &&
+        isAdmin();
+
+      allow delete: if isSameInstituteResource() && isAdmin();
+    }
+
+    // =========================================================================
+    // 5. PARENTS & TEACHERS (/parents/{parentId} & /teachers/{teacherId})
+    // =========================================================================
+    match /parents/{parentId} {
+      allow get, list: if isSameInstituteResource() && (
+        isAdmin() ||
+        (isParent() && (request.auth.uid == parentId || currentUserEntityId() == parentId)) ||
+        isTeacherAuthorizedForBatch(resource.data.batchId)
+      );
+
+      allow create: if isSameInstituteRequest() && isAdmin();
+      allow update: if isSameInstituteResource() && isInstituteUnchanged() && isAdmin();
+      allow delete: if isSameInstituteResource() && isAdmin();
+    }
+
+    match /teachers/{teacherId} {
+      allow get, list: if isSameInstituteResource() && (
+        isAdmin() ||
+        (isTeacher() && (currentUserEntityId() == teacherId || request.auth.uid == teacherId))
+      );
+
+      allow create: if isSameInstituteRequest() && isAdmin();
+      allow update: if isSameInstituteResource() && isInstituteUnchanged() && isAdmin();
+      allow delete: if isSameInstituteResource() && isAdmin();
+    }
+
+    // =========================================================================
+    // 6. COURSES, BATCHES & SUBJECTS (/courses, /batches, /subjects, /enrollments)
+    // =========================================================================
+    match /courses/{courseId} {
+      allow get, list: if isSameInstituteResource() && (
+        isAdmin() ||
+        isTeacher() ||
+        isStudent() ||
+        isParent()
+      );
+
+      allow create: if isSameInstituteRequest() && isAdmin();
+      allow update: if isSameInstituteResource() && isInstituteUnchanged() && isAdmin();
+      allow delete: if isSameInstituteResource() && isAdmin();
+    }
+
+    match /course_enrollments/{enrollmentId} {
+      allow get, list: if isSameInstituteResource() && (
+        isAdmin() ||
+        isTeacherAuthorizedForBatch(resource.data.batchId) ||
+        isSelfStudent(resource.data.studentId) ||
+        isParentOfStudent(resource.data.studentId)
+      );
+
+      allow create: if isSameInstituteRequest() && isAdmin();
+      allow update: if isSameInstituteResource() && isInstituteUnchanged() && isAdmin();
+      allow delete: if isSameInstituteResource() && isAdmin();
+    }
+
+    match /batches/{batchId} {
+      allow get, list: if isSameInstituteResource() && (
+        isAdmin() ||
+        isTeacherAuthorizedForBatch(batchId) ||
+        isTeacherAuthorizedForBatch(resource.data.id) ||
+        isStudentInBatch(batchId) ||
+        isStudentInBatch(resource.data.id) ||
+        isParentInBatch(batchId) ||
+        isParentInBatch(resource.data.id)
+      );
+
+      allow create: if isSameInstituteRequest() && isAdmin();
+      allow update: if isSameInstituteResource() && isInstituteUnchanged() && isAdmin();
+      allow delete: if isSameInstituteResource() && isAdmin();
+    }
+
+    match /subjects/{subjectId} {
+      allow get, list: if isSameInstituteResource() && (
+        isAdmin() ||
+        isTeacherAuthorizedForBatch(resource.data.batchId) ||
+        isStudentInBatch(resource.data.batchId) ||
+        isParentInBatch(resource.data.batchId)
+      );
+
+      allow create: if isSameInstituteRequest() && (
+        isAdmin() ||
+        isTeacherAuthorizedForBatch(request.resource.data.batchId)
+      );
+
+      allow update: if isSameInstituteResource() &&
+        isInstituteUnchanged() && (
+          isAdmin() ||
+          (isTeacherAuthorizedForBatch(resource.data.batchId) &&
+            request.resource.data.batchId == resource.data.batchId)
+        );
+
+      allow delete: if isSameInstituteResource() && isAdmin();
+    }
+
+    match /batch_enrollments/{enrollmentId} {
+      allow get, list: if isSameInstituteResource() && (
+        isAdmin() ||
+        isTeacherAuthorizedForBatch(resource.data.batchId) ||
+        isSelfStudent(resource.data.studentId) ||
+        isParentOfStudent(resource.data.studentId)
+      );
+
+      allow create: if isSameInstituteRequest() && isAdmin();
+      allow update: if isSameInstituteResource() && isInstituteUnchanged() && isAdmin();
+      allow delete: if isSameInstituteResource() && isAdmin();
+    }
+
+    // =========================================================================
+    // 7. ATTENDANCE RECORDS (/attendance/{attendanceId})
+    // =========================================================================
     match /attendance/{attendanceId} {
-      allow read: if isAuthenticated();
-      allow write: if isAdmin();
+      allow get, list: if isSameInstituteResource() && (
+        isAdmin() ||
+        isTeacherAuthorizedForBatch(resource.data.batchId) ||
+        isSelfStudent(resource.data.studentId) ||
+        isParentOfStudent(resource.data.studentId)
+      );
+
+      allow create: if isSameInstituteRequest() && (
+        isAdmin() ||
+        isTeacherAuthorizedForBatch(request.resource.data.batchId)
+      );
+
+      allow update: if isSameInstituteResource() &&
+        isInstituteUnchanged() && (
+          isAdmin() ||
+          (isTeacherAuthorizedForBatch(resource.data.batchId) &&
+            request.resource.data.batchId == resource.data.batchId)
+        );
+
+      allow delete: if isSameInstituteResource() && isAdmin();
     }
 
-    // 4. Fee Ledgers & Financials: Authenticated users can read, ONLY ADMINS CAN WRITE
+    // =========================================================================
+    // 8. FEES & PAYMENTS (/fees/{feeId} & /fee_payments/{paymentId})
+    // =========================================================================
+    // Financial records are strictly restricted to Institute Admins, the Student themselves, or their linked Parent.
+    // Teachers are not permitted to read or modify student fee records.
     match /fees/{feeId} {
-      allow read: if isAuthenticated();
-      allow write: if isAdmin();
+      allow get, list: if isSameInstituteResource() && (
+        isAdmin() ||
+        isSelfStudent(resource.data.studentId) ||
+        isParentOfStudent(resource.data.studentId)
+      );
+
+      allow create: if isSameInstituteRequest() && isAdmin();
+      allow update: if isSameInstituteResource() && isInstituteUnchanged() && isAdmin();
+      allow delete: if isSameInstituteResource() && isAdmin();
     }
 
-    // 5. Security Audit Logs: Only Administrators can read or write
+    match /fee_payments/{paymentId} {
+      allow get, list: if isSameInstituteResource() && (
+        isAdmin() ||
+        isSelfStudent(resource.data.studentId) ||
+        isParentOfStudent(resource.data.studentId)
+      );
+
+      allow create: if isSameInstituteRequest() && (
+        isAdmin() ||
+        isParentOfStudent(request.resource.data.studentId)
+      );
+
+      allow update: if isSameInstituteResource() && isInstituteUnchanged() && isAdmin();
+      allow delete: if isSameInstituteResource() && isAdmin();
+    }
+
+    match /fee_structures/{structureId} {
+      allow get, list: if isSameInstituteResource() && (
+        isAdmin() ||
+        isTeacher() ||
+        isStudent() ||
+        isParent()
+      );
+
+      allow create: if isSameInstituteRequest() && isAdmin();
+      allow update: if isSameInstituteResource() && isInstituteUnchanged() && isAdmin();
+      allow delete: if isSameInstituteResource() && isAdmin();
+    }
+
+    // =========================================================================
+    // 9. TESTS, QUESTIONS & ATTEMPTS (/tests, /questions, /attempts)
+    // =========================================================================
+    match /tests/{testId} {
+      allow get, list: if isSameInstituteResource() && (
+        isAdmin() ||
+        isTeacherAuthorizedForBatch(resource.data.batchId) ||
+        isStudentInBatch(resource.data.batchId) ||
+        isParentInBatch(resource.data.batchId)
+      );
+
+      allow create: if isSameInstituteRequest() && (
+        isAdmin() ||
+        isTeacherAuthorizedForBatch(request.resource.data.batchId)
+      );
+
+      allow update: if isSameInstituteResource() &&
+        isInstituteUnchanged() && (
+          isAdmin() ||
+          (isTeacherAuthorizedForBatch(resource.data.batchId) &&
+            request.resource.data.batchId == resource.data.batchId)
+        );
+
+      allow delete: if isSameInstituteResource() && isAdmin();
+    }
+
+    match /questions/{questionId} {
+      allow get, list: if isSameInstituteResource() && (
+        isAdmin() ||
+        isTeacher() ||
+        isStudent()
+      );
+
+      allow create: if isSameInstituteRequest() && (isAdmin() || isTeacher());
+      allow update: if isSameInstituteResource() && isInstituteUnchanged() && (isAdmin() || isTeacher());
+      allow delete: if isSameInstituteResource() && isAdmin();
+    }
+
+    match /attempts/{attemptId} {
+      allow get, list: if isSameInstituteResource() && (
+        isAdmin() ||
+        isSelfStudent(resource.data.studentId) ||
+        isParentOfStudent(resource.data.studentId) ||
+        isTeacherAuthorizedForBatch(resource.data.batchId)
+      );
+
+      allow create: if isSameInstituteRequest() && (
+        isAdmin() ||
+        isSelfStudent(request.resource.data.studentId)
+      );
+
+      allow update: if isSameInstituteResource() &&
+        isInstituteUnchanged() && (
+          isAdmin() ||
+          (isSelfStudent(resource.data.studentId) &&
+            request.resource.data.studentId == resource.data.studentId)
+        );
+
+      allow delete: if isSameInstituteResource() && isAdmin();
+    }
+
+    match /student_assessments/{assessmentId} {
+      allow get, list: if isSameInstituteResource() && (
+        isAdmin() ||
+        isSelfStudent(resource.data.studentId) ||
+        isParentOfStudent(resource.data.studentId) ||
+        isTeacherAuthorizedForBatch(resource.data.batchId)
+      );
+
+      allow create: if isSameInstituteRequest() && (
+        isAdmin() ||
+        isTeacherAuthorizedForBatch(request.resource.data.batchId) ||
+        isSelfStudent(request.resource.data.studentId)
+      );
+
+      allow update: if isSameInstituteResource() &&
+        isInstituteUnchanged() && (
+          isAdmin() ||
+          (isTeacherAuthorizedForBatch(resource.data.batchId) &&
+            request.resource.data.studentId == resource.data.studentId)
+        );
+
+      allow delete: if isSameInstituteResource() && isAdmin();
+    }
+
+    // =========================================================================
+    // 10. HOMEWORK, DOUBTS, STUDY MATERIAL & STUDY LOGS
+    // =========================================================================
+    match /homework/{homeworkId} {
+      allow get, list: if isSameInstituteResource() && (
+        isAdmin() ||
+        isTeacherAuthorizedForBatch(resource.data.batchId) ||
+        isStudentInBatch(resource.data.batchId) ||
+        isParentInBatch(resource.data.batchId)
+      );
+
+      allow create: if isSameInstituteRequest() && (
+        isAdmin() ||
+        isTeacherAuthorizedForBatch(request.resource.data.batchId)
+      );
+
+      allow update: if isSameInstituteResource() &&
+        isInstituteUnchanged() && (
+          isAdmin() ||
+          (isTeacherAuthorizedForBatch(resource.data.batchId) &&
+            request.resource.data.batchId == resource.data.batchId) ||
+          (isStudentInBatch(resource.data.batchId) &&
+            request.resource.data.batchId == resource.data.batchId &&
+            request.resource.data.title == resource.data.title)
+        );
+
+      allow delete: if isSameInstituteResource() && (
+        isAdmin() ||
+        isTeacherAuthorizedForBatch(resource.data.batchId)
+      );
+    }
+
+    match /student_homework/{homeworkId} {
+      allow get, list: if isSameInstituteResource() && (
+        isAdmin() ||
+        isSelfStudent(resource.data.studentId) ||
+        isParentOfStudent(resource.data.studentId) ||
+        isTeacherAuthorizedForBatch(resource.data.batchId)
+      );
+
+      allow create: if isSameInstituteRequest() && (
+        isAdmin() ||
+        isTeacherAuthorizedForBatch(request.resource.data.batchId) ||
+        isSelfStudent(request.resource.data.studentId)
+      );
+
+      allow update: if isSameInstituteResource() &&
+        isInstituteUnchanged() && (
+          isAdmin() ||
+          (isTeacherAuthorizedForBatch(resource.data.batchId) &&
+            request.resource.data.studentId == resource.data.studentId) ||
+          (isSelfStudent(resource.data.studentId) &&
+            request.resource.data.studentId == resource.data.studentId)
+        );
+
+      allow delete: if isSameInstituteResource() && isAdmin();
+    }
+
+    match /doubts/{doubtId} {
+      allow get, list: if isSameInstituteResource() && (
+        isAdmin() ||
+        isSelfStudent(resource.data.studentId) ||
+        isParentOfStudent(resource.data.studentId) ||
+        isTeacherAuthorizedForBatch(resource.data.batchId)
+      );
+
+      allow create: if isSameInstituteRequest() && (
+        isAdmin() ||
+        isSelfStudent(request.resource.data.studentId)
+      );
+
+      allow update: if isSameInstituteResource() &&
+        isInstituteUnchanged() && (
+          isAdmin() ||
+          (isTeacherAuthorizedForBatch(resource.data.batchId) &&
+            request.resource.data.studentId == resource.data.studentId) ||
+          (isSelfStudent(resource.data.studentId) &&
+            request.resource.data.studentId == resource.data.studentId)
+        );
+
+      allow delete: if isSameInstituteResource() && isAdmin();
+    }
+
+    match /study_material/{materialId} {
+      allow get, list: if isSameInstituteResource() && (
+        isAdmin() ||
+        isTeacherAuthorizedForBatch(resource.data.batchId) ||
+        isStudentInBatch(resource.data.batchId) ||
+        isParentInBatch(resource.data.batchId)
+      );
+
+      allow create: if isSameInstituteRequest() && (
+        isAdmin() ||
+        isTeacherAuthorizedForBatch(request.resource.data.batchId)
+      );
+
+      allow update: if isSameInstituteResource() &&
+        isInstituteUnchanged() && (
+          isAdmin() ||
+          (isTeacherAuthorizedForBatch(resource.data.batchId) &&
+            request.resource.data.batchId == resource.data.batchId)
+        );
+
+      allow delete: if isSameInstituteResource() && (
+        isAdmin() ||
+        isTeacherAuthorizedForBatch(resource.data.batchId)
+      );
+    }
+
+    match /study_logs/{logId} {
+      allow get, list: if isSameInstituteResource() && (
+        isAdmin() ||
+        isSelfStudent(resource.data.studentId) ||
+        isParentOfStudent(resource.data.studentId) ||
+        isTeacherAuthorizedForBatch(resource.data.batchId)
+      );
+
+      allow create: if isSameInstituteRequest() && (
+        isAdmin() ||
+        isSelfStudent(request.resource.data.studentId)
+      );
+
+      allow update: if isSameInstituteResource() &&
+        isInstituteUnchanged() && (
+          isAdmin() ||
+          (isSelfStudent(resource.data.studentId) &&
+            request.resource.data.studentId == resource.data.studentId)
+        );
+
+      allow delete: if isSameInstituteResource() && isAdmin();
+    }
+
+    match /student_goals/{goalId} {
+      allow get, list: if isSameInstituteResource() && (
+        isAdmin() ||
+        isSelfStudent(resource.data.studentId) ||
+        isParentOfStudent(resource.data.studentId) ||
+        isTeacherAuthorizedForBatch(resource.data.batchId)
+      );
+
+      allow create: if isSameInstituteRequest() && (
+        isAdmin() ||
+        isSelfStudent(request.resource.data.studentId)
+      );
+
+      allow update: if isSameInstituteResource() &&
+        isInstituteUnchanged() && (
+          isAdmin() ||
+          (isSelfStudent(resource.data.studentId) &&
+            request.resource.data.studentId == resource.data.studentId)
+        );
+
+      allow delete: if isSameInstituteResource() && isAdmin();
+    }
+
+    // =========================================================================
+    // 11. TIMETABLE (/timetable/{entryId} & /weekly_timetable/{entryId})
+    // =========================================================================
+    match /timetable/{entryId} {
+      allow get, list: if isSameInstituteResource() && (
+        isAdmin() ||
+        isTeacherAuthorizedForBatch(resource.data.batchId) ||
+        isStudentInBatch(resource.data.batchId) ||
+        isParentInBatch(resource.data.batchId)
+      );
+
+      allow create: if isSameInstituteRequest() && (
+        isAdmin() ||
+        isTeacherAuthorizedForBatch(request.resource.data.batchId)
+      );
+
+      allow update: if isSameInstituteResource() &&
+        isInstituteUnchanged() && (
+          isAdmin() ||
+          (isTeacherAuthorizedForBatch(resource.data.batchId) &&
+            request.resource.data.batchId == resource.data.batchId)
+        );
+
+      allow delete: if isSameInstituteResource() && isAdmin();
+    }
+
+    match /weekly_timetable/{entryId} {
+      allow get, list: if isSameInstituteResource() && (
+        isAdmin() ||
+        isTeacherAuthorizedForBatch(resource.data.batchId) ||
+        isStudentInBatch(resource.data.batchId) ||
+        isParentInBatch(resource.data.batchId)
+      );
+
+      allow create: if isSameInstituteRequest() && (
+        isAdmin() ||
+        isTeacherAuthorizedForBatch(request.resource.data.batchId)
+      );
+
+      allow update: if isSameInstituteResource() &&
+        isInstituteUnchanged() && (
+          isAdmin() ||
+          (isTeacherAuthorizedForBatch(resource.data.batchId) &&
+            request.resource.data.batchId == resource.data.batchId)
+        );
+
+      allow delete: if isSameInstituteResource() && isAdmin();
+    }
+
+    // =========================================================================
+    // 12. ANNOUNCEMENTS, NOTIFICATIONS, COMMUNICATION & REPORTS
+    // =========================================================================
+    match /announcements/{announcementId} {
+      allow get, list: if isSameInstituteResource() && (
+        isAdmin() ||
+        resource.data.targetAudience in ['Everyone', 'All'] ||
+        (isTeacher() && resource.data.targetAudience == 'Teachers Only') ||
+        (isStudent() && resource.data.targetAudience == 'Students Only') ||
+        (isParent() && resource.data.targetAudience == 'Parents Only')
+      );
+
+      allow create: if isSameInstituteRequest() && (
+        isAdmin() ||
+        (isTeacher() && (
+          request.resource.data.batchId == null ||
+          request.resource.data.batchId == '' ||
+          isTeacherAuthorizedForBatch(request.resource.data.batchId)
+        ))
+      );
+
+      allow update: if isSameInstituteResource() && isInstituteUnchanged() && isAdmin();
+      allow delete: if isSameInstituteResource() && isAdmin();
+    }
+
+    match /notifications/{notificationId} {
+      allow get, list: if isSameInstituteResource() && (
+        isAdmin() ||
+        (isStudent() && (
+          isSelfStudent(resource.data.targetStudentId) ||
+          (resource.data.targetStudentId == '' && resource.data.recipientRole in ['All', 'Everyone', 'Student'])
+        )) ||
+        (isParent() && (
+          isParentOfStudent(resource.data.targetStudentId) ||
+          (resource.data.targetStudentId == '' && resource.data.recipientRole in ['All', 'Everyone', 'Parent'])
+        )) ||
+        (isTeacher() && (
+          isTeacherAuthorizedForBatch(resource.data.targetBatchId) ||
+          (resource.data.targetBatchId == '' && resource.data.recipientRole in ['All', 'Everyone', 'Teacher'])
+        ))
+      );
+
+      allow create: if isSameInstituteRequest() && (isAdmin() || isTeacher());
+      allow update: if isSameInstituteResource() && isInstituteUnchanged() && isAdmin();
+      allow delete: if isSameInstituteResource() && isAdmin();
+    }
+
+    match /communication_records/{recordId} {
+      allow get, list: if isSameInstituteResource() && (
+        isAdmin() ||
+        isSelfStudent(resource.data.studentId) ||
+        isParentOfStudent(resource.data.studentId) ||
+        isTeacherAuthorizedForBatch(resource.data.batchId)
+      );
+
+      allow create: if isSameInstituteRequest() && (
+        isAdmin() ||
+        isTeacherAuthorizedForBatch(request.resource.data.batchId)
+      );
+
+      allow update: if isSameInstituteResource() && isInstituteUnchanged() && isAdmin();
+      allow delete: if isSameInstituteResource() && isAdmin();
+    }
+
+    match /parent_meetings/{meetingId} {
+      allow get, list: if isSameInstituteResource() && (
+        isAdmin() ||
+        isParentOfStudent(resource.data.studentId) ||
+        isSelfStudent(resource.data.studentId) ||
+        (isTeacher() && (
+          resource.data.teacherId == currentUserEntityId() ||
+          isTeacherAuthorizedForBatch(resource.data.batchId)
+        ))
+      );
+
+      allow create: if isSameInstituteRequest() && (
+        isAdmin() ||
+        isParentOfStudent(request.resource.data.studentId) ||
+        (isTeacher() && (
+          request.resource.data.teacherId == currentUserEntityId() ||
+          isTeacherAuthorizedForBatch(request.resource.data.batchId)
+        ))
+      );
+
+      allow update: if isSameInstituteResource() &&
+        isInstituteUnchanged() && (
+          isAdmin() ||
+          (isTeacher() &&
+            resource.data.teacherId == currentUserEntityId() &&
+            request.resource.data.studentId == resource.data.studentId)
+        );
+
+      allow delete: if isSameInstituteResource() && isAdmin();
+    }
+
+    match /reports/{reportId} {
+      allow get, list: if isSameInstituteResource() && (
+        isAdmin() ||
+        isSelfStudent(resource.data.studentId) ||
+        isParentOfStudent(resource.data.studentId) ||
+        isTeacherAuthorizedForBatch(resource.data.batchId)
+      );
+
+      allow create: if isSameInstituteRequest() && (
+        isAdmin() ||
+        isTeacherAuthorizedForBatch(request.resource.data.batchId)
+      );
+
+      allow update: if isSameInstituteResource() && isInstituteUnchanged() && isAdmin();
+      allow delete: if isSameInstituteResource() && isAdmin();
+    }
+
+    // =========================================================================
+    // 13. ADMISSIONS CRM, PAYROLL & SECURITY AUDIT LOGS
+    // =========================================================================
+    match /leads/{leadId} {
+      allow get, list: if isSameInstituteResource() && isAdmin();
+      allow create: if isSameInstituteRequest() && isAdmin();
+      allow update: if isSameInstituteResource() && isInstituteUnchanged() && isAdmin();
+      allow delete: if isSameInstituteResource() && isAdmin();
+    }
+
+    match /online_forms/{formId} {
+      allow get, list: if isSameInstituteResource() && isAdmin();
+      allow create: if isSameInstituteRequest() && isAdmin();
+      allow update: if isSameInstituteResource() && isInstituteUnchanged() && isAdmin();
+      allow delete: if isSameInstituteResource() && isAdmin();
+    }
+
+    match /payroll/{payrollId} {
+      allow get, list: if isSameInstituteResource() && (
+        isAdmin() ||
+        (isTeacher() && resource.data.teacherId == currentUserEntityId())
+      );
+
+      allow create: if isSameInstituteRequest() && isAdmin();
+      allow update: if isSameInstituteResource() && isInstituteUnchanged() && isAdmin();
+      allow delete: if isSameInstituteResource() && isAdmin();
+    }
+
     match /security_audit_logs/{logId} {
-      allow read, write: if isAdmin();
+      allow get, list: if isSameInstituteResource() && isAdmin();
+      allow create: if isSameInstituteRequest() && isAdmin();
+      allow update, delete: if false;
     }
 
-    // Global Default Protection Rule:
-    // Allows READ access to authenticated users, strictly restricts WRITE access to ADMINS ONLY
+    // =========================================================================
+    // 14. DEFAULT DENY-ALL FALLBACK
+    // =========================================================================
+    // No universal authenticated read/write access exists. Unmatched paths are strictly denied.
     match /{document=**} {
-      allow read: if isAuthenticated();
-      allow write: if isAdmin();
+      allow get, list, create, update, delete: if false;
     }
   }
 }

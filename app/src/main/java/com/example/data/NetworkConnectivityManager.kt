@@ -119,9 +119,22 @@ object NetworkConnectivityManager {
   private fun checkCurrentHardwareConnection(): Boolean {
     val cm = connectivityManager ?: return true
     return try {
-      val activeNetwork = cm.activeNetwork ?: return false
-      val caps = cm.getNetworkCapabilities(activeNetwork) ?: return false
-      caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+      @Suppress("DEPRECATION")
+      val infoConnected = cm.activeNetworkInfo?.isConnected == true
+      val activeNetwork = cm.activeNetwork
+      if (activeNetwork != null) {
+        val caps = cm.getNetworkCapabilities(activeNetwork)
+        if (caps != null) {
+          return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) || infoConnected
+        }
+      }
+      @Suppress("DEPRECATION")
+      val info = cm.activeNetworkInfo
+      if (info != null) {
+        info.isConnected
+      } else {
+        true
+      }
     } catch (e: Exception) {
       Log.e(TAG, "Error checking active network", e)
       false
@@ -226,10 +239,15 @@ object NetworkConnectivityManager {
 
   fun setSimulatedOffline(enabled: Boolean) {
     _isSimulatedOffline.value = enabled
+    if (!enabled) {
+      _isNetworkConnected.value = checkCurrentHardwareConnection()
+      _isServiceReachable.value = true
+      _lastSyncError.value = null
+    }
     prefs?.edit()?.putBoolean(KEY_SIMULATED_OFFLINE, enabled)?.apply()
     recomputeEffectiveOnline()
 
-    if (!enabled && _isNetworkConnected.value) {
+    if (!enabled && _isNetworkConnected.value && FirestoreService.isAvailable()) {
       performLiveSync(isAutoReconnect = true)
     } else if (enabled) {
       _lastSyncFormatted.value = formatTimestamp(_lastSyncTimestamp.value)

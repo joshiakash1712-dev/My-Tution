@@ -103,7 +103,8 @@ object FirebaseAuthService {
     onSuccess: (UserRole, String) -> Unit,
     onFailure: (String) -> Unit
   ) {
-    val cleanEmail = email.trim().lowercase()
+    val rawClean = email.trim().lowercase()
+    val cleanEmail = if (rawClean == "joshiakash1712") "joshiakash1712@gmail.com" else rawClean
     if (cleanEmail.isBlank() || password.isBlank()) {
       onFailure("Email/ID and password are required.")
       return
@@ -113,93 +114,104 @@ object FirebaseAuthService {
     val existsInVault = SecurityEngine.hasRegisteredAccount(cleanEmail)
     val firebaseAuth = auth
 
-    // When Firebase Authentication is available in production, use Firebase Auth as the authoritative authentication mechanism
-    if (firebaseAuth != null) {
-      val resolvedEmail = if (cleanEmail.contains("@")) {
-        cleanEmail
-      } else {
-        AppRepository.resolveCanonicalEmailForIdentifier(cleanEmail) ?: cleanEmail
-      }
-      _authStatus.value = "Signing in with Firebase Auth..."
-      firebaseAuth.signInWithEmailAndPassword(resolvedEmail, password)
-        .addOnSuccessListener { authResult ->
-          val uid = authResult.user?.uid ?: ""
-          val userEmail = (authResult.user?.email ?: resolvedEmail).trim().lowercase()
-          Log.d(TAG, "Firebase Auth sign in successful for UID: $uid")
-
-          fetchUserRole(uid, userEmail, { role ->
-            _authStatus.value = "Signed in successfully as ${role.name}"
-            onSuccess(role, userEmail)
-          }, { _ ->
-            val detected = smartDetectRole(userEmail)
-            _authStatus.value = "Signed in (Role: ${detected.name})"
-            onSuccess(detected, userEmail)
-          })
-        }
-        .addOnFailureListener { e ->
-          Log.e(TAG, "Firebase Auth sign in failed", e)
-          _authStatus.value = "Sign-In Failed: Invalid credentials"
-          onFailure("Invalid email/ID or password. Please verify your credentials or contact institute administration.")
-        }
-      return
-    }
-
-    // When Firebase Auth is unavailable (offline / local environment), verify against SecurityEngine on Dispatchers.Default
-    if (!existsInVault && !accountStatus.exists) {
-      Log.w(TAG, "Login denied for '$cleanEmail': User account not registered in tuition database.")
-      _authStatus.value = "Sign-In Denied: Unregistered Account"
-      SecurityEngine.logEvent(
-        severity = SecuritySeverity.WARNING,
-        eventType = "UNREGISTERED_ACCOUNT_LOGIN_BLOCKED",
-        actor = cleanEmail,
-        details = "Login attempt stopped for $cleanEmail: Account not found in database records."
-      )
-      onFailure("Account '$cleanEmail' not found in tuition database. Please contact institute administration to create your login account.")
-      return
-    }
-
     authScope.launch {
-      val (isSaltedValid, saltedRole) = SecurityEngine.verifySaltedCredential(cleanEmail, password)
-      if (isSaltedValid && saltedRole != null) {
-        val resolvedRole = accountStatus.role ?: saltedRole
-        Log.i(TAG, "Salted password authentication succeeded for $cleanEmail as ${resolvedRole.name}")
-        _authStatus.value = "Signed in successfully as ${resolvedRole.name}"
-        runOnMainOrDirect { onSuccess(resolvedRole, cleanEmail) }
-        return@launch
-      }
-
-      if (accountStatus.exists && accountStatus.role != null) {
-        val canonicalId = when (accountStatus.role) {
-          UserRole.TEACHER -> accountStatus.teacherId?.lowercase() ?: ""
-          UserRole.STUDENT -> accountStatus.studentId?.lowercase() ?: ""
-          UserRole.PARENT -> accountStatus.studentId?.let { "parent_${it.lowercase()}@mytuition.com" } ?: ""
-          UserRole.ADMIN -> AppRepository.resolveCanonicalEmailForIdentifier(cleanEmail) ?: ""
+      try {
+        // 1. Check local BCrypt credential vault first for instant, reliable authentication
+        val (isSaltedValid, saltedRole) = SecurityEngine.verifySaltedCredential(cleanEmail, password)
+        if (isSaltedValid && saltedRole != null) {
+          val resolvedRole = accountStatus.role ?: saltedRole
+          Log.i(TAG, "Salted password authentication succeeded for $cleanEmail as ${resolvedRole.name}")
+          _authStatus.value = "Signed in successfully as ${resolvedRole.name}"
+          runOnMainOrDirect { onSuccess(resolvedRole, cleanEmail) }
+          return@launch
         }
-        if (canonicalId.isNotBlank() && canonicalId != cleanEmail) {
-          val (isCanonicalValid, _) = SecurityEngine.verifySaltedCredential(canonicalId, password)
-          if (isCanonicalValid) {
-            Log.i(TAG, "Canonical salted password authentication succeeded for $cleanEmail as ${accountStatus.role.name}")
-            _authStatus.value = "Signed in successfully as ${accountStatus.role.name}"
-            runOnMainOrDirect { onSuccess(accountStatus.role, cleanEmail) }
-            return@launch
+
+        if (accountStatus.exists && accountStatus.role != null) {
+          val canonicalId = when (accountStatus.role) {
+            UserRole.TEACHER -> accountStatus.teacherId?.lowercase() ?: ""
+            UserRole.STUDENT -> accountStatus.studentId?.lowercase() ?: ""
+            UserRole.PARENT -> accountStatus.studentId?.let { "parent_${it.lowercase()}@mytuition.com" } ?: ""
+            UserRole.ADMIN -> AppRepository.resolveCanonicalEmailForIdentifier(cleanEmail) ?: ""
+          }
+          if (canonicalId.isNotBlank() && canonicalId != cleanEmail) {
+            val (isCanonicalValid, _) = SecurityEngine.verifySaltedCredential(canonicalId, password)
+            if (isCanonicalValid) {
+              Log.i(TAG, "Canonical salted password authentication succeeded for $cleanEmail as ${accountStatus.role.name}")
+              _authStatus.value = "Signed in successfully as ${accountStatus.role.name}"
+              runOnMainOrDirect { onSuccess(accountStatus.role, cleanEmail) }
+              return@launch
+            }
           }
         }
-      }
 
-      Log.w(TAG, "Sign-in failed for $cleanEmail: Invalid salted password hash.")
-      _authStatus.value = "Sign-In Failed: Incorrect password"
-      runOnMainOrDirect { onFailure("Invalid email/ID or password. Please verify your credentials.") }
+        // 2. If Firebase Authentication is available, attempt remote Firebase Auth sign-in
+        if (firebaseAuth != null) {
+          val resolvedEmail = if (cleanEmail.contains("@")) {
+            cleanEmail
+          } else {
+            AppRepository.resolveCanonicalEmailForIdentifier(cleanEmail) ?: cleanEmail
+          }
+          _authStatus.value = "Signing in with Firebase Auth..."
+          runOnMainOrDirect {
+            firebaseAuth.signInWithEmailAndPassword(resolvedEmail, password)
+              .addOnSuccessListener { authResult ->
+                val uid = authResult.user?.uid ?: ""
+                val userEmail = (authResult.user?.email ?: resolvedEmail).trim().lowercase()
+                Log.d(TAG, "Firebase Auth sign in successful for UID: $uid")
+
+                fetchUserRole(uid, userEmail, { role ->
+                  _authStatus.value = "Signed in successfully as ${role.name}"
+                  onSuccess(role, userEmail)
+                }, { _ ->
+                  val detected = smartDetectRole(userEmail)
+                  _authStatus.value = "Signed in (Role: ${detected.name})"
+                  onSuccess(detected, userEmail)
+                })
+              }
+              .addOnFailureListener { e ->
+                Log.e(TAG, "Firebase Auth sign in failed", e)
+                _authStatus.value = "Sign-In Failed: Invalid credentials"
+                onFailure("Invalid email/ID or password. Please verify your credentials or contact institute administration.")
+              }
+          }
+          return@launch
+        }
+
+        // 3. When Firebase Auth is unavailable, report unregistered or invalid password
+        if (!existsInVault && !accountStatus.exists) {
+          Log.w(TAG, "Login denied for '$cleanEmail': User account not registered in tuition database.")
+          _authStatus.value = "Sign-In Denied: Unregistered Account"
+          SecurityEngine.logEvent(
+            severity = SecuritySeverity.WARNING,
+            eventType = "UNREGISTERED_ACCOUNT_LOGIN_BLOCKED",
+            actor = cleanEmail,
+            details = "Login attempt stopped for $cleanEmail: Account not found in database records."
+          )
+          runOnMainOrDirect {
+            onFailure("Account '$cleanEmail' not found in tuition database. Please contact institute administration to create your login account.")
+          }
+          return@launch
+        }
+
+        Log.w(TAG, "Sign-in failed for $cleanEmail: Invalid salted password hash.")
+        _authStatus.value = "Sign-In Failed: Incorrect password"
+        runOnMainOrDirect { onFailure("Invalid email/ID or password. Please verify your credentials.") }
+      } catch (t: Throwable) {
+        Log.e(TAG, "Unexpected error during sign-in for $cleanEmail", t)
+        runOnMainOrDirect { onFailure("Authentication error: ${t.localizedMessage ?: "Please try again."}") }
+      }
     }
   }
 
-  // Real User Registration with designated UserRole
+  // Real User Registration with designated UserRole & instituteId scoping (blocks client self-escalation to ADMIN)
   fun signUp(
     email: String,
     password: String,
     fullName: String,
     role: UserRole,
     onSuccess: () -> Unit,
-    onFailure: (String) -> Unit
+    onFailure: (String) -> Unit,
+    instituteId: String = AppRepository.getCurrentInstituteId()
   ) {
     val cleanEmail = email.trim().lowercase()
     if (cleanEmail.isBlank() || password.length < 6) {
@@ -207,11 +219,59 @@ object FirebaseAuthService {
       return
     }
 
+    val activeSession = AppRepository.buildCurrentFirestoreAuthContext()
+    val activeInstituteId = AppRepository.getCurrentInstituteId()
+    val targetInstituteId = instituteId.trim().ifEmpty { activeInstituteId }
+
+    // Prevent cross-institute user provisioning
+    if (activeSession != null && !targetInstituteId.equals(activeSession.instituteId, ignoreCase = true)) {
+      SecurityEngine.logEvent(
+        severity = SecuritySeverity.CRITICAL,
+        eventType = "CROSS_TENANT_ACCESS_DENIED",
+        actor = activeSession.uid,
+        details = "Blocked attempt to register account '$cleanEmail' in foreign institute '$targetInstituteId' from '${activeSession.instituteId}'."
+      )
+      onFailure("Cross-institute registration denied: Cannot create accounts for another institute.")
+      return
+    }
+
+    // Prevent client-side privilege escalation to ADMIN
+    val directoryStatus = AppRepository.getAccountStatus(cleanEmail)
+    val isAuthorizedAdminProvisioning = (AppRepository.isAdminSession() && activeSession != null && activeSession.instituteId.equals(targetInstituteId, ignoreCase = true))
+    if (role == UserRole.ADMIN && !isAuthorizedAdminProvisioning) {
+      SecurityEngine.logEvent(
+        severity = SecuritySeverity.CRITICAL,
+        eventType = "ROLE_ESCALATION_BLOCKED",
+        actor = activeSession?.uid ?: cleanEmail,
+        details = "Blocked unauthorized client attempt to self-register or escalate '$cleanEmail' to ADMIN."
+      )
+      onFailure("Privilege escalation blocked: Client self-registration as ADMIN is prohibited.")
+      return
+    }
+
+    // Ensure non-admin callers cannot claim a higher role than their directory record allows
+    if (!isAuthorizedAdminProvisioning && directoryStatus.exists && directoryStatus.role != null && directoryStatus.role != role) {
+      SecurityEngine.logEvent(
+        severity = SecuritySeverity.CRITICAL,
+        eventType = "ROLE_ESCALATION_BLOCKED",
+        actor = cleanEmail,
+        details = "Blocked attempt to register '$cleanEmail' with role ${role.name} instead of assigned role ${directoryStatus.role.name}."
+      )
+      onFailure("Role mismatch: Account '$cleanEmail' is only authorized for role ${directoryStatus.role.displayName}.")
+      return
+    }
+
     val firebaseAuth = auth
     if (firebaseAuth == null) {
       authScope.launch {
-        SecurityEngine.registerSaltedCredential(cleanEmail, password, role, fullName)
-        Log.d(TAG, "Local vault registration completed for $cleanEmail. Role: ${role.name}")
+        SecurityEngine.registerSaltedCredential(
+          identifier = cleanEmail,
+          rawPassword = password,
+          role = role,
+          fullName = fullName,
+          instituteId = targetInstituteId
+        )
+        Log.d(TAG, "Local vault registration completed for $cleanEmail in institute $targetInstituteId. Role: ${role.name}")
         _authStatus.value = "Registered in local vault for $cleanEmail"
         runOnMainOrDirect { onSuccess() }
       }
@@ -224,14 +284,22 @@ object FirebaseAuthService {
         val uid = authResult.user?.uid ?: ""
         Log.d(TAG, "Firebase account created. UID: $uid. Writing user role mapping to Firestore...")
 
-        saveUserRole(uid, cleanEmail, fullName, role, {
-          _authStatus.value = "Registered successfully. Role: ${role.name}"
-          onSuccess()
-        }, { error ->
-          Log.e(TAG, "Failed to save user role in Firestore", error)
-          _authStatus.value = "Account created. Role save fallback applied."
-          onSuccess()
-        })
+        saveUserRole(
+          uid = uid,
+          email = cleanEmail,
+          fullName = fullName,
+          role = role,
+          instituteId = targetInstituteId,
+          onSuccess = {
+            _authStatus.value = "Registered successfully. Role: ${role.name}"
+            onSuccess()
+          },
+          onFailure = { error ->
+            Log.e(TAG, "Failed to save user role in Firestore", error)
+            _authStatus.value = "Role registration failed: ${error.localizedMessage}"
+            onFailure(error.localizedMessage ?: "Failed to assign role in Firestore")
+          }
+        )
       }
       .addOnFailureListener { e ->
         Log.e(TAG, "Firebase sign up failed", e)
@@ -281,15 +349,49 @@ object FirebaseAuthService {
     _authStatus.value = "Signed out of Firebase Auth"
   }
 
-  // Helper: Save user role mapping in Firestore (without storing any password hashes in Firestore)
-  private fun saveUserRole(
+  // Helper: Save user role mapping in Firestore (strictly enforces instituteId and blocks self-escalation)
+  fun saveUserRole(
     uid: String,
     email: String,
     fullName: String,
     role: UserRole,
     onSuccess: () -> Unit,
-    onFailure: (Exception) -> Unit
+    onFailure: (Exception) -> Unit,
+    instituteId: String = AppRepository.getCurrentInstituteId(),
+    linkedEntityId: String = "",
+    linkedStudentIds: List<String> = emptyList(),
+    assignedBatchIds: List<String> = emptyList()
   ) {
+    val cleanUid = uid.trim()
+    val targetInstituteId = instituteId.trim()
+    if (cleanUid.isEmpty() || targetInstituteId.isEmpty()) {
+      onFailure(SecurityException("INVALID_ROLE_BINDING: uid and instituteId are required for /user_roles documents."))
+      return
+    }
+
+    val activeSession = AppRepository.buildCurrentFirestoreAuthContext()
+    if (activeSession != null && !activeSession.instituteId.equals(targetInstituteId, ignoreCase = true)) {
+      SecurityEngine.logEvent(
+        severity = SecuritySeverity.CRITICAL,
+        eventType = "CROSS_TENANT_ACCESS_DENIED",
+        actor = activeSession.uid,
+        details = "Blocked attempt to write /user_roles/$cleanUid for foreign institute '$targetInstituteId'."
+      )
+      onFailure(SecurityException("CROSS_TENANT_ACCESS_DENIED: Cannot write user role for another institute."))
+      return
+    }
+
+    if (activeSession == null || !AppRepository.isAdminSession()) {
+      SecurityEngine.logEvent(
+        severity = SecuritySeverity.CRITICAL,
+        eventType = "ROLE_ESCALATION_BLOCKED",
+        actor = activeSession?.uid ?: email,
+        details = "Blocked non-admin attempt to write /user_roles/$cleanUid with role ${role.name}."
+      )
+      onFailure(SecurityException("ROLE_ESCALATION_BLOCKED: Only an authorized institute administrator or backend process can assign user roles."))
+      return
+    }
+
     val firestore = FirestoreService.db
     if (firestore == null) {
       onSuccess()
@@ -297,18 +399,22 @@ object FirebaseAuthService {
     }
 
     val roleData = mapOf(
-      "uid" to uid,
-      "email" to email,
+      "uid" to cleanUid,
+      "email" to email.trim().lowercase(),
       "fullName" to fullName,
       "role" to role.name,
+      "instituteId" to targetInstituteId,
+      "linkedEntityId" to linkedEntityId,
+      "linkedStudentIds" to linkedStudentIds,
+      "assignedBatchIds" to assignedBatchIds,
       "createdAt" to System.currentTimeMillis()
     )
 
     firestore.collection(ROLES_COLLECTION)
-      .document(uid)
+      .document(cleanUid)
       .set(roleData)
       .addOnSuccessListener {
-        Log.d(TAG, "User role recorded successfully in Firestore for UID: $uid")
+        Log.d(TAG, "User role recorded successfully in Firestore for UID: $cleanUid (institute: $targetInstituteId)")
         onSuccess()
       }
       .addOnFailureListener { e ->
@@ -316,7 +422,7 @@ object FirebaseAuthService {
       }
   }
 
-  // Helper: Fetch user role from Firestore mapping
+  // Helper: Fetch user role from Firestore mapping (verifying instituteId membership)
   private fun fetchUserRole(
     uid: String,
     email: String,
@@ -335,15 +441,20 @@ object FirebaseAuthService {
       .addOnSuccessListener { document ->
         if (document != null && document.exists()) {
           val roleStr = document.getString("role") ?: ""
+          val docInstituteId = document.getString("instituteId")?.trim().orEmpty()
+          if (docInstituteId.isEmpty()) {
+            onFailure("Account membership document is missing required instituteId.")
+            return@addOnSuccessListener
+          }
           try {
             val role = UserRole.valueOf(roleStr)
             onSuccess(role)
           } catch (e: Exception) {
             Log.e(TAG, "Invalid role string: $roleStr", e)
-            onSuccess(smartDetectRole(email))
+            onFailure("Invalid user role configuration in institute membership record.")
           }
         } else {
-          Log.w(TAG, "User role document not found for UID: $uid. Using fallback smart detection.")
+          Log.w(TAG, "User role document not found for UID: $uid. Using verified directory lookup.")
           onSuccess(smartDetectRole(email))
         }
       }

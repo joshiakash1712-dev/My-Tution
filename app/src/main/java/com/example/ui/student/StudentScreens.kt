@@ -441,7 +441,7 @@ fun StudentOnlineTestTab(student: Student? = null) {
       studentIdOverride = activeStudent?.id
     )
     testActive = false
-    lastSubmittedAttemptId = persistedAttempt.id
+    lastSubmittedAttemptId = persistedAttempt?.id
   }
 
   // Active Countdown Timer with Auto-Submit & Persistence

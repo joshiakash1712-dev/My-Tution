@@ -25,6 +25,11 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
@@ -385,6 +390,12 @@ fun UniversalLoginScreen(
           shape = RoundedCornerShape(14.dp),
           modifier = Modifier.fillMaxWidth(),
           singleLine = true,
+          keyboardOptions = KeyboardOptions(
+            keyboardType = KeyboardType.Email,
+            capitalization = KeyboardCapitalization.None,
+            autoCorrectEnabled = false,
+            imeAction = ImeAction.Next
+          ),
           colors = OutlinedTextFieldDefaults.colors(
             focusedBorderColor = brandColor,
             unfocusedBorderColor = cardBorderColor,
@@ -489,6 +500,19 @@ fun UniversalLoginScreen(
             shape = RoundedCornerShape(14.dp),
             modifier = Modifier.fillMaxWidth(),
             singleLine = true,
+            keyboardOptions = KeyboardOptions(
+              keyboardType = KeyboardType.Password,
+              capitalization = KeyboardCapitalization.None,
+              autoCorrectEnabled = false,
+              imeAction = ImeAction.Done
+            ),
+            keyboardActions = KeyboardActions(
+              onDone = {
+                if (!isLoading && lockoutRemainingSeconds == 0L) {
+                  authViewModel.performSignIn(onLoginSuccess = onLoginSuccess)
+                }
+              }
+            ),
             colors = OutlinedTextFieldDefaults.colors(
               focusedBorderColor = brandColor,
               unfocusedBorderColor = cardBorderColor,

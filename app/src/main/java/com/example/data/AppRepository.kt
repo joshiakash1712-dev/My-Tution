@@ -11,8 +11,12 @@ import com.squareup.moshi.Types
 
 
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import com.example.data.db.BatchEnrollmentEntity
 
 object AppRepository {
@@ -23,6 +27,14 @@ object AppRepository {
   private val collectorJobs = java.util.concurrent.CopyOnWriteArrayList<kotlinx.coroutines.Job>()
   @Volatile
   private var collectorsInitializedForContextHash: Int = 0
+
+  private val demoSeedMutex = Mutex()
+  @Volatile
+  private var demoSeedDeferred: Deferred<Unit>? = null
+
+  suspend fun awaitInitialDemoDataSeeded() {
+    demoSeedDeferred?.await()
+  }
 
   fun getActiveCollectorJobCount(): Int = collectorJobs.count { it.isActive }
 
@@ -41,8 +53,9 @@ object AppRepository {
   private val _currentUserAccount = MutableStateFlow<UserAccount?>(null)
   val currentUserAccount = _currentUserAccount.asStateFlow()
 
-  private val _userAccounts = MutableStateFlow<List<UserAccount>>(emptyList())
-  val userAccounts = _userAccounts.asStateFlow()
+  private val _allUserAccounts = MutableStateFlow<List<UserAccount>>(emptyList())
+  private val _scopedUserAccounts = MutableStateFlow<List<UserAccount>>(emptyList())
+  val userAccounts = _scopedUserAccounts.asStateFlow()
 
   private val _passwordResetNotice = MutableStateFlow<String?>(null)
   val passwordResetNotice = _passwordResetNotice.asStateFlow()
@@ -50,34 +63,304 @@ object AppRepository {
   private val _currentRole = MutableStateFlow(UserRole.STUDENT)
   val currentRole = _currentRole.asStateFlow()
 
+  private val _currentInstituteId = MutableStateFlow("FSI_MAIN")
+  val currentInstituteId = _currentInstituteId.asStateFlow()
+
+  fun isAuthenticatedSession(): Boolean {
+    return _isLoggedIn.value && _currentUserIdentifier.value.isNotBlank()
+  }
+
+  fun isAdminSession(): Boolean {
+    return isAuthenticatedSession() &&
+      (_currentRole.value == UserRole.ADMIN || _currentUserAccount.value?.role == UserRole.ADMIN)
+  }
+
+  fun isTeacherSession(): Boolean {
+    return isAuthenticatedSession() && _currentRole.value == UserRole.TEACHER
+  }
+
+  fun isStudentSession(): Boolean {
+    return isAuthenticatedSession() && _currentRole.value == UserRole.STUDENT
+  }
+
+  fun isParentSession(): Boolean {
+    return isAuthenticatedSession() && _currentRole.value == UserRole.PARENT
+  }
+
+  private fun requireAdminSession(actionName: String, targetInstituteId: String? = null): Boolean {
+    if (!isAdminSession()) {
+      com.example.security.SecurityEngine.logEvent(
+        severity = com.example.security.SecuritySeverity.ALERT,
+        eventType = "UNAUTHORIZED_ADMIN_MUTATION_BLOCKED",
+        actor = _currentUserIdentifier.value.ifBlank { "Unauthenticated" },
+        details = "Blocked '$actionName': caller role '${_currentRole.value}' (loggedIn=${_isLoggedIn.value}) is not an authenticated ADMIN/OWNER."
+      )
+      return false
+    }
+    if (!targetInstituteId.isNullOrBlank()) {
+      if (!com.example.security.SecurityEngine.isValidInstituteId(targetInstituteId) ||
+        !belongsToCurrentInstitute(targetInstituteId)
+      ) {
+        com.example.security.SecurityEngine.logEvent(
+          severity = com.example.security.SecuritySeverity.ALERT,
+          eventType = "CROSS_TENANT_MUTATION_BLOCKED",
+          actor = _currentUserIdentifier.value,
+          details = "Blocked '$actionName' targeting institute '$targetInstituteId' from active institute '${getCurrentInstituteId()}'."
+        )
+        return false
+      }
+    }
+    return true
+  }
+
+  private fun requireTeacherOrAdminForBatch(
+    actionName: String,
+    batchNameOrId: String = "",
+    targetInstituteId: String? = null
+  ): Boolean {
+    if (!isAuthenticatedSession()) {
+      com.example.security.SecurityEngine.logEvent(
+        severity = com.example.security.SecuritySeverity.ALERT,
+        eventType = "UNAUTHENTICATED_MUTATION_BLOCKED",
+        actor = "Unauthenticated",
+        details = "Blocked '$actionName': no active authenticated session."
+      )
+      return false
+    }
+    if (!targetInstituteId.isNullOrBlank() &&
+      (!com.example.security.SecurityEngine.isValidInstituteId(targetInstituteId) || !belongsToCurrentInstitute(targetInstituteId))
+    ) {
+      com.example.security.SecurityEngine.logEvent(
+        severity = com.example.security.SecuritySeverity.ALERT,
+        eventType = "CROSS_TENANT_MUTATION_BLOCKED",
+        actor = _currentUserIdentifier.value,
+        details = "Blocked '$actionName' across institutes ('$targetInstituteId' vs '${getCurrentInstituteId()}')."
+      )
+      return false
+    }
+    if (isAdminSession()) return true
+    if (isTeacherSession()) {
+      val activeTeacher = getActiveTeacherForCurrentSession() ?: return false
+      if (!belongsToCurrentInstitute(activeTeacher.instituteId)) return false
+      if (batchNameOrId.isNotBlank()) {
+        if (!isTeacherAssignedToBatch(batchNameOrId, activeTeacher)) {
+          com.example.security.SecurityEngine.logEvent(
+            severity = com.example.security.SecuritySeverity.ALERT,
+            eventType = "UNAUTHORIZED_TEACHER_BATCH_MUTATION_BLOCKED",
+            actor = _currentUserIdentifier.value,
+            details = "Blocked '$actionName': teacher '${activeTeacher.id}' is not assigned to batch '$batchNameOrId'."
+          )
+          return false
+        }
+      }
+      return true
+    }
+    com.example.security.SecurityEngine.logEvent(
+      severity = com.example.security.SecuritySeverity.ALERT,
+      eventType = "UNAUTHORIZED_ROLE_MUTATION_BLOCKED",
+      actor = _currentUserIdentifier.value,
+      details = "Blocked '$actionName' for unauthorized role '${_currentRole.value}'."
+    )
+    return false
+  }
+
+  /**
+   * Resolves the authorized target Student for student/parent/teacher/admin operations.
+   * Rejects caller-supplied student/studentId mismatches against the authenticated identity.
+   */
+  fun resolveAuthorizedStudentTarget(
+    requestedStudent: Student? = null,
+    requestedStudentId: String? = null
+  ): Student? {
+    if (!isAuthenticatedSession()) return null
+    val reqId = requestedStudentId?.trim()?.takeIf { it.isNotBlank() }
+      ?: requestedStudent?.id?.trim()?.takeIf { it.isNotBlank() }
+
+    if (requestedStudent != null &&
+      requestedStudent.instituteId.isNotBlank() &&
+      !belongsToCurrentInstitute(requestedStudent.instituteId)
+    ) {
+      return null
+    }
+
+    if (isAdminSession()) {
+      val instStudents = _allStudents.value.filter { belongsToCurrentInstitute(it.instituteId) }
+      if (reqId != null) {
+        return instStudents.find { it.id.equals(reqId, ignoreCase = true) }
+      }
+      return getActiveStudentForCurrentSession()
+    }
+
+    return when (_currentRole.value) {
+      UserRole.STUDENT -> {
+        val ownStudent = getActiveStudentForCurrentSession() ?: return null
+        if (reqId != null && !ownStudent.id.equals(reqId, ignoreCase = true)) {
+          com.example.security.SecurityEngine.logEvent(
+            severity = com.example.security.SecuritySeverity.ALERT,
+            eventType = "STUDENT_IDENTITY_MISMATCH_BLOCKED",
+            actor = _currentUserIdentifier.value,
+            details = "Student '${ownStudent.id}' attempted to access/modify data for another student '$reqId'."
+          )
+          return null
+        }
+        ownStudent
+      }
+      UserRole.PARENT -> {
+        val linked = getLinkedStudentsForCurrentParent()
+        if (linked.isEmpty()) return null
+        if (reqId != null) {
+          val matched = linked.find { it.id.equals(reqId, ignoreCase = true) }
+          if (matched == null) {
+            com.example.security.SecurityEngine.logEvent(
+              severity = com.example.security.SecuritySeverity.ALERT,
+              eventType = "UNLINKED_CHILD_ACCESS_BLOCKED",
+              actor = _currentUserIdentifier.value,
+              details = "Parent attempted to access/modify data for unlinked student '$reqId'."
+            )
+          }
+          return matched
+        }
+        val selectedId = _selectedChildIdForParent.value
+        if (!selectedId.isNullOrBlank()) {
+          linked.find { it.id.equals(selectedId, ignoreCase = true) }?.let { return it }
+        }
+        linked.firstOrNull()
+      }
+      UserRole.TEACHER -> {
+        if (reqId == null) return null
+        val allowedStudents = getStudentsForCurrentTeacher()
+        allowedStudents.find { it.id.equals(reqId, ignoreCase = true) }
+      }
+      UserRole.ADMIN -> null
+    }
+  }
+
+  fun getCurrentInstituteId(): String {
+    val accountInst = _currentUserAccount.value?.instituteId?.trim().orEmpty()
+    if (com.example.security.SecurityEngine.isValidInstituteId(accountInst)) {
+      return accountInst
+    }
+    val flowInst = _currentInstituteId.value.trim()
+    if (com.example.security.SecurityEngine.isValidInstituteId(flowInst)) {
+      return flowInst
+    }
+    val configInst = _instituteConfig.value.instituteId.trim()
+    if (com.example.security.SecurityEngine.isValidInstituteId(configInst)) {
+      return configInst
+    }
+    return "FSI_MAIN"
+  }
+
+  fun currentActiveInstituteId(): String = getCurrentInstituteId()
+
+  fun currentVerifiedRole(): UserRole = _currentRole.value
+
+  fun isCurrentSessionAdmin(): Boolean = isAdminSession()
+
+  fun isSameInstitute(instA: String?, instB: String?): Boolean {
+    val a = instA?.trim().orEmpty()
+    val b = instB?.trim().orEmpty()
+    if (a.isBlank() || b.isBlank()) return false
+    return a.equals(b, ignoreCase = true)
+  }
+
+  private fun logRbacDenial(actionName: String, reason: String) {
+    com.example.security.SecurityEngine.logEvent(
+      severity = com.example.security.SecuritySeverity.ALERT,
+      eventType = "RBAC_DENIAL",
+      actor = _currentUserIdentifier.value.ifBlank { "Unauthenticated" },
+      details = "Blocked '$actionName': $reason"
+    )
+  }
+
+  fun resolveAuthorizedStudentTarget(requestedStudentId: String?): Student? {
+    return resolveAuthorizedStudentTarget(requestedStudent = null, requestedStudentId = requestedStudentId)
+  }
+
+  fun belongsToCurrentInstitute(recordInstituteId: String?): Boolean {
+    if (!com.example.security.SecurityEngine.isValidInstituteId(recordInstituteId)) return false
+    return recordInstituteId!!.trim().equals(getCurrentInstituteId(), ignoreCase = true)
+  }
+
+  fun buildCurrentFirestoreAuthContext(): com.example.security.FirestoreAuthContext? {
+    if (!_isLoggedIn.value) return null
+    val acc = _currentUserAccount.value
+    val role = _currentRole.value
+    val instId = getCurrentInstituteId()
+    val uid = acc?.userId?.ifBlank { _currentUserIdentifier.value } ?: _currentUserIdentifier.value
+    val linkedEntityId = when (role) {
+      UserRole.STUDENT -> getActiveStudentForCurrentSession()?.id ?: acc?.linkedEntityId.orEmpty()
+      UserRole.TEACHER -> getActiveTeacherForCurrentSession()?.id ?: acc?.linkedEntityId.orEmpty()
+      UserRole.PARENT -> acc?.linkedEntityId.orEmpty()
+      UserRole.ADMIN -> acc?.linkedEntityId.orEmpty()
+    }
+    val linkedStuIds = if (role == UserRole.PARENT) {
+      getLinkedStudentsForCurrentParent().map { it.id }.ifEmpty { acc?.linkedStudentIds.orEmpty() }
+    } else {
+      acc?.linkedStudentIds.orEmpty()
+    }
+    val assignedBatches = if (role == UserRole.TEACHER) {
+      val t = getActiveTeacherForCurrentSession()
+      val fromBatches = _allBatches.value.filter {
+        belongsToCurrentInstitute(it.instituteId) &&
+          (it.teacherId.equals(t?.id, ignoreCase = true) || it.teacherName.equals(t?.name, ignoreCase = true))
+      }.map { it.id }
+      (t?.assignedBatchIds.orEmpty() + fromBatches).distinct()
+    } else emptyList()
+    val stuBatchId = if (role == UserRole.STUDENT) {
+      getActiveStudentForCurrentSession()?.batchId.orEmpty()
+    } else ""
+    val parBatchIds = if (role == UserRole.PARENT) {
+      getLinkedStudentsForCurrentParent().mapNotNull { it.batchId.takeIf { b -> b.isNotBlank() } }.distinct()
+    } else emptyList()
+
+    return com.example.security.FirestoreAuthContext(
+      uid = uid,
+      role = role,
+      instituteId = instId,
+      linkedEntityId = linkedEntityId,
+      linkedStudentIds = linkedStuIds,
+      assignedBatchIds = assignedBatches,
+      batchId = stuBatchId,
+      linkedBatchIds = parBatchIds,
+      isAuthenticated = true
+    )
+  }
+
   private val _savedAccounts = MutableStateFlow<List<SavedAccount>>(emptyList())
   val savedAccounts = _savedAccounts.asStateFlow()
 
   private val _darkThemeMode = MutableStateFlow(DarkThemeMode.SYSTEM)
   val darkThemeMode = _darkThemeMode.asStateFlow()
 
-  private val _batchEnrollments = MutableStateFlow<List<BatchEnrollmentEntity>>(emptyList())
-  val batchEnrollments = _batchEnrollments.asStateFlow()
+  private val _allBatchEnrollments = MutableStateFlow<List<BatchEnrollmentEntity>>(emptyList())
+  private val _scopedBatchEnrollments = MutableStateFlow<List<BatchEnrollmentEntity>>(emptyList())
+  val batchEnrollments = _scopedBatchEnrollments.asStateFlow()
 
   private val _selectedChildIdForParent = MutableStateFlow<String?>(null)
   val selectedChildIdForParent = _selectedChildIdForParent.asStateFlow()
 
   fun setSelectedChildForParent(studentId: String): Boolean {
+    if (!isAuthenticatedSession()) return false
     val cleanId = studentId.trim()
     if (cleanId.isBlank()) return false
-    val isAdmin = _currentRole.value == UserRole.ADMIN || _currentUserAccount.value?.role == UserRole.ADMIN
-    if (isAdmin) {
-      val exists = _students.value.any { it.id.equals(cleanId, ignoreCase = true) }
+    if (isAdminSession()) {
+      val exists = _allStudents.value.any {
+        belongsToCurrentInstitute(it.instituteId) && it.id.equals(cleanId, ignoreCase = true)
+      }
       if (exists) {
         _selectedChildIdForParent.value = cleanId
+        refreshScopedStateFlows()
         return true
       }
       return false
     }
+    if (!isParentSession()) return false
     val linkedIds = getLinkedStudentsForCurrentParent().map { it.id }
     val matchedId = linkedIds.find { it.equals(cleanId, ignoreCase = true) }
     return if (matchedId != null) {
       _selectedChildIdForParent.value = matchedId
+      refreshScopedStateFlows()
       true
     } else {
       false
@@ -122,6 +405,106 @@ object AppRepository {
     return true
   }
 
+  internal fun getAppContextOrNull(): android.content.Context? = appContext
+
+  internal fun bindStudentBatchRepository(
+    context: android.content.Context,
+    repo: StudentBatchRepository
+  ) {
+    if (appContext == null) {
+      appContext = context.applicationContext ?: context
+    }
+    studentBatchRepo = repo
+  }
+
+  private fun resolveStudentBatchRepo(): StudentBatchRepository? {
+    val existing = studentBatchRepo
+    if (existing != null && existing.isDatabaseOpenAndCurrent()) {
+      return existing
+    }
+    val ctx = appContext ?: return existing
+    if (com.example.data.db.AppRoomDatabase.getInstanceOrNull() != null) {
+      return StudentBatchRepository(ctx).also { studentBatchRepo = it }
+    }
+    return existing
+  }
+
+  internal fun findStudentLocal(studentId: String): Student? {
+    val cleanId = studentId.trim()
+    if (cleanId.isBlank()) return null
+    _allStudents.value.find { it.id == cleanId }?.let { return it }
+    val dbInst = com.example.data.db.AppRoomDatabase.getInstanceOrNull()
+      ?: appContext?.let { com.example.data.db.AppRoomDatabase.getDatabase(it) }
+    if (dbInst != null) {
+      val entity = kotlinx.coroutines.runBlocking {
+        dbInst.studentDao().getStudentByIdOnce(cleanId)
+      }
+      if (entity != null && !entity.status.equals("Inactive", ignoreCase = true)) {
+        return entity.toDomain()
+      }
+    }
+    return null
+  }
+
+  internal fun onLocalStudentUpserted(
+    student: Student,
+    enrollment: com.example.data.db.BatchEnrollmentEntity? = null
+  ) {
+    _allStudents.update { current ->
+      val idx = current.indexOfFirst { it.id == student.id }
+      if (student.status.equals("Inactive", ignoreCase = true)) {
+        current.filterNot { it.id == student.id }
+      } else if (idx >= 0) {
+        current.toMutableList().also { it[idx] = student }
+      } else {
+        current + student
+      }
+    }
+    if (enrollment != null) {
+      _allBatchEnrollments.update { current ->
+        val filtered = current.map { existing ->
+          if (existing.studentId == student.id && existing.id != enrollment.id) {
+            existing.copy(status = "Inactive")
+          } else {
+            existing
+          }
+        }.filterNot { it.id == enrollment.id }
+        filtered + enrollment
+      }
+    }
+    syncBatchStudentCounts()
+    refreshScopedStateFlows()
+  }
+
+  internal fun onLocalStudentsDeactivated(studentIds: List<String>) {
+    val idSet = studentIds.map { it.trim() }.filter { it.isNotBlank() }.toSet()
+    if (idSet.isEmpty()) return
+    _allStudents.update { list -> list.filterNot { idSet.contains(it.id) } }
+    _allBatchEnrollments.update { list ->
+      list.map { if (idSet.contains(it.studentId)) it.copy(status = "Inactive") else it }
+    }
+    _allUserAccounts.update { list ->
+      list.map { if (idSet.contains(it.linkedEntityId)) it.copy(status = "Inactive") else it }
+    }
+    syncBatchStudentCounts()
+    refreshScopedStateFlows()
+  }
+
+  internal fun findExistingStudentInstituteId(studentId: String): String? {
+    val cleanId = studentId.trim()
+    if (cleanId.isBlank()) return null
+    _allStudents.value.find { it.id == cleanId }?.let { return it.instituteId }
+    val dbInst = com.example.data.db.AppRoomDatabase.getInstanceOrNull()
+      ?: appContext?.let { com.example.data.db.AppRoomDatabase.getDatabase(it) }
+    if (dbInst != null) {
+      val entity = kotlinx.coroutines.runBlocking {
+        dbInst.studentDao().getStudentByIdOnce(cleanId)
+      }
+      if (entity != null) return entity.instituteId
+    }
+    return null
+  }
+
   fun initialize(context: android.content.Context) {
     val appCtx = context.applicationContext
     appContext = appCtx
@@ -137,8 +520,8 @@ object AppRepository {
     }
 
     val isCleared = preferences?.getBoolean("is_data_cleared", false) ?: false
-    if (!isCleared && _notifications.value.isEmpty()) {
-      _notifications.value = listOf(
+    if (!isCleared && _allNotifications.value.isEmpty()) {
+      _allNotifications.value = listOf(
         NotificationItem(
           id = "NOT_INIT_1",
           title = "📢 Welcome to FSI My Tuition!",
@@ -161,14 +544,17 @@ object AppRepository {
     }
 
     val ctxHash = System.identityHashCode(appCtx)
-    val repo = studentBatchRepo?.takeIf { collectorsInitializedForContextHash == ctxHash }
-      ?: StudentBatchRepository(appCtx).also { studentBatchRepo = it }
+    val existingRepoValid = studentBatchRepo?.isDatabaseOpenAndCurrent() == true
+    val repo = studentBatchRepo?.takeIf {
+      collectorsInitializedForContextHash == ctxHash && existingRepoValid
+    } ?: StudentBatchRepository(appCtx).also { studentBatchRepo = it }
 
     if (!isCleared) {
       _badges.value = SeedData.getDefaultBadges()
     }
 
-    val hasActiveCollectors = collectorJobs.isNotEmpty() &&
+    val hasActiveCollectors = existingRepoValid &&
+      collectorJobs.isNotEmpty() &&
       collectorJobs.all { it.isActive } &&
       collectorsInitializedForContextHash == ctxHash
 
@@ -176,19 +562,25 @@ object AppRepository {
       cancelAllCollectors()
       collectorsInitializedForContextHash = ctxHash
 
-      // Perform one-shot deterministic demo seeding if database has not been seeded or cleared
-      collectorJobs.add(
-        repoScope.launch {
-          seedInitialDemoDataIfRequired(repo)
+      // Perform one-shot deterministic demo seeding on Dispatchers.IO without blocking main thread
+      val seedDeferred = repoScope.async<Unit> {
+        demoSeedMutex.withLock {
+          try {
+            seedInitialDemoDataIfRequired(repo)
+          } catch (e: Throwable) {
+            android.util.Log.w("AppRepository", "Demo data seeding fallback warning: ${e.message}")
+          }
         }
-      )
+      }
+      demoSeedDeferred = seedDeferred
 
-      // Pure read-only Room Flow collectors (no write-back loops, no empty-list re-seeding)
+      // Pure read-only Room Flow collectors updating internal caches and projecting role-scoped StateFlows
       collectorJobs.add(
         repoScope.launch {
           repo.allStudents.collect { list ->
-            _students.value = list
+            _allStudents.value = list
             syncBatchStudentCounts(list)
+            refreshScopedStateFlows()
           }
         }
       )
@@ -197,10 +589,14 @@ object AppRepository {
         repoScope.launch {
           repo.allBatches.collect { list ->
             val updated = list.map { b ->
-              val count = _students.value.count { it.batch.equals(b.name, ignoreCase = true) }
+              val count = _allStudents.value.count {
+                it.instituteId.equals(b.instituteId, ignoreCase = true) &&
+                  it.batch.equals(b.name, ignoreCase = true)
+              }
               b.copy(studentCount = count)
             }
-            _batches.value = updated
+            _allBatches.value = updated
+            refreshScopedStateFlows()
           }
         }
       )
@@ -208,7 +604,8 @@ object AppRepository {
       collectorJobs.add(
         repoScope.launch {
           repo.allEnrollments.collect { list ->
-            _batchEnrollments.value = list
+            _allBatchEnrollments.value = list
+            refreshScopedStateFlows()
           }
         }
       )
@@ -216,7 +613,8 @@ object AppRepository {
       collectorJobs.add(
         repoScope.launch {
           repo.allTeachers.collect { list ->
-            _teachers.value = list
+            _allTeachers.value = list
+            refreshScopedStateFlows()
           }
         }
       )
@@ -224,10 +622,10 @@ object AppRepository {
       collectorJobs.add(
         repoScope.launch {
           repo.allUserAccounts.collect { entities ->
-            _userAccounts.value = entities.map { it.toDomain() }
+            _allUserAccounts.value = entities.map { it.toDomain() }
             val activeId = _currentUserIdentifier.value
             if (_isLoggedIn.value && activeId.isNotBlank()) {
-              val matched = _userAccounts.value.find {
+              val matched = _allUserAccounts.value.find {
                 it.email.equals(activeId, ignoreCase = true) ||
                   it.userId.equals(activeId, ignoreCase = true) ||
                   it.linkedEntityId.equals(activeId, ignoreCase = true) ||
@@ -241,6 +639,7 @@ object AppRepository {
                 _currentRole.value = authoritativeRole
               }
             }
+            refreshScopedStateFlows()
           }
         }
       )
@@ -248,10 +647,11 @@ object AppRepository {
       collectorJobs.add(
         repoScope.launch {
           repo.allAttendance.collect { list ->
-            _attendance.value = list
+            _allAttendance.value = list
             if (list.isNotEmpty()) {
               recalculateAllStudentsAttendanceFromRecords(list)
             }
+            refreshScopedStateFlows()
           }
         }
       )
@@ -259,7 +659,8 @@ object AppRepository {
       collectorJobs.add(
         repoScope.launch {
           repo.allFeeInvoices.collect { list ->
-            _fees.value = list
+            _allFees.value = list
+            refreshScopedStateFlows()
           }
         }
       )
@@ -267,7 +668,8 @@ object AppRepository {
       collectorJobs.add(
         repoScope.launch {
           repo.allFeePayments.collect { list ->
-            _feePayments.value = list
+            _allFeePayments.value = list
+            refreshScopedStateFlows()
           }
         }
       )
@@ -275,7 +677,8 @@ object AppRepository {
       collectorJobs.add(
         repoScope.launch {
           repo.allHomeworks.collect { list ->
-            _homework.value = list
+            _allHomework.value = list
+            refreshScopedStateFlows()
           }
         }
       )
@@ -283,7 +686,8 @@ object AppRepository {
       collectorJobs.add(
         repoScope.launch {
           repo.allDoubts.collect { list ->
-            _doubts.value = list
+            _allDoubts.value = list
+            refreshScopedStateFlows()
           }
         }
       )
@@ -291,7 +695,8 @@ object AppRepository {
       collectorJobs.add(
         repoScope.launch {
           repo.allTests.collect { list ->
-            _tests.value = list
+            _allTests.value = list
+            refreshScopedStateFlows()
           }
         }
       )
@@ -299,7 +704,8 @@ object AppRepository {
       collectorJobs.add(
         repoScope.launch {
           repo.allSubjects.collect { list ->
-            _subjects.value = list
+            _allSubjects.value = list
+            refreshScopedStateFlows()
           }
         }
       )
@@ -307,7 +713,8 @@ object AppRepository {
       collectorJobs.add(
         repoScope.launch {
           repo.allLeads.collect { list ->
-            _leads.value = list
+            _allLeads.value = list
+            refreshScopedStateFlows()
           }
         }
       )
@@ -315,7 +722,8 @@ object AppRepository {
       collectorJobs.add(
         repoScope.launch {
           repo.allOnlineForms.collect { list ->
-            _onlineForms.value = list
+            _allOnlineForms.value = list
+            refreshScopedStateFlows()
           }
         }
       )
@@ -324,8 +732,9 @@ object AppRepository {
         repoScope.launch {
           repo.allNotifications.collect { list ->
             if (list.isNotEmpty() || (preferences?.getBoolean("is_data_cleared", false) == true)) {
-              _notifications.value = list
+              _allNotifications.value = list
             }
+            refreshScopedStateFlows()
           }
         }
       )
@@ -333,7 +742,8 @@ object AppRepository {
       collectorJobs.add(
         repoScope.launch {
           repo.allTimetableEntries.collect { list ->
-            _dynamicTimetable.value = list
+            _allDynamicTimetable.value = list
+            refreshScopedStateFlows()
           }
         }
       )
@@ -341,7 +751,8 @@ object AppRepository {
       collectorJobs.add(
         repoScope.launch {
           repo.allWeeklyTimetable.collect { list ->
-            _timetable.value = list
+            _allTimetable.value = list
+            refreshScopedStateFlows()
           }
         }
       )
@@ -349,7 +760,8 @@ object AppRepository {
       collectorJobs.add(
         repoScope.launch {
           repo.allQuestions.collect { list ->
-            _questions.value = list
+            _allQuestions.value = list
+            refreshScopedStateFlows()
           }
         }
       )
@@ -357,7 +769,8 @@ object AppRepository {
       collectorJobs.add(
         repoScope.launch {
           repo.allStudentAttempts.collect { list ->
-            _studentTestAttempts.value = list
+            _allStudentTestAttempts.value = list
+            refreshScopedStateFlows()
           }
         }
       )
@@ -365,7 +778,8 @@ object AppRepository {
       collectorJobs.add(
         repoScope.launch {
           repo.allStudyLogs.collect { list ->
-            _studyLogs.value = list
+            _allStudyLogs.value = list
+            refreshScopedStateFlows()
           }
         }
       )
@@ -373,13 +787,8 @@ object AppRepository {
       collectorJobs.add(
         repoScope.launch {
           repo.allStudentGoals.collect { list ->
-            if (list.isNotEmpty()) {
-              val activeStuId = getActiveStudentForCurrentSession()?.id
-              val matched = if (!activeStuId.isNullOrBlank()) {
-                list.find { it.studentId.equals(activeStuId, ignoreCase = true) }
-              } else null
-              _studentGoal.value = matched ?: list.first()
-            }
+            _allStudentGoals.value = list
+            refreshScopedStateFlows()
           }
         }
       )
@@ -387,20 +796,11 @@ object AppRepository {
       collectorJobs.add(
         repoScope.launch {
           repo.allParentMeetings.collect { list ->
-            _meetings.value = list
+            _allMeetings.value = list
+            refreshScopedStateFlows()
           }
         }
       )
-
-      // Rule 1: Automatic non-permanent rolling lifecycle cleanup (purge records older than 90 days)
-      repoScope.launch {
-        try {
-          val cutoffTimestamp = System.currentTimeMillis() - (90L * 24 * 60 * 60 * 1000L)
-          repo.purgeExpiredAttendance(cutoffTimestamp)
-        } catch (e: Exception) {
-          e.printStackTrace()
-        }
-      }
     }
 
     val persistedThemeStr = preferences?.getString("dark_theme_mode", DarkThemeMode.SYSTEM.name) ?: DarkThemeMode.SYSTEM.name
@@ -441,6 +841,7 @@ object AppRepository {
       _currentUserIdentifier.value = ""
       _currentUserAccount.value = null
       _currentRole.value = UserRole.STUDENT
+      refreshScopedStateFlows()
     }
 
     // Check Firebase Auth session if configured
@@ -456,7 +857,7 @@ object AppRepository {
       },
       onNoSession = {
         // When Firebase Auth is configured as the production authority, a missing Firebase session invalidates stale local state
-        if (FirebaseAuthService.isAvailable()) {
+        if (FirebaseAuthService.isAvailable() && !com.example.security.SecurityEngine.hasRegisteredAccount(_currentUserIdentifier.value)) {
           logout()
         }
       }
@@ -464,32 +865,47 @@ object AppRepository {
   }
 
   private suspend fun seedInitialDemoDataIfRequired(repo: StudentBatchRepository) {
+    ensurePrimaryAdminUserAccountSeeded(repo)
     val isCleared = preferences?.getBoolean("is_data_cleared", false) ?: false
     if (isCleared) return
     val alreadySeeded = preferences?.getBoolean("initial_demo_seed_completed", false) ?: false
-    if (alreadySeeded && repo.getUserAccountCount() > 0) return
+    val needsFullSeed = !alreadySeeded || repo.getUserAccountCount() <= 1
+    if (!needsFullSeed) {
+      return
+    }
 
     val demoStudents = SeedData.get15DemoStudents().map { stu ->
       stu.copy(
         batchId = stu.batchId.ifBlank { SeedData.batchIdForName(stu.batch) },
         parentId = stu.parentId.ifBlank { "PAR_${stu.id}" },
-        parentEmail = stu.parentEmail.ifBlank { "parent_${stu.id.lowercase()}@mytuition.com" }
+        parentEmail = stu.parentEmail.ifBlank { "parent_${stu.id.lowercase()}@mytuition.com" },
+        instituteId = "FSI_MAIN"
       )
     }
     val demoTeachers = SeedData.defaultTeachers
 
-    if (_students.value.isEmpty() || !alreadySeeded) {
-      repo.bulkInsertStudents(demoStudents)
-    }
-    if (!alreadySeeded) {
-      SeedData.defaultBatches.forEach { b ->
+    if (needsFullSeed) {
+      val seededBatches = SeedData.defaultBatches.map { b ->
         val count = demoStudents.count { it.batch.equals(b.name, ignoreCase = true) }
-        repo.insertBatch(b.copy(studentCount = count))
+        b.copy(studentCount = count, instituteId = "FSI_MAIN")
+      }
+      seededBatches.forEach { b ->
+        repo.insertBatch(b)
       }
       repo.insertTeachers(demoTeachers)
-      val defaultsAtt = getDefaultAttendance()
-      if (defaultsAtt.isNotEmpty()) {
-        repo.insertAttendanceList(defaultsAtt)
+      _allBatches.value = seededBatches
+      _allTeachers.value = demoTeachers
+    }
+    if (_allStudents.value.isEmpty() || needsFullSeed) {
+      repo.bulkInsertStudents(demoStudents)
+      _allStudents.value = demoStudents
+    }
+    if (needsFullSeed) {
+      if (repo.getAttendanceCount() == 0) {
+        val defaultsAtt = getDefaultAttendance()
+        if (defaultsAtt.isNotEmpty()) {
+          repo.insertAttendanceList(defaultsAtt)
+        }
       }
       repo.insertFeeInvoices(SeedData.getDefaultFeeRecords())
       repo.insertFeePayments(SeedData.getDefaultFeePayments())
@@ -499,15 +915,48 @@ object AppRepository {
       repo.insertSubjects(SeedData.defaultSubjects)
       repo.insertLeads(SeedData.getDefaultLeads())
       repo.insertOnlineForms(SeedData.getDefaultOnlineForms())
-      if (_notifications.value.isNotEmpty()) {
-        repo.insertNotifications(_notifications.value)
+      if (_allNotifications.value.isNotEmpty()) {
+        repo.insertNotifications(_allNotifications.value)
       }
       repo.insertTimetableEntries(SeedData.getDefaultTimetableEntries())
       repo.insertWeeklyTimetableEntries(SeedData.getDefaultWeeklyTimetable())
       repo.insertQuestions(SeedData.getDefaultQuestions())
     }
     ensureDefaultUserAccountsSeeded(repo, demoStudents, demoTeachers)
+    ensurePrimaryAdminUserAccountSeeded(repo)
     preferences?.edit()?.putBoolean("initial_demo_seed_completed", true)?.apply()
+  }
+
+  private suspend fun ensurePrimaryAdminUserAccountSeeded(repo: StudentBatchRepository) {
+    val existing = repo.findUserAccount("joshiakash1712@gmail.com")
+    val adminEntity = if (existing == null) {
+      com.example.data.db.UserAccountEntity(
+        userId = "USR_ADM_PRIMARY",
+        email = "joshiakash1712@gmail.com",
+        mobile = "",
+        name = "Akash Joshi",
+        passwordHash = "",
+        passwordSalt = "",
+        role = UserRole.ADMIN.name,
+        linkedEntityId = "ADM_01",
+        status = "Active",
+        instituteId = "FSI_MAIN"
+      ).also { repo.insertUserAccount(it) }
+    } else if (!existing.role.equals(UserRole.ADMIN.name, ignoreCase = true) || !existing.status.equals("Active", ignoreCase = true)) {
+      existing.copy(
+        role = UserRole.ADMIN.name,
+        status = "Active",
+        name = existing.name.ifBlank { "Akash Joshi" },
+        instituteId = existing.instituteId.ifBlank { "FSI_MAIN" }
+      ).also { repo.updateUserAccount(it) }
+    } else {
+      existing
+    }
+    val adminDomain = adminEntity.toDomain()
+    _allUserAccounts.update { list ->
+      val filtered = list.filterNot { it.email.equals("joshiakash1712@gmail.com", ignoreCase = true) }
+      listOf(adminDomain) + filtered
+    }
   }
 
   private suspend fun ensureDefaultUserAccountsSeeded(
@@ -515,8 +964,23 @@ object AppRepository {
     studentsList: List<Student>,
     teachersList: List<Teacher>
   ) {
-    if (repo.getUserAccountCount() > 0) return
+    if (repo.getUserAccountCount() > 1) return
     val accounts = mutableListOf<com.example.data.db.UserAccountEntity>()
+
+    accounts.add(
+      com.example.data.db.UserAccountEntity(
+        userId = "USR_ADM_PRIMARY",
+        email = "joshiakash1712@gmail.com",
+        mobile = "",
+        name = "Akash Joshi",
+        passwordHash = "",
+        passwordSalt = "",
+        role = UserRole.ADMIN.name,
+        linkedEntityId = "ADM_01",
+        status = "Active",
+        instituteId = "FSI_MAIN"
+      )
+    )
 
     // Store non-sensitive local profile/directory metadata only (never store default passwords or hashes in Room)
     teachersList.forEach { t ->
@@ -615,15 +1079,21 @@ object AppRepository {
       return
     }
     _currentRole.value = role
+    refreshScopedStateFlows()
   }
 
   // =========================================================================
-  // ROLE-SCOPED IDENTITY RESOLUTION HELPERS
+  // ROLE-SCOPED & TENANT-ISOLATED IDENTITY RESOLUTION HELPERS
   // =========================================================================
   fun getActiveStudentForCurrentSession(): Student? {
-    val allStu = _students.value
-    if (allStu.isEmpty()) return null
+    if (!isAuthenticatedSession()) return null
     val account = _currentUserAccount.value
+    val isAdmin = _currentRole.value == UserRole.ADMIN || account?.role == UserRole.ADMIN
+    if (!isAdmin && _currentRole.value != UserRole.STUDENT) {
+      return null
+    }
+    val allStu = _allStudents.value.filter { belongsToCurrentInstitute(it.instituteId) }
+    if (allStu.isEmpty()) return null
     val activeId = _currentUserIdentifier.value.trim().lowercase()
     val digitsOnly = activeId.filter { it.isDigit() }
 
@@ -637,17 +1107,22 @@ object AppRepository {
           (digitsOnly.length >= 8 && stu.mobile.filter { it.isDigit() }.contains(digitsOnly))
       }?.let { return it }
     }
-    // Only allow fallback preview for an authenticated ADMIN inspecting the Student Portal
-    if (account?.role == UserRole.ADMIN) {
+    // Only allow fallback preview for an authenticated ADMIN inspecting the Student Portal within their own institute
+    if (isAdmin) {
       return allStu.firstOrNull()
     }
     return null
   }
 
   fun getLinkedStudentsForCurrentParent(): List<Student> {
-    val allStu = _students.value
-    if (allStu.isEmpty()) return emptyList()
+    if (!isAuthenticatedSession()) return emptyList()
     val account = _currentUserAccount.value
+    val isAdmin = _currentRole.value == UserRole.ADMIN || account?.role == UserRole.ADMIN
+    if (!isAdmin && _currentRole.value != UserRole.PARENT) {
+      return emptyList()
+    }
+    val allStu = _allStudents.value.filter { belongsToCurrentInstitute(it.instituteId) }
+    if (allStu.isEmpty()) return emptyList()
     val activeId = _currentUserIdentifier.value.trim().lowercase()
     val digitsOnly = activeId.filter { it.isDigit() }
 
@@ -669,17 +1144,22 @@ object AppRepository {
       if (matchedByContactOrEmail.isNotEmpty()) return matchedByContactOrEmail
     }
 
-    // Only allow fallback preview for an authenticated ADMIN inspecting the Parent Portal
-    if (account?.role == UserRole.ADMIN) {
+    // Only allow fallback preview for an authenticated ADMIN inspecting the Parent Portal within their own institute
+    if (isAdmin) {
       return listOfNotNull(allStu.firstOrNull())
     }
     return emptyList()
   }
 
   fun getActiveTeacherForCurrentSession(): Teacher? {
-    val allTch = _teachers.value
-    if (allTch.isEmpty()) return null
+    if (!isAuthenticatedSession()) return null
     val account = _currentUserAccount.value
+    val isAdmin = _currentRole.value == UserRole.ADMIN || account?.role == UserRole.ADMIN
+    if (!isAdmin && _currentRole.value != UserRole.TEACHER) {
+      return null
+    }
+    val allTch = _allTeachers.value.filter { belongsToCurrentInstitute(it.instituteId) }
+    if (allTch.isEmpty()) return null
     val activeId = _currentUserIdentifier.value.trim().lowercase()
     val digitsOnly = activeId.filter { it.isDigit() }
 
@@ -694,11 +1174,565 @@ object AppRepository {
           t.name.equals(activeId, ignoreCase = true)
       }?.let { return it }
     }
-    // Only allow fallback preview for an authenticated ADMIN inspecting the Teacher Portal
-    if (account?.role == UserRole.ADMIN) {
+    // Only allow fallback preview for an authenticated ADMIN inspecting the Teacher Portal within their own institute
+    if (isAdmin) {
       return allTch.firstOrNull()
     }
     return null
+  }
+
+  fun getStudentsForCurrentSession(): List<Student> {
+    if (!isAuthenticatedSession()) return emptyList()
+    val instStudents = _allStudents.value.filter { belongsToCurrentInstitute(it.instituteId) }
+    return when (_currentRole.value) {
+      UserRole.ADMIN -> instStudents
+      UserRole.TEACHER -> getStudentsForCurrentTeacher()
+      UserRole.STUDENT -> listOfNotNull(getActiveStudentForCurrentSession())
+      UserRole.PARENT -> getLinkedStudentsForCurrentParent()
+    }
+  }
+
+  fun getTeachersForCurrentSession(): List<Teacher> {
+    if (!isAuthenticatedSession()) return emptyList()
+    val instTeachers = _allTeachers.value.filter { belongsToCurrentInstitute(it.instituteId) }
+    return when (_currentRole.value) {
+      UserRole.ADMIN -> instTeachers
+      UserRole.TEACHER -> listOfNotNull(getActiveTeacherForCurrentSession())
+      UserRole.STUDENT -> {
+        val stu = getActiveStudentForCurrentSession() ?: return emptyList()
+        instTeachers.filter { t ->
+          isTeacherAssignedToBatch(stu.batchId.ifBlank { stu.batch }, t) ||
+            isTeacherAssignedToBatch(stu.batch, t)
+        }.map { it.copy(salary = 0, incentives = 0, deductions = 0, activationCode = "") }
+      }
+      UserRole.PARENT -> {
+        val linked = getLinkedStudentsForCurrentParent()
+        if (linked.isEmpty()) return emptyList()
+        instTeachers.filter { t ->
+          linked.any { stu ->
+            isTeacherAssignedToBatch(stu.batchId.ifBlank { stu.batch }, t) ||
+              isTeacherAssignedToBatch(stu.batch, t)
+          }
+        }.map { it.copy(salary = 0, incentives = 0, deductions = 0, activationCode = "") }
+      }
+    }
+  }
+
+  fun getAttendanceForCurrentSession(): List<AttendanceRecord> {
+    if (!isAuthenticatedSession()) return emptyList()
+    val instAttendance = _allAttendance.value.filter { belongsToCurrentInstitute(it.instituteId) }
+    return when (_currentRole.value) {
+      UserRole.ADMIN -> instAttendance
+      UserRole.TEACHER -> {
+        val teacherBatches = getAssignedBatchesForCurrentTeacher()
+        val batchIds = teacherBatches.map { it.id.lowercase() }.toSet()
+        val batchNames = teacherBatches.map { it.name.lowercase() }.toSet()
+        instAttendance.filter {
+          (it.batchId.isNotBlank() && it.batchId.lowercase() in batchIds) ||
+            (it.batchName.isNotBlank() && it.batchName.lowercase() in batchNames)
+        }
+      }
+      UserRole.STUDENT -> {
+        val stuId = getActiveStudentForCurrentSession()?.id ?: return emptyList()
+        instAttendance.filter { it.studentId.equals(stuId, ignoreCase = true) }
+      }
+      UserRole.PARENT -> {
+        val linkedIds = getLinkedStudentsForCurrentParent().map { it.id.lowercase() }.toSet()
+        instAttendance.filter { it.studentId.lowercase() in linkedIds }
+      }
+    }
+  }
+
+  fun getFeesForCurrentSession(): List<FeeRecord> {
+    if (!isAuthenticatedSession()) return emptyList()
+    val instFees = _allFees.value.filter { belongsToCurrentInstitute(it.instituteId) }
+    return when (_currentRole.value) {
+      UserRole.ADMIN -> instFees
+      UserRole.TEACHER -> emptyList() // Teachers are not authorized to read student fee records
+      UserRole.STUDENT -> {
+        val stuId = getActiveStudentForCurrentSession()?.id ?: return emptyList()
+        instFees.filter { it.studentId.equals(stuId, ignoreCase = true) }
+      }
+      UserRole.PARENT -> {
+        val linkedIds = getLinkedStudentsForCurrentParent().map { it.id.lowercase() }.toSet()
+        instFees.filter { it.studentId.lowercase() in linkedIds }
+      }
+    }
+  }
+
+  fun getFeePaymentsForCurrentSession(): List<StudentFeePayment> {
+    if (!isAuthenticatedSession()) return emptyList()
+    val instPayments = _allFeePayments.value.filter { belongsToCurrentInstitute(it.instituteId) }
+    return when (_currentRole.value) {
+      UserRole.ADMIN -> instPayments
+      UserRole.TEACHER -> emptyList() // Teachers are not authorized to read student fee payments
+      UserRole.STUDENT -> {
+        val stuId = getActiveStudentForCurrentSession()?.id ?: return emptyList()
+        instPayments.filter { it.studentId.equals(stuId, ignoreCase = true) }
+      }
+      UserRole.PARENT -> {
+        val linkedIds = getLinkedStudentsForCurrentParent().map { it.id.lowercase() }.toSet()
+        instPayments.filter { it.studentId.lowercase() in linkedIds }
+      }
+    }
+  }
+
+  fun getBatchesForCurrentSession(): List<Batch> {
+    if (!isAuthenticatedSession()) return emptyList()
+    val instBatches = _allBatches.value.filter { belongsToCurrentInstitute(it.instituteId) }
+    return when (_currentRole.value) {
+      UserRole.ADMIN -> instBatches
+      UserRole.TEACHER -> getAssignedBatchesForCurrentTeacher()
+      UserRole.STUDENT -> {
+        val stu = getActiveStudentForCurrentSession() ?: return emptyList()
+        instBatches.filter {
+          it.id.equals(stu.batchId, ignoreCase = true) || it.name.equals(stu.batch, ignoreCase = true)
+        }
+      }
+      UserRole.PARENT -> {
+        val linked = getLinkedStudentsForCurrentParent()
+        val batchIds = linked.mapNotNull { it.batchId.takeIf { b -> b.isNotBlank() }?.lowercase() }.toSet()
+        val batchNames = linked.mapNotNull { it.batch.takeIf { b -> b.isNotBlank() }?.lowercase() }.toSet()
+        instBatches.filter {
+          it.id.lowercase() in batchIds || it.name.lowercase() in batchNames
+        }
+      }
+    }
+  }
+
+  fun getSubjectsForCurrentSession(): List<Subject> {
+    if (!isAuthenticatedSession()) return emptyList()
+    val instSubjects = _allSubjects.value.filter { belongsToCurrentInstitute(it.instituteId) }
+    return when (_currentRole.value) {
+      UserRole.ADMIN -> instSubjects
+      UserRole.TEACHER -> {
+        val teacher = getActiveTeacherForCurrentSession() ?: return emptyList()
+        val assignedBatches = getAssignedBatchesForCurrentTeacher()
+        val batchIds = assignedBatches.map { it.id.lowercase() }.toSet()
+        val batchNames = assignedBatches.map { it.name.lowercase() }.toSet()
+        instSubjects.filter { sub ->
+          (sub.batchId.isBlank() && sub.batchName.isBlank()) ||
+            sub.teacherId.equals(teacher.id, ignoreCase = true) ||
+            (sub.batchId.isNotBlank() && sub.batchId.lowercase() in batchIds) ||
+            (sub.batchName.isNotBlank() && sub.batchName.lowercase() in batchNames)
+        }
+      }
+      UserRole.STUDENT -> {
+        getActiveStudentForCurrentSession() ?: return emptyList()
+        instSubjects
+      }
+      UserRole.PARENT -> {
+        if (getLinkedStudentsForCurrentParent().isEmpty()) return emptyList()
+        instSubjects
+      }
+    }
+  }
+
+  fun getTestsForCurrentSession(): List<TestRecord> {
+    if (!isAuthenticatedSession()) return emptyList()
+    val instTests = _allTests.value.filter { belongsToCurrentInstitute(it.instituteId) }
+    return when (_currentRole.value) {
+      UserRole.ADMIN -> instTests
+      UserRole.TEACHER -> {
+        val assignedBatches = getAssignedBatchesForCurrentTeacher()
+        if (assignedBatches.isEmpty()) return emptyList()
+        val batchIds = assignedBatches.map { it.id.lowercase() }.toSet()
+        val batchNames = assignedBatches.map { it.name.lowercase() }.toSet()
+        val allowedStudentIds = getStudentsForCurrentTeacher().map { it.id.lowercase() }.toSet()
+        instTests.filter { tst ->
+          (tst.batchId.isNotBlank() && tst.batchId.lowercase() in batchIds) ||
+            (tst.batch.isNotBlank() && tst.batch.lowercase() in batchNames)
+        }.map { tst ->
+          tst.copy(studentMarks = tst.studentMarks.filterKeys { it.lowercase() in allowedStudentIds })
+        }
+      }
+      UserRole.STUDENT -> {
+        val stu = getActiveStudentForCurrentSession() ?: return emptyList()
+        instTests.filter { tst ->
+          (stu.batchId.isNotBlank() && tst.batchId.equals(stu.batchId, ignoreCase = true)) ||
+            (stu.batch.isNotBlank() && tst.batch.equals(stu.batch, ignoreCase = true)) ||
+            tst.studentMarks.keys.any { it.equals(stu.id, ignoreCase = true) }
+        }.map { tst ->
+          // Filter studentMarks to only the authenticated student's own score so other students' marks never leak
+          tst.copy(studentMarks = tst.studentMarks.filterKeys { it.equals(stu.id, ignoreCase = true) })
+        }
+      }
+      UserRole.PARENT -> {
+        val linked = getLinkedStudentsForCurrentParent()
+        if (linked.isEmpty()) return emptyList()
+        val linkedIds = linked.map { it.id.lowercase() }.toSet()
+        val batchIds = linked.mapNotNull { it.batchId.takeIf { b -> b.isNotBlank() }?.lowercase() }.toSet()
+        val batchNames = linked.mapNotNull { it.batch.takeIf { b -> b.isNotBlank() }?.lowercase() }.toSet()
+        instTests.filter { tst ->
+          (tst.batchId.isNotBlank() && tst.batchId.lowercase() in batchIds) ||
+            (tst.batch.isNotBlank() && tst.batch.lowercase() in batchNames) ||
+            tst.studentMarks.keys.any { it.lowercase() in linkedIds }
+        }.map { tst ->
+          tst.copy(studentMarks = tst.studentMarks.filterKeys { it.lowercase() in linkedIds })
+        }
+      }
+    }
+  }
+
+  fun getAttemptsForCurrentSession(): List<StudentTestAttempt> {
+    if (!isAuthenticatedSession()) return emptyList()
+    val instAttempts = _allStudentTestAttempts.value.filter { belongsToCurrentInstitute(it.instituteId) }
+    return when (_currentRole.value) {
+      UserRole.ADMIN -> instAttempts
+      UserRole.TEACHER -> {
+        val allowedStudentIds = getStudentsForCurrentTeacher().map { it.id.lowercase() }.toSet()
+        instAttempts.filter { it.studentId.lowercase() in allowedStudentIds }
+      }
+      UserRole.STUDENT -> getAttemptsForCurrentStudent()
+      UserRole.PARENT -> {
+        val linkedIds = getLinkedStudentsForCurrentParent().map { it.id.lowercase() }.toSet()
+        instAttempts.filter { it.studentId.lowercase() in linkedIds }
+      }
+    }
+  }
+
+  fun getDoubtsForCurrentSession(): List<DoubtItem> {
+    if (!isAuthenticatedSession()) return emptyList()
+    val instDoubts = _allDoubts.value.filter { belongsToCurrentInstitute(it.instituteId) }
+    return when (_currentRole.value) {
+      UserRole.ADMIN -> instDoubts
+      UserRole.TEACHER -> {
+        val assignedBatches = getAssignedBatchesForCurrentTeacher()
+        if (assignedBatches.isEmpty()) return emptyList()
+        val batchIds = assignedBatches.map { it.id.lowercase() }.toSet()
+        val batchNames = assignedBatches.map { it.name.lowercase() }.toSet()
+        val allowedStudentIds = getStudentsForCurrentTeacher().map { it.id.lowercase() }.toSet()
+        instDoubts.filter { d ->
+          d.studentId.lowercase() in allowedStudentIds ||
+            (d.batchId.isNotBlank() && d.batchId.lowercase() in batchIds) ||
+            (d.batchName.isNotBlank() && d.batchName.lowercase() in batchNames)
+        }
+      }
+      UserRole.STUDENT -> getDoubtsForCurrentStudent()
+      UserRole.PARENT -> {
+        val linkedIds = getLinkedStudentsForCurrentParent().map { it.id.lowercase() }.toSet()
+        instDoubts.filter { it.studentId.lowercase() in linkedIds }
+      }
+    }
+  }
+
+  fun getHomeworkForCurrentSession(): List<HomeworkItem> {
+    if (!isAuthenticatedSession()) return emptyList()
+    val instHw = _allHomework.value.filter { belongsToCurrentInstitute(it.instituteId) }
+    return when (_currentRole.value) {
+      UserRole.ADMIN -> instHw
+      UserRole.TEACHER -> {
+        val assignedBatches = getAssignedBatchesForCurrentTeacher()
+        if (assignedBatches.isEmpty()) return emptyList()
+        val batchIds = assignedBatches.map { it.id.lowercase() }.toSet()
+        val batchNames = assignedBatches.map { it.name.lowercase() }.toSet()
+        instHw.filter { hw ->
+          (hw.batchId.isNotBlank() && hw.batchId.lowercase() in batchIds) ||
+            (hw.batchName.isNotBlank() && hw.batchName.lowercase() in batchNames)
+        }
+      }
+      UserRole.STUDENT -> getHomeworkForCurrentStudent()
+      UserRole.PARENT -> {
+        val linked = getLinkedStudentsForCurrentParent()
+        if (linked.isEmpty()) return emptyList()
+        val linkedIds = linked.map { it.id.lowercase() }.toSet()
+        val batchIds = linked.mapNotNull { it.batchId.takeIf { b -> b.isNotBlank() }?.lowercase() }.toSet()
+        val batchNames = linked.mapNotNull { it.batch.takeIf { b -> b.isNotBlank() }?.lowercase() }.toSet()
+        instHw.filter { hw ->
+          (hw.batchId.isNotBlank() && hw.batchId.lowercase() in batchIds) ||
+            (hw.batchName.isNotBlank() && hw.batchName.lowercase() in batchNames)
+        }.map { hw ->
+          hw.copy(completedByStudentIds = hw.completedByStudentIds.filter { it.lowercase() in linkedIds })
+        }
+      }
+    }
+  }
+
+  fun getStudyLogsForCurrentSession(): List<StudyLogItem> {
+    if (!isAuthenticatedSession()) return emptyList()
+    val instLogs = _allStudyLogs.value.filter { belongsToCurrentInstitute(it.instituteId) }
+    return when (_currentRole.value) {
+      UserRole.ADMIN -> instLogs
+      UserRole.TEACHER -> {
+        val allowedStudentIds = getStudentsForCurrentTeacher().map { it.id.lowercase() }.toSet()
+        instLogs.filter { it.studentId.lowercase() in allowedStudentIds }
+      }
+      UserRole.STUDENT -> getStudyLogsForCurrentStudent()
+      UserRole.PARENT -> {
+        val linkedIds = getLinkedStudentsForCurrentParent().map { it.id.lowercase() }.toSet()
+        instLogs.filter { it.studentId.lowercase() in linkedIds }
+      }
+    }
+  }
+
+  fun getTimetableForCurrentSession(): List<TimetableItem> {
+    if (!isAuthenticatedSession()) return emptyList()
+    val instTimetable = _allTimetable.value.filter { belongsToCurrentInstitute(it.instituteId) }
+    return when (_currentRole.value) {
+      UserRole.ADMIN -> instTimetable
+      UserRole.TEACHER -> {
+        val teacher = getActiveTeacherForCurrentSession() ?: return emptyList()
+        val assignedBatches = getAssignedBatchesForCurrentTeacher()
+        val batchIds = assignedBatches.map { it.id.lowercase() }.toSet()
+        val batchNames = assignedBatches.map { it.name.lowercase() }.toSet()
+        instTimetable.filter { item ->
+          item.teacherId.equals(teacher.id, ignoreCase = true) ||
+            isSameFaculty(item.teacherName, teacher.name) ||
+            (item.batchId.isNotBlank() && item.batchId.lowercase() in batchIds) ||
+            (item.batch.isNotBlank() && item.batch.lowercase() in batchNames)
+        }
+      }
+      UserRole.STUDENT -> {
+        val stu = getActiveStudentForCurrentSession() ?: return emptyList()
+        instTimetable.filter { item ->
+          (stu.batchId.isNotBlank() && item.batchId.equals(stu.batchId, ignoreCase = true)) ||
+            (stu.batch.isNotBlank() && item.batch.equals(stu.batch, ignoreCase = true))
+        }
+      }
+      UserRole.PARENT -> {
+        val linked = getLinkedStudentsForCurrentParent()
+        if (linked.isEmpty()) return emptyList()
+        val batchIds = linked.mapNotNull { it.batchId.takeIf { b -> b.isNotBlank() }?.lowercase() }.toSet()
+        val batchNames = linked.mapNotNull { it.batch.takeIf { b -> b.isNotBlank() }?.lowercase() }.toSet()
+        instTimetable.filter { item ->
+          (item.batchId.isNotBlank() && item.batchId.lowercase() in batchIds) ||
+            (item.batch.isNotBlank() && item.batch.lowercase() in batchNames)
+        }
+      }
+    }
+  }
+
+  fun getDynamicTimetableForCurrentSession(): List<DynamicTimetableEntry> {
+    if (!isAuthenticatedSession()) return emptyList()
+    val instDynamic = _allDynamicTimetable.value.filter { belongsToCurrentInstitute(it.instituteId) }
+    return when (_currentRole.value) {
+      UserRole.ADMIN -> instDynamic
+      UserRole.TEACHER -> {
+        val teacher = getActiveTeacherForCurrentSession() ?: return emptyList()
+        val assignedBatches = getAssignedBatchesForCurrentTeacher()
+        val batchIds = assignedBatches.map { it.id.lowercase() }.toSet()
+        val batchNames = assignedBatches.map { it.name.lowercase() }.toSet()
+        instDynamic.filter { entry ->
+          entry.teacherId.equals(teacher.id, ignoreCase = true) ||
+            isSameFaculty(entry.teacherName, teacher.name) ||
+            (entry.batchId.isNotBlank() && entry.batchId.lowercase() in batchIds) ||
+            (entry.batch.isNotBlank() && entry.batch.lowercase() in batchNames)
+        }
+      }
+      UserRole.STUDENT -> {
+        val stu = getActiveStudentForCurrentSession() ?: return emptyList()
+        instDynamic.filter { entry ->
+          (stu.batchId.isNotBlank() && entry.batchId.equals(stu.batchId, ignoreCase = true)) ||
+            (stu.batch.isNotBlank() && entry.batch.equals(stu.batch, ignoreCase = true))
+        }
+      }
+      UserRole.PARENT -> {
+        val linked = getLinkedStudentsForCurrentParent()
+        if (linked.isEmpty()) return emptyList()
+        val batchIds = linked.mapNotNull { it.batchId.takeIf { b -> b.isNotBlank() }?.lowercase() }.toSet()
+        val batchNames = linked.mapNotNull { it.batch.takeIf { b -> b.isNotBlank() }?.lowercase() }.toSet()
+        instDynamic.filter { entry ->
+          (entry.batchId.isNotBlank() && entry.batchId.lowercase() in batchIds) ||
+            (entry.batch.isNotBlank() && entry.batch.lowercase() in batchNames)
+        }
+      }
+    }
+  }
+
+  fun getQuestionsForCurrentSession(): List<QuestionItem> {
+    if (!isAuthenticatedSession()) return emptyList()
+    val instQuestions = _allQuestions.value.filter { belongsToCurrentInstitute(it.instituteId) }
+    return when (_currentRole.value) {
+      UserRole.ADMIN, UserRole.TEACHER -> instQuestions
+      UserRole.STUDENT -> {
+        getActiveStudentForCurrentSession() ?: return emptyList()
+        instQuestions
+      }
+      UserRole.PARENT -> {
+        if (getLinkedStudentsForCurrentParent().isEmpty()) return emptyList()
+        instQuestions
+      }
+    }
+  }
+
+  fun getNotificationsForCurrentSession(): List<NotificationItem> {
+    if (!isAuthenticatedSession()) return emptyList()
+    val instNotes = _allNotifications.value.filter { belongsToCurrentInstitute(it.instituteId) }
+    return when (_currentRole.value) {
+      UserRole.ADMIN -> instNotes
+      UserRole.TEACHER -> {
+        val assignedBatches = getAssignedBatchesForCurrentTeacher()
+        val batchIds = assignedBatches.map { it.id.lowercase() }.toSet()
+        val batchNames = assignedBatches.map { it.name.lowercase() }.toSet()
+        val allowedStudentIds = getStudentsForCurrentTeacher().map { it.id.lowercase() }.toSet()
+        instNotes.filter { n ->
+          val roleAllowed = n.recipientRole.equals("All", ignoreCase = true) ||
+            n.recipientRole.equals("Teacher", ignoreCase = true) ||
+            n.recipientRole.equals("Teachers Only", ignoreCase = true)
+          val studentMatch = n.targetStudentId.isNullOrBlank() || n.targetStudentId.lowercase() in allowedStudentIds
+          val batchMatch = (n.targetBatchId.isBlank() && n.targetBatchName.isNullOrBlank()) ||
+            (n.targetBatchId.isNotBlank() && n.targetBatchId.lowercase() in batchIds) ||
+            (!n.targetBatchName.isNullOrBlank() && n.targetBatchName.lowercase() in batchNames)
+          roleAllowed && studentMatch && batchMatch
+        }
+      }
+      UserRole.STUDENT -> {
+        val stu = getActiveStudentForCurrentSession() ?: return emptyList()
+        instNotes.filter { n ->
+          val roleAllowed = n.recipientRole.equals("All", ignoreCase = true) ||
+            n.recipientRole.equals("Student", ignoreCase = true) ||
+            n.recipientRole.equals("Students Only", ignoreCase = true)
+          val studentMatch = n.targetStudentId.isNullOrBlank() || n.targetStudentId.equals(stu.id, ignoreCase = true)
+          val batchMatch = (n.targetBatchId.isBlank() && n.targetBatchName.isNullOrBlank()) ||
+            (stu.batchId.isNotBlank() && n.targetBatchId.equals(stu.batchId, ignoreCase = true)) ||
+            (stu.batch.isNotBlank() && n.targetBatchName.equals(stu.batch, ignoreCase = true))
+          roleAllowed && studentMatch && batchMatch
+        }
+      }
+      UserRole.PARENT -> {
+        val linked = getLinkedStudentsForCurrentParent()
+        if (linked.isEmpty()) return emptyList()
+        val linkedIds = linked.map { it.id.lowercase() }.toSet()
+        val batchIds = linked.mapNotNull { it.batchId.takeIf { b -> b.isNotBlank() }?.lowercase() }.toSet()
+        val batchNames = linked.mapNotNull { it.batch.takeIf { b -> b.isNotBlank() }?.lowercase() }.toSet()
+        instNotes.filter { n ->
+          val roleAllowed = n.recipientRole.equals("All", ignoreCase = true) ||
+            n.recipientRole.equals("Parent", ignoreCase = true) ||
+            n.recipientRole.equals("Parents Only", ignoreCase = true)
+          val studentMatch = n.targetStudentId.isNullOrBlank() || n.targetStudentId.lowercase() in linkedIds
+          val batchMatch = (n.targetBatchId.isBlank() && n.targetBatchName.isNullOrBlank()) ||
+            (n.targetBatchId.isNotBlank() && n.targetBatchId.lowercase() in batchIds) ||
+            (!n.targetBatchName.isNullOrBlank() && n.targetBatchName.lowercase() in batchNames)
+          roleAllowed && studentMatch && batchMatch
+        }
+      }
+    }
+  }
+
+  fun getMeetingsForCurrentSession(): List<ParentMeetingItem> {
+    if (!isAuthenticatedSession()) return emptyList()
+    val instMeetings = _allMeetings.value.filter { belongsToCurrentInstitute(it.instituteId) }
+    return when (_currentRole.value) {
+      UserRole.ADMIN -> instMeetings
+      UserRole.TEACHER -> {
+        val teacher = getActiveTeacherForCurrentSession() ?: return emptyList()
+        val allowedStudentIds = getStudentsForCurrentTeacher().map { it.id.lowercase() }.toSet()
+        instMeetings.filter { m ->
+          m.teacherId.equals(teacher.id, ignoreCase = true) ||
+            isSameFaculty(m.teacherName, teacher.name) ||
+            m.studentId.lowercase() in allowedStudentIds
+        }
+      }
+      UserRole.STUDENT -> {
+        val stu = getActiveStudentForCurrentSession() ?: return emptyList()
+        instMeetings.filter { it.studentId.equals(stu.id, ignoreCase = true) }
+      }
+      UserRole.PARENT -> {
+        val linkedIds = getLinkedStudentsForCurrentParent().map { it.id.lowercase() }.toSet()
+        if (linkedIds.isEmpty()) return emptyList()
+        instMeetings.filter { it.studentId.lowercase() in linkedIds }
+      }
+    }
+  }
+
+  fun getLeadsForCurrentSession(): List<LeadRecord> {
+    if (!isAdminSession()) return emptyList()
+    return _allLeads.value.filter { belongsToCurrentInstitute(it.instituteId) }
+  }
+
+  fun getOnlineFormsForCurrentSession(): List<OnlineFormSubmission> {
+    if (!isAdminSession()) return emptyList()
+    return _allOnlineForms.value.filter { belongsToCurrentInstitute(it.instituteId) }
+  }
+
+  fun getUserAccountsForCurrentSession(): List<UserAccount> {
+    if (!isAuthenticatedSession()) return emptyList()
+    if (isAdminSession()) {
+      return _allUserAccounts.value.filter { belongsToCurrentInstitute(it.instituteId) }
+    }
+    return listOfNotNull(_currentUserAccount.value)
+  }
+
+  fun getBatchEnrollmentsForCurrentSession(): List<BatchEnrollmentEntity> {
+    if (!isAuthenticatedSession()) return emptyList()
+    val instStudentIds = _allStudents.value
+      .filter { belongsToCurrentInstitute(it.instituteId) }
+      .map { it.id.lowercase() }
+      .toSet()
+    val instEnrollments = _allBatchEnrollments.value.filter { it.studentId.lowercase() in instStudentIds }
+    return when (_currentRole.value) {
+      UserRole.ADMIN -> instEnrollments
+      UserRole.TEACHER -> {
+        val batchIds = getAssignedBatchesForCurrentTeacher().map { it.id.lowercase() }.toSet()
+        instEnrollments.filter { it.batchId.lowercase() in batchIds }
+      }
+      UserRole.STUDENT -> {
+        val stuId = getActiveStudentForCurrentSession()?.id ?: return emptyList()
+        instEnrollments.filter { it.studentId.equals(stuId, ignoreCase = true) }
+      }
+      UserRole.PARENT -> {
+        val linkedIds = getLinkedStudentsForCurrentParent().map { it.id.lowercase() }.toSet()
+        instEnrollments.filter { it.studentId.lowercase() in linkedIds }
+      }
+    }
+  }
+
+  private fun refreshScopedStateFlows() {
+    if (!isAuthenticatedSession()) {
+      _scopedStudents.value = emptyList()
+      _scopedTeachers.value = emptyList()
+      _scopedBatches.value = emptyList()
+      _scopedSubjects.value = emptyList()
+      _scopedAttendance.value = emptyList()
+      _scopedFees.value = emptyList()
+      _scopedFeePayments.value = emptyList()
+      _scopedTests.value = emptyList()
+      _scopedStudentTestAttempts.value = emptyList()
+      _scopedQuestions.value = emptyList()
+      _scopedDoubts.value = emptyList()
+      _scopedHomework.value = emptyList()
+      _scopedTimetable.value = emptyList()
+      _scopedDynamicTimetable.value = emptyList()
+      _scopedStudyLogs.value = emptyList()
+      _scopedStudentGoal.value = GoalItem(
+        studentId = "",
+        targetMarks = 0,
+        targetPercent = 0,
+        targetRank = 0,
+        targetAttendance = 0,
+        weeklyStudyHours = 0,
+        instituteId = ""
+      )
+      _scopedNotifications.value = emptyList()
+      _scopedMeetings.value = emptyList()
+      _scopedLeads.value = emptyList()
+      _scopedOnlineForms.value = emptyList()
+      _scopedUserAccounts.value = emptyList()
+      _scopedBatchEnrollments.value = emptyList()
+      return
+    }
+    _scopedStudents.value = getStudentsForCurrentSession()
+    _scopedTeachers.value = getTeachersForCurrentSession()
+    _scopedBatches.value = getBatchesForCurrentSession()
+    _scopedSubjects.value = getSubjectsForCurrentSession()
+    _scopedAttendance.value = getAttendanceForCurrentSession()
+    _scopedFees.value = getFeesForCurrentSession()
+    _scopedFeePayments.value = getFeePaymentsForCurrentSession()
+    _scopedTests.value = getTestsForCurrentSession()
+    _scopedStudentTestAttempts.value = getAttemptsForCurrentSession()
+    _scopedQuestions.value = getQuestionsForCurrentSession()
+    _scopedDoubts.value = getDoubtsForCurrentSession()
+    _scopedHomework.value = getHomeworkForCurrentSession()
+    _scopedTimetable.value = getTimetableForCurrentSession()
+    _scopedDynamicTimetable.value = getDynamicTimetableForCurrentSession()
+    _scopedStudyLogs.value = getStudyLogsForCurrentSession()
+    _scopedStudentGoal.value = getGoalForCurrentStudent()
+    _scopedNotifications.value = getNotificationsForCurrentSession()
+    _scopedMeetings.value = getMeetingsForCurrentSession()
+    _scopedLeads.value = getLeadsForCurrentSession()
+    _scopedOnlineForms.value = getOnlineFormsForCurrentSession()
+    _scopedUserAccounts.value = getUserAccountsForCurrentSession()
+    _scopedBatchEnrollments.value = getBatchEnrollmentsForCurrentSession()
   }
 
   fun setDarkThemeMode(mode: DarkThemeMode) {
@@ -731,8 +1765,9 @@ object AppRepository {
   }
 
   // Students
-  private val _students = MutableStateFlow<List<Student>>(SeedData.get15DemoStudents())
-  val students = _students.asStateFlow()
+  private val _allStudents = MutableStateFlow<List<Student>>(SeedData.get15DemoStudents())
+  private val _scopedStudents = MutableStateFlow<List<Student>>(emptyList())
+  val students = _scopedStudents.asStateFlow()
 
   /**
    * Reconciles remote Firestore student documents into Room using stable student IDs (never names)
@@ -740,14 +1775,23 @@ object AppRepository {
    */
   fun reconcileRemoteStudentsToRoom(remoteList: List<FirestoreStudent>) {
     if (remoteList.isEmpty()) return
-    val validRemote = remoteList.filter { it.id.isNotBlank() }
+    val activeInst = getCurrentInstituteId()
+    val validRemote = remoteList.filter {
+      it.id.isNotBlank() &&
+        com.example.security.SecurityEngine.isValidInstituteId(it.instituteId) &&
+        (!_isLoggedIn.value || it.instituteId.equals(activeInst, ignoreCase = true))
+    }
     if (validRemote.isEmpty()) return
 
     val updatedStudents = mutableListOf<Student>()
-    _students.update { localList ->
+    _allStudents.update { localList ->
       val localById = localList.associateBy { it.id }.toMutableMap()
       validRemote.forEach { remote ->
         val existing = localById[remote.id]
+        // Prevent cross-institute overwrite of an existing student belonging to another institute
+        if (existing != null && !existing.instituteId.equals(remote.instituteId, ignoreCase = true)) {
+          return@forEach
+        }
         val merged = remote.toDomain(existing)
         localById[remote.id] = merged
         updatedStudents.add(merged)
@@ -755,6 +1799,7 @@ object AppRepository {
       localById.values.toList()
     }
     syncBatchStudentCounts()
+    refreshScopedStateFlows()
     if (updatedStudents.isNotEmpty()) {
       repoScope.launch {
         studentBatchRepo?.bulkInsertStudents(updatedStudents)
@@ -762,51 +1807,78 @@ object AppRepository {
     }
   }
 
-  fun addStudent(student: Student) {
-    if (!checkOnlineOrBlock("add student record")) return
+  fun addStudent(student: Student): Boolean {
+    if (!checkOnlineOrBlock("add student record")) return false
+    val existingInstId = findExistingStudentInstituteId(student.id)
+    if (existingInstId != null &&
+      (!com.example.security.SecurityEngine.isValidInstituteId(student.instituteId) ||
+        !existingInstId.equals(student.instituteId, ignoreCase = true))
+    ) {
+      com.example.security.SecurityEngine.logEvent(
+        severity = com.example.security.SecuritySeverity.ALERT,
+        eventType = "INSTITUTE_REASSIGNMENT_BLOCKED",
+        actor = _currentUserIdentifier.value.ifBlank { "System" },
+        details = "Blocked attempt in addStudent to change instituteId of student '${student.id}' from '$existingInstId' to '${student.instituteId}'."
+      )
+      return false
+    }
+    if (!requireAdminSession("addStudent", existingInstId ?: student.instituteId)) return false
+    val resolvedInstituteId = getCurrentInstituteId()
     val normalizedStudent = student.copy(
       batchId = student.batchId.ifBlank { "BATCH_${student.batch.replace(" ", "_")}" },
       parentId = student.parentId.ifBlank { "PAR_${student.id}" },
-      parentEmail = student.parentEmail.ifBlank { "parent_${student.id.lowercase()}@mytuition.com" }
+      parentEmail = student.parentEmail.ifBlank { "parent_${student.id.lowercase()}@mytuition.com" },
+      instituteId = resolvedInstituteId
     )
-    _students.update { it + normalizedStudent }
-    syncBatchStudentCounts()
     val stuEmail = normalizedStudent.email.ifBlank { "${normalizedStudent.id.lowercase()}@mytuition.com" }.lowercase()
     val parEmail = normalizedStudent.parentEmail.lowercase()
-    repoScope.launch {
-      studentBatchRepo?.insertStudent(normalizedStudent)
-      studentBatchRepo?.insertUserAccounts(
-        listOf(
-          com.example.data.db.UserAccountEntity(
-            userId = "USR_STU_${normalizedStudent.id}",
-            email = stuEmail,
-            mobile = normalizedStudent.mobile,
-            name = normalizedStudent.name,
-            passwordHash = "",
-            passwordSalt = "",
-            role = UserRole.STUDENT.name,
-            linkedEntityId = normalizedStudent.id,
-            linkedStudentIds = listOf(normalizedStudent.id),
-            status = normalizedStudent.status
-          ),
-          com.example.data.db.UserAccountEntity(
-            userId = "USR_PAR_${normalizedStudent.id}",
-            email = parEmail,
-            mobile = normalizedStudent.parentContact,
-            name = normalizedStudent.parentName.ifBlank { "Parent of ${normalizedStudent.name}" },
-            passwordHash = "",
-            passwordSalt = "",
-            role = UserRole.PARENT.name,
-            linkedEntityId = normalizedStudent.id,
-            linkedStudentIds = listOf(normalizedStudent.id),
-            status = "Active"
+    val repo = resolveStudentBatchRepo()
+    if (repo != null) {
+      kotlinx.coroutines.runBlocking {
+        repo.insertStudent(normalizedStudent, syncToCloud = false)
+        repo.insertUserAccounts(
+          listOf(
+            com.example.data.db.UserAccountEntity(
+              userId = "USR_STU_${normalizedStudent.id}",
+              email = stuEmail,
+              mobile = normalizedStudent.mobile,
+              name = normalizedStudent.name,
+              passwordHash = "",
+              passwordSalt = "",
+              role = UserRole.STUDENT.name,
+              linkedEntityId = normalizedStudent.id,
+              linkedStudentIds = listOf(normalizedStudent.id),
+              status = normalizedStudent.status,
+              instituteId = resolvedInstituteId
+            ),
+            com.example.data.db.UserAccountEntity(
+              userId = "USR_PAR_${normalizedStudent.id}",
+              email = parEmail,
+              mobile = normalizedStudent.parentContact,
+              name = normalizedStudent.parentName.ifBlank { "Parent of ${normalizedStudent.name}" },
+              passwordHash = "",
+              passwordSalt = "",
+              role = UserRole.PARENT.name,
+              linkedEntityId = normalizedStudent.id,
+              linkedStudentIds = listOf(normalizedStudent.id),
+              status = "Active",
+              instituteId = resolvedInstituteId
+            )
           )
         )
-      )
+      }
+    } else {
+      onLocalStudentUpserted(normalizedStudent)
     }
-    FirestoreService.syncStudentToCloud(normalizedStudent, _currentUserIdentifier.value.ifBlank { "ADMIN" })
-    NetworkConnectivityManager.markDataUpdatedOnline()
-    addNotification(
+    FirestoreService.syncStudentToCloud(
+      student = normalizedStudent,
+      createdBy = _currentUserIdentifier.value.ifBlank { "ADMIN" },
+      operationType = com.example.data.db.SyncOperationType.CREATE
+    )
+    if (NetworkConnectivityManager.isOnline.value) {
+      NetworkConnectivityManager.markDataUpdatedOnline()
+    }
+    addNotificationInternal(
       NotificationItem(
         id = "NOT_${System.currentTimeMillis()}",
         title = "New Student Admitted",
@@ -814,158 +1886,341 @@ object AppRepository {
         time = getCurrentTimeStr(),
         type = "Announcement",
         recipientRole = "All",
-        targetStudentId = normalizedStudent.id
+        targetStudentId = normalizedStudent.id,
+        instituteId = resolvedInstituteId
       )
     )
+    return true
   }
 
-  fun updateStudent(student: Student) {
-    if (!checkOnlineOrBlock("update student record")) return
-    _students.update { list ->
-      list.map { if (it.id == student.id) student else it }
+  fun updateStudent(student: Student): Boolean {
+    if (!checkOnlineOrBlock("update student record")) return false
+    val existing = findStudentLocal(student.id)
+    val existingInstituteId = existing?.instituteId ?: findExistingStudentInstituteId(student.id)
+    if (existingInstituteId != null) {
+      if (!com.example.security.SecurityEngine.isValidInstituteId(student.instituteId) ||
+        !existingInstituteId.equals(student.instituteId, ignoreCase = true)
+      ) {
+        com.example.security.SecurityEngine.logEvent(
+          severity = com.example.security.SecuritySeverity.ALERT,
+          eventType = "INSTITUTE_REASSIGNMENT_BLOCKED",
+          actor = _currentUserIdentifier.value.ifBlank { "System" },
+          details = "Blocked attempt to change instituteId of student '${student.id}' from '$existingInstituteId' to '${student.instituteId}'."
+        )
+        return false
+      }
+      if (!requireAdminSession("updateStudent", existingInstituteId)) return false
+    } else {
+      if (!requireAdminSession("updateStudent", student.instituteId)) return false
     }
-    syncBatchStudentCounts()
-    repoScope.launch {
-      studentBatchRepo?.updateStudent(student)
+    val resolvedBatchId = student.batchId.ifBlank { "BATCH_${student.batch.replace(" ", "_")}" }
+    val normalized = student.copy(
+      batchId = resolvedBatchId,
+      instituteId = existingInstituteId ?: getCurrentInstituteId()
+    )
+    val repo = resolveStudentBatchRepo()
+    if (repo != null) {
+      kotlinx.coroutines.runBlocking {
+        repo.updateStudent(normalized, syncToCloud = false)
+      }
+    } else {
+      onLocalStudentUpserted(normalized)
     }
-    FirestoreService.syncStudentToCloud(student, _currentUserIdentifier.value.ifBlank { "ADMIN" })
-    NetworkConnectivityManager.markDataUpdatedOnline()
+    FirestoreService.syncStudentToCloud(
+      student = normalized,
+      createdBy = _currentUserIdentifier.value.ifBlank { "ADMIN" },
+      operationType = com.example.data.db.SyncOperationType.UPDATE
+    )
+    if (NetworkConnectivityManager.isOnline.value) {
+      NetworkConnectivityManager.markDataUpdatedOnline()
+    }
+    return true
   }
 
-  fun addStudents(newStudents: List<Student>) {
-    if (!checkOnlineOrBlock("import students")) return
-    if (newStudents.isEmpty()) return
-    _students.update { current ->
-      val currentMap = current.associateBy { it.id }.toMutableMap()
-      newStudents.forEach { currentMap[it.id] = it }
-      currentMap.values.toList()
+  fun addStudents(newStudents: List<Student>): Boolean {
+    if (!checkOnlineOrBlock("import students")) return false
+    if (newStudents.isEmpty()) return false
+    if (!requireAdminSession("addStudents")) return false
+    val activeInst = getCurrentInstituteId()
+    val sanitized = newStudents.mapNotNull { stu ->
+      val existingInst = findExistingStudentInstituteId(stu.id)
+      if (existingInst != null && !existingInst.equals(activeInst, ignoreCase = true)) {
+        com.example.security.SecurityEngine.logEvent(
+          severity = com.example.security.SecuritySeverity.ALERT,
+          eventType = "CROSS_TENANT_WRITE_BLOCKED",
+          actor = _currentUserIdentifier.value,
+          details = "Blocked addStudents item '${stu.id}' belonging to foreign institute '$existingInst'."
+        )
+        null
+      } else if (stu.instituteId.isNotBlank() && !stu.instituteId.equals(activeInst, ignoreCase = true)) {
+        com.example.security.SecurityEngine.logEvent(
+          severity = com.example.security.SecuritySeverity.ALERT,
+          eventType = "CROSS_TENANT_WRITE_BLOCKED",
+          actor = _currentUserIdentifier.value,
+          details = "Blocked addStudents item '${stu.id}' with foreign instituteId '${stu.instituteId}'."
+        )
+        null
+      } else {
+        val resolvedBatchId = stu.batchId.ifBlank { "BATCH_${stu.batch.replace(" ", "_")}" }
+        stu.copy(batchId = resolvedBatchId, instituteId = activeInst)
+      }
     }
-    syncBatchStudentCounts()
-    repoScope.launch {
-      studentBatchRepo?.bulkInsertStudents(newStudents)
+    if (sanitized.isEmpty()) return false
+    val repo = resolveStudentBatchRepo()
+    if (repo != null) {
+      kotlinx.coroutines.runBlocking {
+        repo.bulkInsertStudents(sanitized, syncToCloud = false)
+      }
+    } else {
+      sanitized.forEach { onLocalStudentUpserted(it) }
     }
-    NetworkConnectivityManager.markDataUpdatedOnline()
-    addNotification(
+    sanitized.forEach { stu ->
+      FirestoreService.syncStudentToCloud(
+        student = stu,
+        createdBy = _currentUserIdentifier.value.ifBlank { "ADMIN" },
+        operationType = com.example.data.db.SyncOperationType.CREATE
+      )
+    }
+    if (NetworkConnectivityManager.isOnline.value) {
+      NetworkConnectivityManager.markDataUpdatedOnline()
+    }
+    addNotificationInternal(
       NotificationItem(
         id = "NOT_${System.currentTimeMillis()}",
         title = "Bulk Student Import Completed",
-        message = "Successfully imported ${newStudents.size} student records via CSV.",
+        message = "Successfully imported ${sanitized.size} student records via CSV.",
         time = getCurrentTimeStr(),
         type = "Announcement",
-        recipientRole = "All"
+        recipientRole = "All",
+        instituteId = activeInst
       )
+    )
+    return true
+  }
+
+  fun updateStudentStatus(studentId: String, newStatus: String): Boolean {
+    if (!checkOnlineOrBlock("update student status")) return false
+    val existing = findStudentLocal(studentId) ?: return false
+    if (!requireAdminSession("updateStudentStatus", existing.instituteId)) return false
+    val updatedStudent = existing.copy(
+      status = newStatus,
+      instituteId = existing.instituteId.ifBlank { getCurrentInstituteId() }
+    )
+    val repo = resolveStudentBatchRepo()
+    if (repo != null) {
+      kotlinx.coroutines.runBlocking {
+        repo.updateStudent(updatedStudent, syncToCloud = false)
+      }
+    } else {
+      onLocalStudentUpserted(updatedStudent)
+    }
+    FirestoreService.syncStudentToCloud(
+      student = updatedStudent,
+      createdBy = _currentUserIdentifier.value.ifBlank { "ADMIN" },
+      operationType = com.example.data.db.SyncOperationType.UPDATE
+    )
+    if (NetworkConnectivityManager.isOnline.value) {
+      NetworkConnectivityManager.markDataUpdatedOnline()
+    }
+    return true
+  }
+
+  private fun markStudentActivatedInternal(studentId: String, isActivated: Boolean) {
+    val existing = findStudentLocal(studentId) ?: return
+    val updatedStudent = existing.copy(
+      isActivated = isActivated,
+      status = if (isActivated) "Active" else existing.status,
+      instituteId = existing.instituteId.ifBlank { getCurrentInstituteId() }
+    )
+    val repo = resolveStudentBatchRepo()
+    if (repo != null) {
+      kotlinx.coroutines.runBlocking {
+        repo.updateStudent(updatedStudent, syncToCloud = false)
+      }
+    } else {
+      onLocalStudentUpserted(updatedStudent)
+    }
+    FirestoreService.syncStudentToCloud(
+      student = updatedStudent,
+      createdBy = _currentUserIdentifier.value.ifBlank { "ADMIN" },
+      operationType = com.example.data.db.SyncOperationType.UPDATE
     )
   }
 
-  fun updateStudentStatus(studentId: String, newStatus: String) {
-    if (!checkOnlineOrBlock("update student status")) return
-    _students.update { list ->
-      list.map { if (it.id == studentId) it.copy(status = newStatus) else it }
+  fun updateStudentActivationStatus(studentId: String, isActivated: Boolean): Boolean {
+    if (!checkOnlineOrBlock("change student activation status")) return false
+    val existing = findStudentLocal(studentId) ?: return false
+    if (!requireAdminSession("updateStudentActivationStatus", existing.instituteId)) return false
+    markStudentActivatedInternal(studentId, isActivated)
+    if (NetworkConnectivityManager.isOnline.value) {
+      NetworkConnectivityManager.markDataUpdatedOnline()
     }
-    val updatedStudent = _students.value.find { it.id == studentId }
-    if (updatedStudent != null) {
-      repoScope.launch {
-        studentBatchRepo?.updateStudent(updatedStudent)
-      }
-      FirestoreService.syncStudentToCloud(updatedStudent, _currentUserIdentifier.value.ifBlank { "ADMIN" })
-    }
-    NetworkConnectivityManager.markDataUpdatedOnline()
+    return true
   }
 
-  fun updateStudentActivationStatus(studentId: String, isActivated: Boolean) {
-    if (!checkOnlineOrBlock("change student activation status")) return
-    _students.update { list ->
-      list.map { if (it.id == studentId) it.copy(isActivated = isActivated, status = if (isActivated) "Active" else it.status) else it }
-    }
-    val updatedStudent = _students.value.find { it.id == studentId }
-    if (updatedStudent != null) {
-      repoScope.launch {
-        studentBatchRepo?.updateStudent(updatedStudent)
-      }
-    }
-    NetworkConnectivityManager.markDataUpdatedOnline()
+  fun deactivateStudent(studentId: String): Boolean {
+    return deleteStudent(studentId)
   }
 
-  fun deleteStudent(studentId: String) {
-    if (!checkOnlineOrBlock("delete student record")) return
-    val student = _students.value.find { it.id == studentId }
-    _students.update { list -> list.filterNot { it.id == studentId } }
-    syncBatchStudentCounts()
-    repoScope.launch {
-      studentBatchRepo?.deleteStudent(studentId)
+  fun deactivateStudents(studentIds: List<String>): Boolean {
+    return deleteStudents(studentIds)
+  }
+
+  fun deleteStudent(studentId: String): Boolean {
+    if (!checkOnlineOrBlock("delete student record")) return false
+    val cleanId = studentId.trim()
+    if (cleanId.isBlank()) return false
+    val student = findStudentLocal(cleanId)
+    val targetInstituteId = student?.instituteId ?: findExistingStudentInstituteId(cleanId)
+    if (!requireAdminSession("deleteStudent", targetInstituteId)) return false
+    val repo = resolveStudentBatchRepo()
+    if (repo != null) {
+      kotlinx.coroutines.runBlocking {
+        repo.deleteStudent(cleanId, syncToCloud = false)
+      }
+    } else {
+      onLocalStudentsDeactivated(listOf(cleanId))
     }
-    NetworkConnectivityManager.markDataUpdatedOnline()
-    addNotification(
+    FirestoreService.deleteStudentProfile(cleanId, {}, {})
+    if (NetworkConnectivityManager.isOnline.value) {
+      NetworkConnectivityManager.markDataUpdatedOnline()
+    }
+    addNotificationInternal(
       NotificationItem(
         id = "NOT_${System.currentTimeMillis()}",
         title = "Student Record Removed",
-        message = "Student ${student?.name ?: studentId} was removed from the active directory.",
+        message = "Student ${student?.name ?: cleanId} was removed from the active directory.",
         time = getCurrentTimeStr(),
         type = "Announcement",
-        recipientRole = "Admin"
+        recipientRole = "Admin",
+        instituteId = getCurrentInstituteId()
       )
     )
+    return true
   }
 
-  fun deleteStudents(studentIds: List<String>) {
-    if (!checkOnlineOrBlock("batch delete student records")) return
-    if (studentIds.isEmpty()) return
-    val idSet = studentIds.toSet()
-    _students.update { list -> list.filterNot { idSet.contains(it.id) } }
-    syncBatchStudentCounts()
-    repoScope.launch {
-      studentBatchRepo?.deleteStudents(studentIds)
+  fun deleteStudents(studentIds: List<String>): Boolean {
+    if (!checkOnlineOrBlock("batch delete student records")) return false
+    if (studentIds.isEmpty()) return false
+    if (!requireAdminSession("deleteStudents")) return false
+    val allowedIds = studentIds.map { it.trim() }.filter { id ->
+      if (id.isBlank()) return@filter false
+      val stuInst = findStudentLocal(id)?.instituteId ?: findExistingStudentInstituteId(id)
+      stuInst == null || belongsToCurrentInstitute(stuInst)
     }
-    NetworkConnectivityManager.markDataUpdatedOnline()
-    addNotification(
+    if (allowedIds.isEmpty()) return false
+    val repo = resolveStudentBatchRepo()
+    if (repo != null) {
+      kotlinx.coroutines.runBlocking {
+        repo.deleteStudents(allowedIds, syncToCloud = false)
+      }
+    } else {
+      onLocalStudentsDeactivated(allowedIds)
+    }
+    allowedIds.forEach { id ->
+      FirestoreService.deleteStudentProfile(id, {}, {})
+    }
+    if (NetworkConnectivityManager.isOnline.value) {
+      NetworkConnectivityManager.markDataUpdatedOnline()
+    }
+    addNotificationInternal(
       NotificationItem(
         id = "NOT_${System.currentTimeMillis()}",
         title = "Batch Students Deletion",
-        message = "Successfully removed ${studentIds.size} student records in batch.",
+        message = "Successfully removed ${allowedIds.size} student records in batch.",
         time = getCurrentTimeStr(),
         type = "Announcement",
-        recipientRole = "Admin"
+        recipientRole = "Admin",
+        instituteId = getCurrentInstituteId()
       )
     )
+    return true
   }
 
-  // Institute Configuration & Academic Profile
-  private val _instituteConfig = MutableStateFlow(InstituteConfig())
+  // Institute Configuration & Academic Profile (Tenant-Scoped per InstituteId)
+  private val instituteConfigsByTenant = java.util.concurrent.ConcurrentHashMap<String, InstituteConfig>().apply {
+    put("FSI_MAIN", InstituteConfig(instituteId = "FSI_MAIN"))
+  }
+  private val _instituteConfig = MutableStateFlow(InstituteConfig(instituteId = "FSI_MAIN"))
   val instituteConfig = _instituteConfig.asStateFlow()
 
-  fun updateInstituteConfig(newConfig: InstituteConfig) {
-    if (!checkOnlineOrBlock("update institute configuration")) return
-    _instituteConfig.value = newConfig
+  fun getInstituteConfigForTenant(instituteId: String = getCurrentInstituteId()): InstituteConfig? {
+    val cleanInst = instituteId.trim()
+    if (!com.example.security.SecurityEngine.isValidInstituteId(cleanInst)) {
+      return null
+    }
+    if (_isLoggedIn.value && !belongsToCurrentInstitute(cleanInst)) {
+      com.example.security.SecurityEngine.logEvent(
+        severity = com.example.security.SecuritySeverity.ALERT,
+        eventType = "CROSS_TENANT_CONFIG_READ_BLOCKED",
+        actor = _currentUserIdentifier.value,
+        details = "Blocked cross-institute config read for '$cleanInst' from active institute '${getCurrentInstituteId()}'."
+      )
+      return null
+    }
+    return instituteConfigsByTenant[cleanInst]
+      ?: _instituteConfig.value.takeIf { it.instituteId.equals(cleanInst, ignoreCase = true) }
+  }
+
+  fun updateInstituteConfig(newConfig: InstituteConfig): Boolean {
+    if (!checkOnlineOrBlock("update institute configuration")) return false
+    val rawInstId = newConfig.instituteId.trim()
+    if (rawInstId.equals("primary_institute", ignoreCase = true) || rawInstId.isBlank()) {
+      com.example.security.SecurityEngine.logEvent(
+        severity = com.example.security.SecuritySeverity.ALERT,
+        eventType = "PRIMARY_INSTITUTE_COLLISION_BLOCKED",
+        actor = _currentUserIdentifier.value.ifBlank { "System" },
+        details = "Rejected institute configuration update using invalid or global key '$rawInstId'."
+      )
+      return false
+    }
+    if (!requireAdminSession("updateInstituteConfig", rawInstId)) {
+      return false
+    }
+
+    val scopedConfig = newConfig.copy(instituteId = rawInstId)
+    instituteConfigsByTenant[rawInstId] = scopedConfig
+    if (belongsToCurrentInstitute(rawInstId)) {
+      _instituteConfig.value = scopedConfig
+    }
     preferences?.edit()?.apply {
-      putString("institute_name", newConfig.instituteName)
-      putString("institute_tagline", newConfig.tagline)
-      putString("founder_name", newConfig.founderName)
-      putString("institute_address", newConfig.address)
-      putString("institute_phone", newConfig.contactPhone)
-      putString("institute_email", newConfig.email)
-      putString("academic_year", newConfig.academicYear)
-      putInt("existing_staff_count", newConfig.existingStaffCount)
-      putString("selected_grades", newConfig.selectedGrades.joinToString(","))
-      putBoolean("is_setup_completed", newConfig.isSetupCompleted)
+      putString("institute_name_$rawInstId", scopedConfig.instituteName)
+      putString("institute_tagline_$rawInstId", scopedConfig.tagline)
+      putString("founder_name_$rawInstId", scopedConfig.founderName)
+      putString("institute_address_$rawInstId", scopedConfig.address)
+      putString("institute_phone_$rawInstId", scopedConfig.contactPhone)
+      putString("institute_email_$rawInstId", scopedConfig.email)
+      putString("academic_year_$rawInstId", scopedConfig.academicYear)
+      putInt("existing_staff_count_$rawInstId", scopedConfig.existingStaffCount)
+      putString("selected_grades_$rawInstId", scopedConfig.selectedGrades.joinToString(","))
+      putBoolean("is_setup_completed_$rawInstId", scopedConfig.isSetupCompleted)
       apply()
     }
-    // Sync to Cloud Firestore in real-time
-    FirestoreService.syncInstituteConfig(newConfig)
+    // Sync to Cloud Firestore under the tenant-isolated document ID
+    FirestoreService.syncInstituteConfig(scopedConfig)
     NetworkConnectivityManager.markDataUpdatedOnline()
-    addNotification(
+    addNotificationInternal(
       NotificationItem(
         id = "NOT_${System.currentTimeMillis()}",
         title = "🏫 Institute Profile Updated",
-        message = "${newConfig.instituteName} academic configuration saved successfully.",
+        message = "${scopedConfig.instituteName} academic configuration saved successfully.",
         time = getCurrentTimeStr(),
         type = "Announcement",
-        recipientRole = "Admin"
+        recipientRole = "Admin",
+        instituteId = rawInstId
       )
     )
+    return true
   }
 
   fun reconcileFacultyName(rawTeacherName: String?, batchName: String? = null, subject: String? = null): String {
     val clean = (rawTeacherName ?: "").trim()
+    val instTeachers = _allTeachers.value.filter {
+      !_isLoggedIn.value || belongsToCurrentInstitute(it.instituteId)
+    }
+    val instBatches = _allBatches.value.filter {
+      !_isLoggedIn.value || belongsToCurrentInstitute(it.instituteId)
+    }
 
     // Preserve any explicitly provided teacher name or ID that isn't a generic placeholder
     if (clean.isNotBlank() &&
@@ -973,7 +2228,7 @@ object AppRepository {
       !clean.equals("Subject Faculty", ignoreCase = true) &&
       !clean.equals("TBA", ignoreCase = true)
     ) {
-      val exactTeacher = _teachers.value.find {
+      val exactTeacher = instTeachers.find {
         it.id.equals(clean, ignoreCase = true) ||
           it.name.equals(clean, ignoreCase = true) ||
           it.email.equals(clean, ignoreCase = true)
@@ -983,18 +2238,18 @@ object AppRepository {
 
     // If a batch has an assigned teacher in the repository, use that teacher's real name
     if (!batchName.isNullOrBlank()) {
-      val batchObj = _batches.value.find {
+      val batchObj = instBatches.find {
         it.id.equals(batchName, ignoreCase = true) || it.name.equals(batchName, ignoreCase = true)
       }
       if (batchObj != null) {
         if (batchObj.teacherId.isNotBlank()) {
-          _teachers.value.find { it.id.equals(batchObj.teacherId, ignoreCase = true) }?.let { return it.name }
+          instTeachers.find { it.id.equals(batchObj.teacherId, ignoreCase = true) }?.let { return it.name }
         }
         if (batchObj.teacherName.isNotBlank() && !batchObj.teacherName.equals("Faculty", ignoreCase = true)) {
           return batchObj.teacherName
         }
       }
-      val assignedTeacher = _teachers.value.find { t ->
+      val assignedTeacher = instTeachers.find { t ->
         t.assignedBatchIds.any { bId -> bId.equals(batchName, ignoreCase = true) } ||
           t.assignedBatches.any { b -> b.equals(batchName, ignoreCase = true) }
       }
@@ -1004,7 +2259,7 @@ object AppRepository {
     // If a subject is provided, match against registered teachers for that subject
     if (!subject.isNullOrBlank()) {
       val subjectLower = subject.lowercase()
-      val matchedBySubject = _teachers.value.find { t ->
+      val matchedBySubject = instTeachers.find { t ->
         t.subject.lowercase().contains(subjectLower) || subjectLower.contains(t.subject.lowercase())
       }
       if (matchedBySubject != null) return matchedBySubject.name
@@ -1018,8 +2273,11 @@ object AppRepository {
     val c1 = nameOrId1.trim()
     val c2 = nameOrId2.trim()
     if (c1.equals(c2, ignoreCase = true)) return true
-    val t1 = _teachers.value.find { it.id.equals(c1, ignoreCase = true) || it.name.equals(c1, ignoreCase = true) || it.email.equals(c1, ignoreCase = true) }
-    val t2 = _teachers.value.find { it.id.equals(c2, ignoreCase = true) || it.name.equals(c2, ignoreCase = true) || it.email.equals(c2, ignoreCase = true) }
+    val instTeachers = _allTeachers.value.filter {
+      !_isLoggedIn.value || belongsToCurrentInstitute(it.instituteId)
+    }
+    val t1 = instTeachers.find { it.id.equals(c1, ignoreCase = true) || it.name.equals(c1, ignoreCase = true) || it.email.equals(c1, ignoreCase = true) }
+    val t2 = instTeachers.find { it.id.equals(c2, ignoreCase = true) || it.name.equals(c2, ignoreCase = true) || it.email.equals(c2, ignoreCase = true) }
     if (t1 != null && t2 != null) return t1.id.equals(t2.id, ignoreCase = true)
     return false
   }
@@ -1031,11 +2289,14 @@ object AppRepository {
   fun isTeacherAssignedToBatch(batchNameOrId: String, teacherOverride: Teacher? = null): Boolean {
     val cleanBatch = batchNameOrId.trim()
     if (cleanBatch.isBlank()) return false
-    val isAdmin = _currentRole.value == UserRole.ADMIN || _currentUserAccount.value?.role == UserRole.ADMIN
-    if (isAdmin && teacherOverride == null) return true
+    if (!isAuthenticatedSession() && teacherOverride == null) return false
+    if (isAdminSession() && teacherOverride == null) return true
 
     val teacher = teacherOverride ?: getActiveTeacherForCurrentSession() ?: return false
-    val targetBatch = _batches.value.find {
+    val instBatches = _allBatches.value.filter {
+      it.instituteId.equals(teacher.instituteId, ignoreCase = true)
+    }
+    val targetBatch = instBatches.find {
       it.id.equals(cleanBatch, ignoreCase = true) || it.name.equals(cleanBatch, ignoreCase = true)
     }
 
@@ -1060,10 +2321,12 @@ object AppRepository {
   }
 
   fun getAssignedBatchesForCurrentTeacher(): List<Batch> {
-    val isAdmin = _currentRole.value == UserRole.ADMIN || _currentUserAccount.value?.role == UserRole.ADMIN
-    if (isAdmin) return _batches.value
+    if (!isAuthenticatedSession()) return emptyList()
+    val instBatches = _allBatches.value.filter { belongsToCurrentInstitute(it.instituteId) }
+    if (isAdminSession()) return instBatches
+    if (!isTeacherSession()) return emptyList()
     val teacher = getActiveTeacherForCurrentSession() ?: return emptyList()
-    return _batches.value.filter { b ->
+    return instBatches.filter { b ->
       isTeacherAssignedToBatch(b.id, teacher) || isTeacherAssignedToBatch(b.name, teacher)
     }
   }
@@ -1071,94 +2334,129 @@ object AppRepository {
   fun getAuthorizedBatchesForCurrentTeacher(): List<Batch> = getAssignedBatchesForCurrentTeacher()
 
   fun getStudentsForCurrentTeacher(): List<Student> {
-    val isAdmin = _currentRole.value == UserRole.ADMIN || _currentUserAccount.value?.role == UserRole.ADMIN
-    if (isAdmin) return _students.value
+    if (!isAuthenticatedSession()) return emptyList()
+    val instStudents = _allStudents.value.filter { belongsToCurrentInstitute(it.instituteId) }
+    if (isAdminSession()) return instStudents
+    if (!isTeacherSession()) return emptyList()
     val assignedBatches = getAssignedBatchesForCurrentTeacher()
     if (assignedBatches.isEmpty()) return emptyList()
     val batchIds = assignedBatches.map { it.id.lowercase() }.toSet()
     val batchNames = assignedBatches.map { it.name.lowercase() }.toSet()
-    return _students.value.filter { stu ->
+    return instStudents.filter { stu ->
       (stu.batchId.isNotBlank() && batchIds.contains(stu.batchId.lowercase())) ||
         batchNames.contains(stu.batch.lowercase())
     }
   }
 
   // Teachers
-  private val _teachers = MutableStateFlow<List<Teacher>>(SeedData.defaultTeachers)
-  val teachers = _teachers.asStateFlow()
+  private val _allTeachers = MutableStateFlow<List<Teacher>>(SeedData.defaultTeachers)
+  private val _scopedTeachers = MutableStateFlow<List<Teacher>>(emptyList())
+  val teachers = _scopedTeachers.asStateFlow()
 
-  fun addTeacher(t: Teacher) {
-    if (!checkOnlineOrBlock("add new faculty")) return
-    _teachers.update { it + t }
+  fun addTeacher(t: Teacher): Boolean {
+    if (!checkOnlineOrBlock("add new faculty")) return false
+    if (!requireAdminSession("addTeacher", t.instituteId)) return false
+    val normalized = t.copy(instituteId = getCurrentInstituteId())
+    _allTeachers.update { it + normalized }
+    refreshScopedStateFlows()
     repoScope.launch {
-      studentBatchRepo?.insertTeacher(t)
+      studentBatchRepo?.insertTeacher(normalized)
     }
     NetworkConnectivityManager.markDataUpdatedOnline()
-    addNotification(
+    addNotificationInternal(
       NotificationItem(
         id = "NOT_${System.currentTimeMillis()}",
         title = "Staff Member Onboarded",
-        message = "${t.name} (${t.subject}) registered in faculty directory.",
+        message = "${normalized.name} (${normalized.subject}) registered in faculty directory.",
         time = getCurrentTimeStr(),
         type = "Announcement",
-        recipientRole = "Admin"
+        recipientRole = "Admin",
+        instituteId = normalized.instituteId
       )
     )
+    return true
   }
 
-  fun updateTeacher(t: Teacher) {
-    if (!checkOnlineOrBlock("update faculty record")) return
-    _teachers.update { list ->
-      list.map { if (it.id == t.id) t else it }
+  fun updateTeacher(t: Teacher): Boolean {
+    if (!checkOnlineOrBlock("update faculty record")) return false
+    val existing = _allTeachers.value.find { it.id == t.id }
+    if (existing != null && !existing.instituteId.equals(t.instituteId, ignoreCase = true)) {
+      com.example.security.SecurityEngine.logEvent(
+        severity = com.example.security.SecuritySeverity.ALERT,
+        eventType = "INSTITUTE_REASSIGNMENT_BLOCKED",
+        actor = _currentUserIdentifier.value.ifBlank { "System" },
+        details = "Blocked attempt to change instituteId of teacher '${t.id}'."
+      )
+      return false
     }
+    if (!requireAdminSession("updateTeacher", existing?.instituteId ?: t.instituteId)) return false
+    val normalized = t.copy(instituteId = existing?.instituteId ?: getCurrentInstituteId())
+    _allTeachers.update { list ->
+      list.map { if (it.id == normalized.id) normalized else it }
+    }
+    refreshScopedStateFlows()
     repoScope.launch {
-      studentBatchRepo?.updateTeacher(t)
+      studentBatchRepo?.updateTeacher(normalized)
     }
     NetworkConnectivityManager.markDataUpdatedOnline()
+    return true
   }
 
-  fun deleteTeacher(teacherId: String) {
-    if (!checkOnlineOrBlock("delete faculty record")) return
-    _teachers.update { list -> list.filterNot { it.id == teacherId } }
+  fun deleteTeacher(teacherId: String): Boolean {
+    if (!checkOnlineOrBlock("delete faculty record")) return false
+    val existing = _allTeachers.value.find { it.id == teacherId }
+    if (!requireAdminSession("deleteTeacher", existing?.instituteId)) return false
+    _allTeachers.update { list -> list.filterNot { it.id == teacherId } }
+    refreshScopedStateFlows()
     repoScope.launch {
       studentBatchRepo?.deleteTeacher(teacherId)
     }
     NetworkConnectivityManager.markDataUpdatedOnline()
+    return true
   }
 
-  fun updateTeacherStatus(teacherId: String, isActivated: Boolean) {
-    if (!checkOnlineOrBlock("update teacher status")) return
-    _teachers.update { list ->
+  private fun markTeacherActivatedInternal(teacherId: String, isActivated: Boolean) {
+    _allTeachers.update { list ->
       list.map { if (it.id == teacherId) it.copy(isActivated = isActivated, status = if (isActivated) "Active" else "Pending") else it }
     }
-    val updated = _teachers.value.find { it.id == teacherId }
+    refreshScopedStateFlows()
+    val updated = _allTeachers.value.find { it.id == teacherId }
     if (updated != null) {
       repoScope.launch {
         studentBatchRepo?.updateTeacher(updated)
       }
     }
+  }
+
+  fun updateTeacherStatus(teacherId: String, isActivated: Boolean): Boolean {
+    if (!checkOnlineOrBlock("update teacher status")) return false
+    val existing = _allTeachers.value.find { it.id == teacherId } ?: return false
+    if (!requireAdminSession("updateTeacherStatus", existing.instituteId)) return false
+    markTeacherActivatedInternal(teacherId, isActivated)
     NetworkConnectivityManager.markDataUpdatedOnline()
+    return true
   }
 
   fun resolveCanonicalEmailForIdentifier(identifier: String): String? {
     val cleanId = identifier.trim().lowercase()
     if (cleanId.isBlank()) return null
+    if (cleanId == "joshiakash1712") return "joshiakash1712@gmail.com"
     if (cleanId.contains("@")) return cleanId
     val digitsOnly = cleanId.filter { it.isDigit() }
-    val userAcc = _userAccounts.value.find { acc ->
+    val userAcc = _allUserAccounts.value.find { acc ->
       acc.userId.equals(cleanId, ignoreCase = true) ||
         acc.linkedEntityId.equals(cleanId, ignoreCase = true) ||
         (digitsOnly.length >= 10 && acc.mobile.filter { it.isDigit() }.endsWith(digitsOnly.takeLast(10)))
     }
     if (userAcc != null && userAcc.email.contains("@")) return userAcc.email.lowercase()
 
-    val teacher = _teachers.value.find { t ->
+    val teacher = _allTeachers.value.find { t ->
       t.id.equals(cleanId, ignoreCase = true) ||
         (digitsOnly.length >= 10 && t.contact.filter { it.isDigit() }.endsWith(digitsOnly.takeLast(10)))
     }
     if (teacher != null && teacher.email.contains("@")) return teacher.email.lowercase()
 
-    val student = _students.value.find { s ->
+    val student = _allStudents.value.find { s ->
       s.id.equals(cleanId, ignoreCase = true) ||
         s.parentId.equals(cleanId, ignoreCase = true) ||
         (digitsOnly.length >= 10 && s.mobile.filter { it.isDigit() }.endsWith(digitsOnly.takeLast(10))) ||
@@ -1175,7 +2473,8 @@ object AppRepository {
   }
 
   fun getAccountStatus(identifier: String): AccountStatusInfo {
-    val cleanId = identifier.trim().lowercase()
+    val rawClean = identifier.trim().lowercase()
+    val cleanId = if (rawClean == "joshiakash1712") "joshiakash1712@gmail.com" else rawClean
     if (cleanId.isBlank()) {
       return AccountStatusInfo(exists = false, role = null, displayName = "", isActivated = true)
     }
@@ -1183,7 +2482,7 @@ object AppRepository {
     val digitsOnly = cleanId.filter { it.isDigit() }
 
     // 0. Check normalized UserAccount table first
-    val userAcc = _userAccounts.value.find { acc ->
+    val userAcc = _allUserAccounts.value.find { acc ->
       acc.email.equals(cleanId, ignoreCase = true) ||
         acc.userId.equals(cleanId, ignoreCase = true) ||
         acc.linkedEntityId.equals(cleanId, ignoreCase = true) ||
@@ -1197,16 +2496,20 @@ object AppRepository {
     val isVaultAdmin = com.example.security.SecurityEngine.getVerifiedRole(cleanId) == UserRole.ADMIN
     val isUserAccAdmin = userAcc?.role == UserRole.ADMIN
     if (isConfiguredAdmin || isVaultAdmin || isUserAccAdmin) {
+      val resolvedInstId = userAcc?.instituteId?.takeIf { com.example.security.SecurityEngine.isValidInstituteId(it) }
+        ?: config.instituteId.takeIf { com.example.security.SecurityEngine.isValidInstituteId(it) }
+        ?: "FSI_MAIN"
       return AccountStatusInfo(
         exists = true,
         role = UserRole.ADMIN,
         displayName = userAcc?.name?.ifBlank { null } ?: config.adminFullName.ifBlank { "Institute Administrator" },
-        isActivated = true
+        isActivated = true,
+        instituteId = resolvedInstId
       )
     }
 
     // 2. Check Faculty / Teachers (exact email, ID, or phone match)
-    val matchedTeacher = _teachers.value.find { t ->
+    val matchedTeacher = _allTeachers.value.find { t ->
       t.email.lowercase() == cleanId ||
         t.id.lowercase() == cleanId ||
         (digitsOnly.length >= 10 && t.contact.filter { it.isDigit() }.endsWith(digitsOnly.takeLast(10)))
@@ -1215,18 +2518,22 @@ object AppRepository {
       val hasCustomPassword = com.example.security.SecurityEngine.hasRegisteredAccount(matchedTeacher.email) ||
         com.example.security.SecurityEngine.hasRegisteredAccount(matchedTeacher.id)
       val isActivated = matchedTeacher.isActivated && hasCustomPassword
+      val resolvedInstId = userAcc?.instituteId?.takeIf { com.example.security.SecurityEngine.isValidInstituteId(it) }
+        ?: matchedTeacher.instituteId.takeIf { com.example.security.SecurityEngine.isValidInstituteId(it) }
+        ?: "FSI_MAIN"
       return AccountStatusInfo(
         exists = true,
         role = UserRole.TEACHER,
         displayName = matchedTeacher.name,
         isActivated = isActivated,
         expectedActivationCode = matchedTeacher.activationCode,
-        teacherId = matchedTeacher.id
+        teacherId = matchedTeacher.id,
+        instituteId = resolvedInstId
       )
     }
 
     // 3. Check Students & Parents (exact email, ID, parentEmail, or phone match)
-    val matchedStudent = _students.value.find { s ->
+    val matchedStudent = _allStudents.value.find { s ->
       s.email.lowercase() == cleanId ||
         s.id.lowercase() == cleanId ||
         s.parentEmail.lowercase() == cleanId ||
@@ -1246,13 +2553,17 @@ object AppRepository {
       val hasCustomPassword = com.example.security.SecurityEngine.hasRegisteredAccount(lookupKey) ||
         com.example.security.SecurityEngine.hasRegisteredAccount(matchedStudent.id)
       val isActivated = matchedStudent.isActivated && hasCustomPassword
+      val resolvedInstId = userAcc?.instituteId?.takeIf { com.example.security.SecurityEngine.isValidInstituteId(it) }
+        ?: matchedStudent.instituteId.takeIf { com.example.security.SecurityEngine.isValidInstituteId(it) }
+        ?: "FSI_MAIN"
       return AccountStatusInfo(
         exists = true,
         role = role,
         displayName = if (isParent) "${matchedStudent.parentName} (Parent of ${matchedStudent.name})" else matchedStudent.name,
         isActivated = isActivated,
         expectedActivationCode = matchedStudent.activationCode,
-        studentId = matchedStudent.id
+        studentId = matchedStudent.id,
+        instituteId = resolvedInstId
       )
     }
 
@@ -1263,7 +2574,8 @@ object AppRepository {
         displayName = userAcc.name,
         isActivated = userAcc.status.equals("Active", ignoreCase = true),
         teacherId = if (userAcc.role == UserRole.TEACHER) userAcc.linkedEntityId else null,
-        studentId = if (userAcc.role == UserRole.STUDENT || userAcc.role == UserRole.PARENT) userAcc.linkedEntityId else null
+        studentId = if (userAcc.role == UserRole.STUDENT || userAcc.role == UserRole.PARENT) userAcc.linkedEntityId else null,
+        instituteId = userAcc.instituteId.takeIf { com.example.security.SecurityEngine.isValidInstituteId(it) } ?: "FSI_MAIN"
       )
     }
 
@@ -1309,10 +2621,10 @@ object AppRepository {
     val targetRole = status.role
 
     if (status.teacherId != null) {
-      updateTeacherStatus(status.teacherId, isActivated = true)
+      markTeacherActivatedInternal(status.teacherId, isActivated = true)
     }
     if (status.studentId != null) {
-      updateStudentActivationStatus(status.studentId, isActivated = true)
+      markStudentActivatedInternal(status.studentId, isActivated = true)
     }
 
     com.example.security.SecurityEngine.registerUserCredential(
@@ -1345,7 +2657,8 @@ object AppRepository {
             role = targetRole.name,
             linkedEntityId = status.teacherId ?: status.studentId ?: "",
             linkedStudentIds = if (status.studentId != null) listOf(status.studentId) else emptyList(),
-            status = "Active"
+            status = "Active",
+            instituteId = status.instituteId.ifBlank { "FSI_MAIN" }
           )
         )
       }
@@ -1367,77 +2680,135 @@ object AppRepository {
   }
 
   // Batches
-  private val _batches = MutableStateFlow<List<Batch>>(
+  private val _allBatches = MutableStateFlow<List<Batch>>(
     SeedData.defaultBatches.map { b ->
       val count = SeedData.get15DemoStudents().count { it.batch.equals(b.name, ignoreCase = true) }
       b.copy(studentCount = count)
     }
   )
-  val batches = _batches.asStateFlow()
+  private val _scopedBatches = MutableStateFlow<List<Batch>>(emptyList())
+  val batches = _scopedBatches.asStateFlow()
 
-  fun syncBatchStudentCounts(studentsList: List<Student> = _students.value) {
-    _batches.update { currentBatches ->
+  fun syncBatchStudentCounts(studentsList: List<Student> = _allStudents.value) {
+    _allBatches.update { currentBatches ->
       currentBatches.map { b ->
-        val count = studentsList.count { it.batch.equals(b.name, ignoreCase = true) }
+        val count = studentsList.count {
+          it.instituteId.equals(b.instituteId, ignoreCase = true) &&
+            it.batch.equals(b.name, ignoreCase = true)
+        }
         b.copy(studentCount = count)
       }
     }
   }
 
   fun getLiveBatchStudentCount(batchName: String): Int {
-    return _students.value.count { it.batch.equals(batchName, ignoreCase = true) }
+    if (!isAuthenticatedSession()) return 0
+    return getStudentsForCurrentSession().count { it.batch.equals(batchName, ignoreCase = true) }
   }
 
-  fun addBatch(b: Batch) {
-    if (!checkOnlineOrBlock("create new batch")) return
-    val count = _students.value.count { it.batch.equals(b.name, ignoreCase = true) }
-    val newBatch = b.copy(studentCount = count)
-    _batches.update { it + newBatch }
+  fun addBatch(b: Batch): Boolean {
+    if (!checkOnlineOrBlock("create new batch")) return false
+    if (!requireAdminSession("addBatch", b.instituteId)) return false
+    val activeInst = getCurrentInstituteId()
+    val count = _allStudents.value.count {
+      it.instituteId.equals(activeInst, ignoreCase = true) && it.batch.equals(b.name, ignoreCase = true)
+    }
+    val newBatch = b.copy(studentCount = count, instituteId = activeInst)
+    _allBatches.update { it + newBatch }
+    refreshScopedStateFlows()
     repoScope.launch {
       studentBatchRepo?.insertBatch(newBatch)
     }
     NetworkConnectivityManager.markDataUpdatedOnline()
+    return true
   }
 
-  fun enrollStudentInBatch(student: Student, batch: Batch) {
-    if (!checkOnlineOrBlock("enroll student in batch")) return
-    _students.update { list ->
-      list.map { if (it.id == student.id) it.copy(batch = batch.name, batchId = batch.id) else it }
+  fun enrollStudentInBatch(student: Student, batch: Batch): Boolean {
+    if (!checkOnlineOrBlock("enroll student in batch")) return false
+    val existing = findStudentLocal(student.id)
+    val existingInstituteId = existing?.instituteId ?: findExistingStudentInstituteId(student.id)
+    if (existingInstituteId != null &&
+      (!com.example.security.SecurityEngine.isValidInstituteId(student.instituteId) ||
+        !existingInstituteId.equals(student.instituteId, ignoreCase = true))
+    ) {
+      com.example.security.SecurityEngine.logEvent(
+        severity = com.example.security.SecuritySeverity.ALERT,
+        eventType = "INSTITUTE_REASSIGNMENT_BLOCKED",
+        actor = _currentUserIdentifier.value.ifBlank { "System" },
+        details = "Blocked attempt in enrollStudentInBatch to change instituteId of student '${student.id}' from '$existingInstituteId' to '${student.instituteId}'."
+      )
+      return false
     }
-    syncBatchStudentCounts()
-    repoScope.launch {
-      studentBatchRepo?.enrollStudentInBatch(student, batch)
+    val targetStudentInstituteId = existingInstituteId ?: student.instituteId
+    if (!requireAdminSession("enrollStudentInBatch", targetStudentInstituteId)) return false
+    if (!belongsToCurrentInstitute(batch.instituteId)) {
+      com.example.security.SecurityEngine.logEvent(
+        severity = com.example.security.SecuritySeverity.ALERT,
+        eventType = "CROSS_TENANT_WRITE_BLOCKED",
+        actor = _currentUserIdentifier.value.ifBlank { "System" },
+        details = "Blocked enrollStudentInBatch for student '${student.id}' into foreign batch '${batch.id}' (${batch.instituteId})."
+      )
+      return false
     }
-    NetworkConnectivityManager.markDataUpdatedOnline()
+    val resolvedInstituteId = existingInstituteId ?: getCurrentInstituteId()
+    val resolvedBatchId = batch.id.ifBlank { "BATCH_${batch.name.replace(" ", "_")}" }
+    val normalizedBatch = batch.copy(id = resolvedBatchId, instituteId = resolvedInstituteId)
+    val updatedStudent = (existing ?: student).copy(
+      batch = normalizedBatch.name,
+      batchId = normalizedBatch.id,
+      instituteId = resolvedInstituteId
+    )
+    val repo = resolveStudentBatchRepo()
+    if (repo != null) {
+      kotlinx.coroutines.runBlocking {
+        repo.enrollStudentInBatch(updatedStudent, normalizedBatch, syncToCloud = false)
+      }
+    } else {
+      onLocalStudentUpserted(updatedStudent)
+    }
+    FirestoreService.syncStudentToCloud(
+      student = updatedStudent,
+      createdBy = _currentUserIdentifier.value.ifBlank { "ADMIN" },
+      operationType = com.example.data.db.SyncOperationType.UPDATE
+    )
+    if (NetworkConnectivityManager.isOnline.value) {
+      NetworkConnectivityManager.markDataUpdatedOnline()
+    }
+    return true
   }
 
   // Subjects
-  private val _subjects = MutableStateFlow<List<Subject>>(SeedData.defaultSubjects)
-  val subjects = _subjects.asStateFlow()
+  private val _allSubjects = MutableStateFlow<List<Subject>>(SeedData.defaultSubjects)
+  private val _scopedSubjects = MutableStateFlow<List<Subject>>(emptyList())
+  val subjects = _scopedSubjects.asStateFlow()
 
-  fun addSubject(s: Subject) {
-    if (!checkOnlineOrBlock("add subject")) return
-    _subjects.update { it + s }
+  fun addSubject(s: Subject): Boolean {
+    if (!checkOnlineOrBlock("add subject")) return false
+    if (!requireAdminSession("addSubject", s.instituteId)) return false
+    val normalized = s.copy(instituteId = getCurrentInstituteId())
+    _allSubjects.update { it + normalized }
+    refreshScopedStateFlows()
     repoScope.launch {
-      studentBatchRepo?.insertSubject(s)
+      studentBatchRepo?.insertSubject(normalized)
     }
     NetworkConnectivityManager.markDataUpdatedOnline()
+    return true
   }
 
   fun markChapterCompleted(subjectId: String, chapter: String): Boolean {
     if (!checkOnlineOrBlock("update chapter completion status")) return false
-    // Only Admin or Teacher can modify syllabus completion
-    val role = _currentRole.value
-    val isAdmin = role == UserRole.ADMIN || _currentUserAccount.value?.role == UserRole.ADMIN
-    if (!isAdmin && role != UserRole.TEACHER) return false
-
-    val targetSub = _subjects.value.find { it.id == subjectId } ?: return false
-    if (!isAdmin && targetSub.batchName.isNotBlank() && !isTeacherAssignedToBatch(targetSub.batchId.ifBlank { targetSub.batchName })) {
+    val targetSub = _allSubjects.value.find { it.id == subjectId } ?: return false
+    if (!requireTeacherOrAdminForBatch(
+        actionName = "markChapterCompleted",
+        batchNameOrId = targetSub.batchId.ifBlank { targetSub.batchName },
+        targetInstituteId = targetSub.instituteId
+      )
+    ) {
       return false
     }
 
     var updatedSubject: Subject? = null
-    _subjects.update { list ->
+    _allSubjects.update { list ->
       list.map { sub ->
         if (sub.id == subjectId && sub.pendingChapters.contains(chapter)) {
           val newPending = sub.pendingChapters - chapter
@@ -1450,6 +2821,7 @@ object AppRepository {
         } else sub
       }
     }
+    refreshScopedStateFlows()
     updatedSubject?.let { sub ->
       repoScope.launch {
         studentBatchRepo?.updateSubject(sub)
@@ -1461,18 +2833,19 @@ object AppRepository {
 
   fun updateSyllabusProgress(subjectId: String, newCompletionPercent: Int): Boolean {
     if (!checkOnlineOrBlock("update syllabus progress")) return false
-    val role = _currentRole.value
-    val isAdmin = role == UserRole.ADMIN || _currentUserAccount.value?.role == UserRole.ADMIN
-    if (!isAdmin && role != UserRole.TEACHER) return false
-
-    val targetSub = _subjects.value.find { it.id == subjectId } ?: return false
-    if (!isAdmin && targetSub.batchName.isNotBlank() && !isTeacherAssignedToBatch(targetSub.batchId.ifBlank { targetSub.batchName })) {
+    val targetSub = _allSubjects.value.find { it.id == subjectId } ?: return false
+    if (!requireTeacherOrAdminForBatch(
+        actionName = "updateSyllabusProgress",
+        batchNameOrId = targetSub.batchId.ifBlank { targetSub.batchName },
+        targetInstituteId = targetSub.instituteId
+      )
+    ) {
       return false
     }
 
     val clamped = newCompletionPercent.coerceIn(0, 100)
     var updatedSubject: Subject? = null
-    _subjects.update { list ->
+    _allSubjects.update { list ->
       list.map { sub ->
         if (sub.id == subjectId) {
           val copy = sub.copy(completionPercent = clamped)
@@ -1481,6 +2854,7 @@ object AppRepository {
         } else sub
       }
     }
+    refreshScopedStateFlows()
     updatedSubject?.let { sub ->
       repoScope.launch {
         studentBatchRepo?.updateSubject(sub)
@@ -1496,7 +2870,7 @@ object AppRepository {
     val today = getCurrentDateStr()
     val todayParsed = com.example.data.db.AttendanceRecordEntity.parseDateAndTimeString(today, now)
 
-    val studentsList = _students.value.ifEmpty { SeedData.get15DemoStudents() }
+    val studentsList = _allStudents.value.ifEmpty { SeedData.get15DemoStudents() }
     studentsList.forEachIndexed { index, stu ->
       val (status, reason) = when (index % 6) {
         0 -> "Present" to null
@@ -1536,9 +2910,10 @@ object AppRepository {
   const val ATTENDANCE_EDIT_WINDOW_HOURS = 22
   const val ATTENDANCE_EDIT_WINDOW_MS = 22 * 60 * 60 * 1000L
 
-  private val _attendance = MutableStateFlow<List<AttendanceRecord>>(emptyList())
-  val attendance = _attendance.asStateFlow()
-  val attendanceRecords = _attendance.asStateFlow()
+  private val _allAttendance = MutableStateFlow<List<AttendanceRecord>>(emptyList())
+  private val _scopedAttendance = MutableStateFlow<List<AttendanceRecord>>(emptyList())
+  val attendance = _scopedAttendance.asStateFlow()
+  val attendanceRecords = _scopedAttendance.asStateFlow()
 
   fun isAttendanceEditable(record: AttendanceRecord): Boolean {
     val elapsed = System.currentTimeMillis() - record.timestamp
@@ -1555,21 +2930,22 @@ object AppRepository {
   }
 
   fun getAttendanceForDate(dateStr: String): List<AttendanceRecord> {
-    return _attendance.value.filter { it.date == dateStr }
+    if (!isAuthenticatedSession()) return emptyList()
+    return getAttendanceForCurrentSession().filter { it.date == dateStr }
   }
 
   fun getAttendanceByBatch(batchNameOrId: String, dateStr: String? = null): List<AttendanceRecord> {
+    if (!isAuthenticatedSession()) return emptyList()
     val cleanBatch = batchNameOrId.trim()
     if (cleanBatch.isBlank()) return emptyList()
-    val role = _currentRole.value
-    val isAdmin = role == UserRole.ADMIN || _currentUserAccount.value?.role == UserRole.ADMIN
-    if (!isAdmin && role == UserRole.TEACHER && !isTeacherAssignedToBatch(cleanBatch)) {
+    if (isTeacherSession() && !isTeacherAssignedToBatch(cleanBatch)) {
       return emptyList()
     }
-    val batchObj = _batches.value.find {
-      it.id.equals(cleanBatch, ignoreCase = true) || it.name.equals(cleanBatch, ignoreCase = true)
+    val batchObj = _allBatches.value.find {
+      belongsToCurrentInstitute(it.instituteId) &&
+        (it.id.equals(cleanBatch, ignoreCase = true) || it.name.equals(cleanBatch, ignoreCase = true))
     }
-    return _attendance.value.filter { rec ->
+    return getAttendanceForCurrentSession().filter { rec ->
       val batchMatches = rec.batchId.equals(cleanBatch, ignoreCase = true) ||
         rec.batchName.equals(cleanBatch, ignoreCase = true) ||
         (batchObj != null && (rec.batchId.equals(batchObj.id, ignoreCase = true) || rec.batchName.equals(batchObj.name, ignoreCase = true)))
@@ -1581,38 +2957,17 @@ object AppRepository {
   fun getAttendanceForStudent(studentId: String): List<AttendanceRecord> {
     val cleanStudentId = studentId.trim()
     if (cleanStudentId.isBlank()) return emptyList()
-    val role = _currentRole.value
-    val isAdmin = role == UserRole.ADMIN || _currentUserAccount.value?.role == UserRole.ADMIN
-    if (!isAdmin) {
-      when (role) {
-        UserRole.STUDENT -> {
-          val activeStu = getActiveStudentForCurrentSession()
-          if (activeStu == null || !activeStu.id.equals(cleanStudentId, ignoreCase = true)) {
-            return emptyList()
-          }
-        }
-        UserRole.PARENT -> {
-          val linkedIds = getLinkedStudentsForCurrentParent().map { it.id }
-          if (linkedIds.none { it.equals(cleanStudentId, ignoreCase = true) }) {
-            return emptyList()
-          }
-        }
-        UserRole.TEACHER -> {
-          val allowedStudents = getStudentsForCurrentTeacher().map { it.id }
-          if (allowedStudents.none { it.equals(cleanStudentId, ignoreCase = true) }) {
-            return emptyList()
-          }
-        }
-        else -> {}
-      }
+    val authorizedStu = resolveAuthorizedStudentTarget(requestedStudentId = cleanStudentId) ?: return emptyList()
+    return _allAttendance.value.filter {
+      belongsToCurrentInstitute(it.instituteId) &&
+        it.studentId.equals(authorizedStu.id, ignoreCase = true)
     }
-    return _attendance.value.filter { it.studentId.equals(cleanStudentId, ignoreCase = true) }
   }
 
-  fun calculateStudentAttendancePercent(studentId: String, records: List<AttendanceRecord> = _attendance.value): Int {
+  fun calculateStudentAttendancePercent(studentId: String, records: List<AttendanceRecord> = _scopedAttendance.value): Int {
     val stuRecords = records.filter { it.studentId.equals(studentId, ignoreCase = true) }
     if (stuRecords.isEmpty()) {
-      return _students.value.find { it.id.equals(studentId, ignoreCase = true) }?.attendancePercent ?: 0
+      return getStudentsForCurrentSession().find { it.id.equals(studentId, ignoreCase = true) }?.attendancePercent ?: 0
     }
     val presentOrLate = stuRecords.count {
       it.status.equals("Present", ignoreCase = true) || it.status.equals("Late", ignoreCase = true)
@@ -1620,11 +2975,11 @@ object AppRepository {
     return ((presentOrLate * 100f) / stuRecords.size).toInt().coerceIn(0, 100)
   }
 
-  fun calculateStudentAttendancePercentage(studentId: String, records: List<AttendanceRecord> = _attendance.value): Int {
+  fun calculateStudentAttendancePercentage(studentId: String, records: List<AttendanceRecord> = _scopedAttendance.value): Int {
     return calculateStudentAttendancePercent(studentId, records)
   }
 
-  fun calculateConsecutiveAbsences(studentId: String, records: List<AttendanceRecord> = _attendance.value): Int {
+  fun calculateConsecutiveAbsences(studentId: String, records: List<AttendanceRecord> = _scopedAttendance.value): Int {
     val stuRecords = records
       .filter { it.studentId.equals(studentId, ignoreCase = true) }
       .sortedByDescending { it.timestamp }
@@ -1640,7 +2995,8 @@ object AppRepository {
   }
 
   fun getAttendanceForDateComponents(day: Int, month: Int, year: Int): List<AttendanceRecord> {
-    return _attendance.value.filter { record ->
+    if (!isAuthenticatedSession()) return emptyList()
+    return getAttendanceForCurrentSession().filter { record ->
       if (record.day > 0 && record.month > 0 && record.year > 0) {
         record.day == day && record.month == month && record.year == year
       } else {
@@ -1653,7 +3009,7 @@ object AppRepository {
   private fun recalculateAllStudentsAttendanceFromRecords(records: List<AttendanceRecord>) {
     if (records.isEmpty()) return
     val byStudent = records.groupBy { it.studentId }
-    _students.update { list ->
+    _allStudents.update { list ->
       list.map { stu ->
         val stuRecords = byStudent[stu.id]
         if (!stuRecords.isNullOrEmpty()) {
@@ -1668,14 +3024,14 @@ object AppRepository {
   }
 
   private fun recalculateStudentAttendancePercentage(studentId: String) {
-    val stuRecords = _attendance.value.filter { it.studentId.equals(studentId, ignoreCase = true) }
+    val stuRecords = _allAttendance.value.filter { it.studentId.equals(studentId, ignoreCase = true) }
     if (stuRecords.isEmpty()) return
     val presentOrLate = stuRecords.count {
       it.status.equals("Present", ignoreCase = true) || it.status.equals("Late", ignoreCase = true)
     }
     val pct = ((presentOrLate * 100f) / stuRecords.size).toInt().coerceIn(0, 100)
     var updatedStu: Student? = null
-    _students.update { list ->
+    _allStudents.update { list ->
       list.map { s ->
         if (s.id.equals(studentId, ignoreCase = true)) {
           val copy = s.copy(attendancePercent = pct)
@@ -1684,6 +3040,7 @@ object AppRepository {
         } else s
       }
     }
+    refreshScopedStateFlows()
     updatedStu?.let { stu ->
       repoScope.launch {
         studentBatchRepo?.updateStudent(stu)
@@ -1693,21 +3050,22 @@ object AppRepository {
 
   fun updateAttendanceRecord(recordId: String, newStatus: String, reason: String? = null, recordedBy: String? = null): Boolean {
     if (!checkOnlineOrBlock("modify attendance record")) return false
-    val role = _currentRole.value
-    val isAdmin = role == UserRole.ADMIN || _currentUserAccount.value?.role == UserRole.ADMIN
-    if (!isAdmin && role != UserRole.TEACHER) return false
-
-    val targetRecord = _attendance.value.find { it.id == recordId } ?: return false
-    if (!isAdmin && !isTeacherAssignedToBatch(targetRecord.batchId.ifBlank { targetRecord.batchName })) {
+    val targetRecord = _allAttendance.value.find { it.id == recordId } ?: return false
+    if (!requireTeacherOrAdminForBatch(
+        actionName = "updateAttendanceRecord",
+        batchNameOrId = targetRecord.batchId.ifBlank { targetRecord.batchName },
+        targetInstituteId = targetRecord.instituteId
+      )
+    ) {
       return false
     }
 
     var success = false
     var updatedItem: AttendanceRecord? = null
-    val finalRecorder = recordedBy ?: _currentUserIdentifier.value.ifBlank { "system_fsi" }
+    val finalRecorder = _currentUserIdentifier.value.ifBlank { recordedBy ?: "system_fsi" }
     val now = System.currentTimeMillis()
 
-    _attendance.update { current ->
+    _allAttendance.update { current ->
       current.map { record ->
         if (record.id == recordId) {
           if (isAttendanceEditable(record)) {
@@ -1731,6 +3089,7 @@ object AppRepository {
 
     if (success && updatedItem != null) {
       recalculateStudentAttendancePercentage(updatedItem!!.studentId)
+      refreshScopedStateFlows()
       repoScope.launch {
         studentBatchRepo?.updateAttendance(updatedItem!!)
       }
@@ -1749,22 +3108,33 @@ object AppRepository {
     recordedBy: String? = null
   ): Boolean {
     if (!checkOnlineOrBlock("record attendance")) return false
-    val role = _currentRole.value
-    val isAdmin = role == UserRole.ADMIN || _currentUserAccount.value?.role == UserRole.ADMIN
-    if (!isAdmin && role != UserRole.TEACHER) return false
-    if (!isAdmin && !isTeacherAssignedToBatch(batchName)) return false
+    val targetStudent = _allStudents.value.find { it.id.equals(studentId, ignoreCase = true) }
+    if (!requireTeacherOrAdminForBatch(
+        actionName = "saveSingleAttendance",
+        batchNameOrId = batchName,
+        targetInstituteId = targetStudent?.instituteId
+      )
+    ) {
+      return false
+    }
 
-    val finalRecorder = recordedBy ?: _currentUserIdentifier.value.ifBlank { "system_fsi" }
+    val finalRecorder = _currentUserIdentifier.value.ifBlank { recordedBy ?: "system_fsi" }
     var allowed = true
     val now = System.currentTimeMillis()
     val parsed = com.example.data.db.AttendanceRecordEntity.parseDateAndTimeString(date, now)
     var savedRecord: AttendanceRecord? = null
-    val resolvedBatchId = _batches.value.find {
-      it.name.equals(batchName, ignoreCase = true) || it.id.equals(batchName, ignoreCase = true)
+    val activeInst = getCurrentInstituteId()
+    val resolvedBatchId = _allBatches.value.find {
+      belongsToCurrentInstitute(it.instituteId) &&
+        (it.name.equals(batchName, ignoreCase = true) || it.id.equals(batchName, ignoreCase = true))
     }?.id ?: SeedData.batchIdForName(batchName)
 
-    _attendance.update { current ->
-      val existing = current.find { it.studentId == studentId && it.date == date && (it.batchName.equals(batchName, ignoreCase = true) || it.batchId.equals(resolvedBatchId, ignoreCase = true)) }
+    _allAttendance.update { current ->
+      val existing = current.find {
+        it.studentId == studentId &&
+          it.date == date &&
+          (it.batchName.equals(batchName, ignoreCase = true) || it.batchId.equals(resolvedBatchId, ignoreCase = true))
+      }
       if (existing != null) {
         if (isAttendanceEditable(existing)) {
           current.map { record ->
@@ -1795,7 +3165,7 @@ object AppRepository {
           year = parsed.year,
           time = parsed.time,
           studentId = studentId,
-          studentName = studentName,
+          studentName = targetStudent?.name ?: studentName,
           batchName = batchName,
           status = status,
           timestamp = now,
@@ -1803,7 +3173,7 @@ object AppRepository {
           reason = reason,
           recordedBy = finalRecorder,
           batchId = resolvedBatchId,
-          instituteId = "FSI_MAIN"
+          instituteId = activeInst
         )
         savedRecord = newRecord
         current + newRecord
@@ -1812,6 +3182,7 @@ object AppRepository {
 
     if (allowed && savedRecord != null) {
       recalculateStudentAttendancePercentage(studentId)
+      refreshScopedStateFlows()
       repoScope.launch {
         studentBatchRepo?.insertAttendance(savedRecord!!)
       }
@@ -1819,10 +3190,10 @@ object AppRepository {
     }
 
     if (allowed && status == "Absent") {
-      val stu = _students.value.find { it.id == studentId }
+      val stu = targetStudent
       if (stu != null) {
         val reasonSfx = if (!reason.isNullOrBlank()) " due to $reason" else ""
-        addNotification(
+        addNotificationInternal(
           NotificationItem(
             id = "NOT_ABS_${System.currentTimeMillis()}",
             title = "⚠️ Automated Absence Alert",
@@ -1832,7 +3203,8 @@ object AppRepository {
             recipientRole = "Parent",
             targetStudentId = stu.id,
             targetBatchName = batchName,
-            targetBatchId = resolvedBatchId
+            targetBatchId = resolvedBatchId,
+            instituteId = activeInst
           )
         )
       }
@@ -1843,17 +3215,19 @@ object AppRepository {
 
   fun deleteAttendanceRecord(recordId: String): Boolean {
     if (!checkOnlineOrBlock("delete attendance record")) return false
-    val role = _currentRole.value
-    val isAdmin = role == UserRole.ADMIN || _currentUserAccount.value?.role == UserRole.ADMIN
-    val targetRecord = _attendance.value.find { it.id == recordId } ?: return false
-    if (!isAdmin) {
-      if (role != UserRole.TEACHER || !isTeacherAssignedToBatch(targetRecord.batchId.ifBlank { targetRecord.batchName })) {
-        return false
-      }
+    val targetRecord = _allAttendance.value.find { it.id == recordId } ?: return false
+    if (!requireTeacherOrAdminForBatch(
+        actionName = "deleteAttendanceRecord",
+        batchNameOrId = targetRecord.batchId.ifBlank { targetRecord.batchName },
+        targetInstituteId = targetRecord.instituteId
+      )
+    ) {
+      return false
     }
     val targetStudentId = targetRecord.studentId
-    _attendance.update { list -> list.filter { it.id != recordId } }
+    _allAttendance.update { list -> list.filter { it.id != recordId } }
     recalculateStudentAttendancePercentage(targetStudentId)
+    refreshScopedStateFlows()
     repoScope.launch {
       studentBatchRepo?.deleteAttendance(recordId)
     }
@@ -1861,40 +3235,33 @@ object AppRepository {
     return true
   }
 
-  fun purgeExpiredAttendance(cutoffTimestamp: Long) {
-    _attendance.update { list -> list.filter { it.timestamp >= cutoffTimestamp } }
-    repoScope.launch {
-      studentBatchRepo?.purgeExpiredAttendance(cutoffTimestamp)
-    }
-  }
-
   fun submitBatchAttendance(batchName: String, statusMap: Map<String, String>, recordedBy: String? = null): Boolean {
     if (!checkOnlineOrBlock("record batch attendance")) return false
-    val role = _currentRole.value
-    val isAdmin = role == UserRole.ADMIN || _currentUserAccount.value?.role == UserRole.ADMIN
-    if (!isAdmin && role != UserRole.TEACHER) return false
-    if (!isAdmin && !isTeacherAssignedToBatch(batchName)) return false
+    if (!requireTeacherOrAdminForBatch("submitBatchAttendance", batchName)) return false
 
     val date = getCurrentDateStr()
+    val allowedStudents = getStudentsForCurrentSession().associateBy { it.id }
     statusMap.forEach { (stuId, st) ->
-      val stuName = _students.value.find { it.id == stuId }?.name ?: "Student"
-      saveSingleAttendance(stuId, stuName, batchName, date, st, recordedBy = recordedBy)
+      val stu = allowedStudents[stuId] ?: return@forEach
+      saveSingleAttendance(stuId, stu.name, batchName, date, st, recordedBy = recordedBy)
     }
     return true
   }
 
   // Tests & CBT Assessments
-  private val _tests = MutableStateFlow<List<TestRecord>>(SeedData.getDefaultTestRecords())
-  val tests = _tests.asStateFlow()
+  private val _allTests = MutableStateFlow<List<TestRecord>>(SeedData.getDefaultTestRecords())
+  private val _scopedTests = MutableStateFlow<List<TestRecord>>(emptyList())
+  val tests = _scopedTests.asStateFlow()
 
-  private val _studentTestAttempts = MutableStateFlow<List<StudentTestAttempt>>(emptyList())
-  val studentTestAttempts = _studentTestAttempts.asStateFlow()
+  private val _allStudentTestAttempts = MutableStateFlow<List<StudentTestAttempt>>(emptyList())
+  private val _scopedStudentTestAttempts = MutableStateFlow<List<StudentTestAttempt>>(emptyList())
+  val studentTestAttempts = _scopedStudentTestAttempts.asStateFlow()
 
   fun getAttemptsForCurrentStudent(student: Student? = null): List<StudentTestAttempt> {
-    val activeStu = student ?: getActiveStudentForCurrentSession() ?: return _studentTestAttempts.value
-    return _studentTestAttempts.value.filter {
-      it.studentId.equals(activeStu.id, ignoreCase = true) ||
-        (it.studentId.isBlank() && it.studentName.equals(activeStu.name, ignoreCase = true))
+    val activeStu = resolveAuthorizedStudentTarget(requestedStudent = student) ?: return emptyList()
+    return _allStudentTestAttempts.value.filter {
+      belongsToCurrentInstitute(it.instituteId) &&
+        it.studentId.equals(activeStu.id, ignoreCase = true)
     }
   }
 
@@ -1905,7 +3272,7 @@ object AppRepository {
     answers: Map<String, Int>,
     durationSeconds: Int,
     studentIdOverride: String? = null
-  ): StudentTestAttempt {
+  ): StudentTestAttempt? {
     val existingAttempt = submitCbtTestAttempt(
       testId = testId,
       answers = answers,
@@ -1914,13 +3281,10 @@ object AppRepository {
     )
     if (existingAttempt != null) return existingAttempt
 
-    val stu = if (!studentIdOverride.isNullOrBlank()) {
-      _students.value.find { it.id.equals(studentIdOverride, ignoreCase = true) }
-    } else {
-      getActiveStudentForCurrentSession()
-    }
-    val studentId = stu?.id ?: studentIdOverride ?: "STU001"
-    val studentName = stu?.name ?: "Student"
+    if (!isAuthenticatedSession() || (!isStudentSession() && !isAdminSession())) return null
+    val stu = resolveAuthorizedStudentTarget(requestedStudentId = studentIdOverride) ?: return null
+    val studentId = stu.id
+    val studentName = stu.name
     val testQuestions = getQuestionsForTest(testId)
     var correctCount = 0
     var wrongCount = 0
@@ -1944,7 +3308,7 @@ object AppRepository {
       testName = testName,
       studentId = studentId,
       studentName = studentName,
-      instituteId = stu?.instituteId?.ifBlank { "FSI_MAIN" } ?: "FSI_MAIN",
+      instituteId = stu.instituteId.ifBlank { getCurrentInstituteId() },
       answers = answers,
       score = score,
       totalMarks = maxMarks,
@@ -1956,9 +3320,10 @@ object AppRepository {
       startedAt = now - (durationSeconds * 1000L),
       submittedAt = now
     )
-    _studentTestAttempts.update { list ->
+    _allStudentTestAttempts.update { list ->
       listOf(fallbackAttempt) + list.filterNot { it.studentId == studentId && it.testId == testId }
     }
+    refreshScopedStateFlows()
     repoScope.launch {
       studentBatchRepo?.insertStudentAttempt(fallbackAttempt)
     }
@@ -1967,28 +3332,30 @@ object AppRepository {
 
   fun createTest(t: TestRecord): Boolean {
     if (!checkOnlineOrBlock("schedule new test")) return false
-    val role = _currentRole.value
-    val isAdmin = role == UserRole.ADMIN || _currentUserAccount.value?.role == UserRole.ADMIN
-    if (!isAdmin && role != UserRole.TEACHER) return false
-    if (!isAdmin && t.batch.isNotBlank() && !isTeacherAssignedToBatch(t.batchId.ifBlank { t.batch })) return false
+    if (!requireTeacherOrAdminForBatch("createTest", t.batchId.ifBlank { t.batch }, t.instituteId)) {
+      return false
+    }
 
+    val activeInst = getCurrentInstituteId()
     val resolvedBatchId = t.batchId.ifBlank { SeedData.batchIdForName(t.batch) }
+    val instQuestions = _allQuestions.value.filter { belongsToCurrentInstitute(it.instituteId) }
     val resolvedQuestionIds = t.questionIds.ifEmpty {
-      _questions.value.filter { q ->
+      instQuestions.filter { q ->
         q.subject.equals(t.subject, ignoreCase = true) || t.subject.contains(q.subject, ignoreCase = true)
-      }.map { it.id }.ifEmpty { _questions.value.map { it.id } }
+      }.map { it.id }.ifEmpty { instQuestions.map { it.id } }
     }
     val normalizedTest = t.copy(
       batchId = resolvedBatchId,
       questionIds = resolvedQuestionIds,
-      instituteId = t.instituteId.ifBlank { "FSI_MAIN" }
+      instituteId = activeInst
     )
-    _tests.update { listOf(normalizedTest) + it }
+    _allTests.update { listOf(normalizedTest) + it }
+    refreshScopedStateFlows()
     repoScope.launch {
       studentBatchRepo?.insertTest(normalizedTest)
     }
     NetworkConnectivityManager.markDataUpdatedOnline()
-    addNotification(
+    addNotificationInternal(
       NotificationItem(
         id = "NOT_TST_${System.currentTimeMillis()}",
         title = "📅 Upcoming Test Announced",
@@ -1997,15 +3364,18 @@ object AppRepository {
         type = "Test",
         recipientRole = "Student",
         targetBatchName = normalizedTest.batch,
-        targetBatchId = resolvedBatchId
+        targetBatchId = resolvedBatchId,
+        instituteId = activeInst
       )
     )
     return true
   }
 
   fun getQuestionsForTest(testId: String): List<QuestionItem> {
-    val allQ = _questions.value.ifEmpty { SeedData.getDefaultQuestions() }
-    val test = _tests.value.find { it.id == testId }
+    if (!isAuthenticatedSession()) return emptyList()
+    val allQ = _allQuestions.value.filter { belongsToCurrentInstitute(it.instituteId) }
+      .ifEmpty { SeedData.getDefaultQuestions() }
+    val test = _allTests.value.find { belongsToCurrentInstitute(it.instituteId) && it.id == testId }
     if (test != null) {
       if (test.questionIds.isNotEmpty()) {
         val byIds = allQ.filter { q -> test.questionIds.contains(q.id) }
@@ -2030,13 +3400,11 @@ object AppRepository {
     studentIdOverride: String? = null
   ): StudentTestAttempt? {
     if (!checkOnlineOrBlock("submit CBT test attempt")) return null
-    val student = if (!studentIdOverride.isNullOrBlank()) {
-      _students.value.find { it.id.equals(studentIdOverride, ignoreCase = true) }
-    } else {
-      getActiveStudentForCurrentSession()
-    } ?: return null
+    if (!isAuthenticatedSession() || (!isStudentSession() && !isAdminSession())) return null
+    val student = resolveAuthorizedStudentTarget(requestedStudentId = studentIdOverride) ?: return null
 
-    val test = _tests.value.find { it.id == testId } ?: _tests.value.firstOrNull()
+    val instTests = _allTests.value.filter { belongsToCurrentInstitute(it.instituteId) }
+    val test = instTests.find { it.id == testId } ?: instTests.firstOrNull()
     val resolvedTestId = test?.id ?: testId.ifBlank { "TST_12S_01" }
     val resolvedTestName = test?.testName ?: "CBT Online Assessment"
     val testQuestions = getQuestionsForTest(resolvedTestId)
@@ -2072,7 +3440,7 @@ object AppRepository {
       testName = resolvedTestName,
       studentId = student.id,
       studentName = student.name,
-      instituteId = student.instituteId.ifBlank { "FSI_MAIN" },
+      instituteId = student.instituteId.ifBlank { getCurrentInstituteId() },
       answers = answers,
       score = scaledScore,
       totalMarks = totalMarks,
@@ -2085,9 +3453,10 @@ object AppRepository {
       submittedAt = now
     )
 
-    _studentTestAttempts.update { list ->
+    _allStudentTestAttempts.update { list ->
       listOf(attempt) + list.filterNot { it.studentId == student.id && it.testId == resolvedTestId }
     }
+    refreshScopedStateFlows()
     repoScope.launch {
       studentBatchRepo?.insertStudentAttempt(attempt)
     }
@@ -2105,21 +3474,26 @@ object AppRepository {
 
   fun saveTestMarks(testId: String, marksMap: Map<String, Int>): Boolean {
     if (!checkOnlineOrBlock("submit test marks")) return false
-    val role = _currentRole.value
-    val isAdmin = role == UserRole.ADMIN || _currentUserAccount.value?.role == UserRole.ADMIN
-    val targetTest = _tests.value.find { it.id == testId }
-    if (!isAdmin) {
-      if (role != UserRole.TEACHER) return false
-      if (targetTest != null && !isTeacherAssignedToBatch(targetTest.batchId.ifBlank { targetTest.batch })) {
-        return false
-      }
+    val targetTest = _allTests.value.find { it.id == testId } ?: return false
+    if (!requireTeacherOrAdminForBatch(
+        actionName = "saveTestMarks",
+        batchNameOrId = targetTest.batchId.ifBlank { targetTest.batch },
+        targetInstituteId = targetTest.instituteId
+      )
+    ) {
+      return false
     }
-    saveTestMarksInternal(testId, marksMap)
+    val allowedStudentIds = getStudentsForCurrentSession().map { it.id }.toSet()
+    val filteredMarks = marksMap.filterKeys { it in allowedStudentIds }
+    saveTestMarksInternal(testId, filteredMarks)
     return true
   }
 
   private fun saveTestMarksInternal(testId: String, marksMap: Map<String, Int>) {
-    val validStudentIds = _students.value.map { it.id }.toSet()
+    val validStudentIds = _allStudents.value
+      .filter { belongsToCurrentInstitute(it.instituteId) }
+      .map { it.id }
+      .toSet()
     val sanitizedMarks = if (validStudentIds.isNotEmpty()) {
       marksMap.filterKeys { validStudentIds.contains(it) }
     } else {
@@ -2127,13 +3501,13 @@ object AppRepository {
     }
     val classScores = sanitizedMarks.values.toList()
     val avgScore = if (classScores.isNotEmpty()) classScores.average().toInt() else 0
-    val targetTest = _tests.value.find { it.id == testId }
+    val targetTest = _allTests.value.find { it.id == testId }
     val testName = targetTest?.testName ?: "Batch Assessment"
     val maxMarks = (targetTest?.totalMarks ?: 300).coerceAtLeast(1)
     val dynamicAiSuggestion = AiService.generatePerformanceInsights(testName, avgScore, maxMarks)
 
     var updatedTestRecord: TestRecord? = null
-    _tests.update { list ->
+    _allTests.update { list ->
       list.map { test ->
         if (test.id == testId) {
           val copy = test.copy(studentMarks = sanitizedMarks, aiSuggestion = dynamicAiSuggestion)
@@ -2142,6 +3516,7 @@ object AppRepository {
         } else test
       }
     }
+    refreshScopedStateFlows()
     updatedTestRecord?.let { tst ->
       repoScope.launch {
         studentBatchRepo?.updateTest(tst)
@@ -2152,12 +3527,13 @@ object AppRepository {
     recalculateStudentAcademicStats(sanitizedMarks, targetTest?.subject ?: "Assessment", maxMarks)
 
     NetworkConnectivityManager.markDataUpdatedOnline()
+    val activeInst = getCurrentInstituteId()
     sanitizedMarks.forEach { (stuId, score) ->
       val pct = (score * 100) / maxMarks
       if (pct < 45) {
-        val stu = _students.value.find { it.id == stuId }
+        val stu = _allStudents.value.find { it.id == stuId }
         if (stu != null) {
-          addNotification(
+          addNotificationInternal(
             NotificationItem(
               id = "NOT_LOW_${System.currentTimeMillis()}_$stuId",
               title = "📉 Academic Performance Alert",
@@ -2166,7 +3542,8 @@ object AppRepository {
               type = "Test",
               recipientRole = "Parent",
               targetStudentId = stu.id,
-              targetBatchName = stu.batch
+              targetBatchName = stu.batch,
+              instituteId = activeInst
             )
           )
         }
@@ -2179,7 +3556,7 @@ object AppRepository {
     val rankMap = sortedEntries.mapIndexed { idx, entry -> entry.key to (idx + 1) }.toMap()
 
     val updatedStudents = mutableListOf<Student>()
-    _students.update { list ->
+    _allStudents.update { list ->
       list.map { stu ->
         val score = marksMap[stu.id]
         if (score != null) {
@@ -2201,6 +3578,7 @@ object AppRepository {
         } else stu
       }
     }
+    refreshScopedStateFlows()
     if (updatedStudents.isNotEmpty()) {
       repoScope.launch {
         updatedStudents.forEach { studentBatchRepo?.updateStudent(it) }
@@ -2209,20 +3587,22 @@ object AppRepository {
   }
 
   // Fees & Revenue — Authoritative Unified Ledger
-  private val _fees = MutableStateFlow<List<FeeRecord>>(SeedData.getDefaultFeeRecords())
-  val fees = _fees.asStateFlow()
+  private val _allFees = MutableStateFlow<List<FeeRecord>>(SeedData.getDefaultFeeRecords())
+  private val _scopedFees = MutableStateFlow<List<FeeRecord>>(emptyList())
+  val fees = _scopedFees.asStateFlow()
 
-  private val _feePayments = MutableStateFlow<List<StudentFeePayment>>(SeedData.getDefaultFeePayments())
-  val feePayments = _feePayments.asStateFlow()
+  private val _allFeePayments = MutableStateFlow<List<StudentFeePayment>>(SeedData.getDefaultFeePayments())
+  private val _scopedFeePayments = MutableStateFlow<List<StudentFeePayment>>(emptyList())
+  val feePayments = _scopedFeePayments.asStateFlow()
 
   private fun syncStudentFeeStatus(studentId: String) {
     if (studentId.isBlank()) return
-    val studentInvoices = _fees.value.filter { it.studentId.equals(studentId, ignoreCase = true) }
+    val studentInvoices = _allFees.value.filter { it.studentId.equals(studentId, ignoreCase = true) }
     if (studentInvoices.isEmpty()) return
     val totalPending = studentInvoices.sumOf { it.pendingAmount }
     val newFeeStatus = if (totalPending <= 0) "Paid" else "Pending"
     var updatedStudent: Student? = null
-    _students.update { list ->
+    _allStudents.update { list ->
       list.map { stu ->
         if (stu.id.equals(studentId, ignoreCase = true) && stu.feeStatus != newFeeStatus) {
           val copy = stu.copy(feeStatus = newFeeStatus)
@@ -2231,6 +3611,7 @@ object AppRepository {
         } else stu
       }
     }
+    refreshScopedStateFlows()
     updatedStudent?.let { stu ->
       repoScope.launch {
         studentBatchRepo?.updateStudent(stu)
@@ -2238,16 +3619,32 @@ object AppRepository {
     }
   }
 
-  fun recordFeePayment(recordId: String, payAmt: Int, mode: String = "UPI", remarks: String = "Installment payment") {
-    if (!checkOnlineOrBlock("record fee transaction")) return
-    if (payAmt <= 0) return
+  fun recordFeePayment(recordId: String, payAmt: Int, mode: String = "UPI", remarks: String = "Installment payment"): Boolean {
+    if (!checkOnlineOrBlock("record fee transaction")) return false
+    if (payAmt <= 0 || !isAuthenticatedSession()) return false
+    val existingInvoice = _allFees.value.find { it.id == recordId } ?: return false
+    if (!belongsToCurrentInstitute(existingInvoice.instituteId)) return false
+    if (!isAdminSession()) {
+      if (!isParentSession()) return false
+      val linkedIds = getLinkedStudentsForCurrentParent().map { it.id.lowercase() }.toSet()
+      if (existingInvoice.studentId.lowercase() !in linkedIds) {
+        com.example.security.SecurityEngine.logEvent(
+          severity = com.example.security.SecuritySeverity.ALERT,
+          eventType = "UNAUTHORIZED_FEE_PAYMENT_BLOCKED",
+          actor = _currentUserIdentifier.value,
+          details = "Blocked parent attempt to record payment on unlinked invoice '$recordId' for student '${existingInvoice.studentId}'."
+        )
+        return false
+      }
+    }
+
     var targetStudentName = ""
     var targetStudentId = ""
     var targetMonth = "August 2026"
     var targetInvoiceId = recordId
     var updatedInvoice: FeeRecord? = null
 
-    _fees.update { list ->
+    _allFees.update { list ->
       list.map { rec ->
         if (rec.id == recordId) {
           targetStudentName = rec.studentName
@@ -2275,6 +3672,7 @@ object AppRepository {
         } else rec
       }
     }
+    refreshScopedStateFlows()
 
     updatedInvoice?.let { inv ->
       syncStudentFeeStatus(inv.studentId)
@@ -2284,11 +3682,12 @@ object AppRepository {
     }
 
     if (targetStudentId.isNotBlank() || targetStudentName.isNotBlank()) {
-      val foundStudent = _students.value.find {
-        (targetStudentId.isNotBlank() && it.id.equals(targetStudentId, ignoreCase = true)) ||
-          (targetStudentId.isBlank() && it.name.equals(targetStudentName, ignoreCase = true))
+      val foundStudent = _allStudents.value.find {
+        belongsToCurrentInstitute(it.instituteId) &&
+          ((targetStudentId.isNotBlank() && it.id.equals(targetStudentId, ignoreCase = true)) ||
+            (targetStudentId.isBlank() && it.name.equals(targetStudentName, ignoreCase = true)))
       }
-      val resolvedStudentId = foundStudent?.id ?: targetStudentId.ifBlank { "STU_${System.currentTimeMillis() % 1000}" }
+      val resolvedStudentId = foundStudent?.id ?: targetStudentId
       val resolvedStudentName = foundStudent?.name ?: targetStudentName
       val now = System.currentTimeMillis()
       val paymentItem = StudentFeePayment(
@@ -2308,32 +3707,47 @@ object AppRepository {
         },
         timestamp = now,
         invoiceId = targetInvoiceId,
-        instituteId = foundStudent?.instituteId?.ifBlank { "FSI_MAIN" } ?: "FSI_MAIN",
+        instituteId = foundStudent?.instituteId?.ifBlank { getCurrentInstituteId() } ?: getCurrentInstituteId(),
         transactionId = "TXN-${now % 1000000}"
       )
       recordStudentFeePayment(paymentItem, syncInvoice = false)
     }
     NetworkConnectivityManager.markDataUpdatedOnline()
+    return true
   }
 
-  fun recordStudentFeePayment(payment: StudentFeePayment, syncInvoice: Boolean = true) {
-    if (!checkOnlineOrBlock("record fee payment")) return
-    // Resolve stable studentId first; never rely solely on studentName when studentId is known
-    val matchedStu = _students.value.find {
+  fun recordStudentFeePayment(payment: StudentFeePayment, syncInvoice: Boolean = true): Boolean {
+    if (!checkOnlineOrBlock("record fee payment")) return false
+    if (!isAuthenticatedSession() || payment.amount <= 0.0) return false
+    // Resolve stable studentId first within current institute
+    val instStudents = _allStudents.value.filter { belongsToCurrentInstitute(it.instituteId) }
+    val matchedStu = instStudents.find {
       (payment.studentId.isNotBlank() && it.id.equals(payment.studentId, ignoreCase = true)) ||
         (payment.studentId.isBlank() && it.name.equals(payment.studentName, ignoreCase = true))
     }
     val resolvedStudentId = matchedStu?.id ?: payment.studentId
+    if (!isAdminSession()) {
+      if (!isParentSession()) return false
+      val linkedIds = getLinkedStudentsForCurrentParent().map { it.id.lowercase() }.toSet()
+      if (resolvedStudentId.lowercase() !in linkedIds) {
+        return false
+      }
+    } else if (payment.instituteId.isNotBlank() && !belongsToCurrentInstitute(payment.instituteId)) {
+      return false
+    }
+
     val resolvedStudentName = matchedStu?.name ?: payment.studentName
+    val activeInst = getCurrentInstituteId()
     val normalizedPayment = payment.copy(
       studentId = resolvedStudentId,
       studentName = resolvedStudentName,
-      instituteId = payment.instituteId.ifBlank { matchedStu?.instituteId ?: "FSI_MAIN" },
+      instituteId = activeInst,
       transactionId = payment.transactionId.ifBlank { "TXN-${payment.timestamp % 1000000}" },
-      recordedBy = payment.recordedBy.ifBlank { _currentUserIdentifier.value.ifBlank { "Admin" } }
+      recordedBy = _currentUserIdentifier.value.ifBlank { payment.recordedBy.ifBlank { "Admin" } }
     )
 
-    _feePayments.update { listOf(normalizedPayment) + it.filter { p -> p.id != normalizedPayment.id } }
+    _allFeePayments.update { listOf(normalizedPayment) + it.filter { p -> p.id != normalizedPayment.id } }
+    refreshScopedStateFlows()
     repoScope.launch {
       studentBatchRepo?.insertFeePayment(normalizedPayment)
     }
@@ -2341,10 +3755,11 @@ object AppRepository {
     // Keep FeeRecord invoice ledger synchronized when a direct receipt is logged
     if (syncInvoice && normalizedPayment.paymentStatus.equals("Paid", ignoreCase = true)) {
       var syncedInvoice: FeeRecord? = null
-      _fees.update { list ->
+      _allFees.update { list ->
         val matchIdx = list.indexOfFirst { rec ->
-          (normalizedPayment.invoiceId.isNotBlank() && rec.id == normalizedPayment.invoiceId) ||
-            (resolvedStudentId.isNotBlank() && rec.studentId.equals(resolvedStudentId, ignoreCase = true))
+          belongsToCurrentInstitute(rec.instituteId) &&
+            ((normalizedPayment.invoiceId.isNotBlank() && rec.id == normalizedPayment.invoiceId) ||
+              (resolvedStudentId.isNotBlank() && rec.studentId.equals(resolvedStudentId, ignoreCase = true)))
         }
         if (matchIdx >= 0) {
           list.mapIndexed { idx, rec ->
@@ -2359,6 +3774,7 @@ object AppRepository {
           }
         } else list
       }
+      refreshScopedStateFlows()
       syncedInvoice?.let { inv ->
         syncStudentFeeStatus(inv.studentId)
         repoScope.launch {
@@ -2369,7 +3785,7 @@ object AppRepository {
 
     NetworkConnectivityManager.markDataUpdatedOnline()
 
-    addNotification(
+    addNotificationInternal(
       NotificationItem(
         id = "N_PAY_${System.currentTimeMillis()}",
         title = "💳 Fee Payment Received",
@@ -2377,29 +3793,42 @@ object AppRepository {
         time = "Just now",
         type = "Fee",
         recipientRole = "All",
-        targetStudentId = normalizedPayment.studentId
+        targetStudentId = normalizedPayment.studentId,
+        instituteId = activeInst
       )
     )
+    return true
   }
 
-  fun updateStudentFeePayment(payment: StudentFeePayment) {
-    if (!checkOnlineOrBlock("update fee payment record")) return
-    _feePayments.update { list ->
-      list.map { if (it.id == payment.id) payment else it }
+  fun updateStudentFeePayment(payment: StudentFeePayment): Boolean {
+    if (!checkOnlineOrBlock("update fee payment record")) return false
+    val existing = _allFeePayments.value.find { it.id == payment.id }
+    if (!requireAdminSession("updateStudentFeePayment", existing?.instituteId ?: payment.instituteId)) {
+      return false
     }
+    val normalized = payment.copy(instituteId = existing?.instituteId ?: getCurrentInstituteId())
+    _allFeePayments.update { list ->
+      list.map { if (it.id == normalized.id) normalized else it }
+    }
+    refreshScopedStateFlows()
     repoScope.launch {
-      studentBatchRepo?.updateFeePayment(payment)
+      studentBatchRepo?.updateFeePayment(normalized)
     }
     NetworkConnectivityManager.markDataUpdatedOnline()
+    return true
   }
 
-  fun deleteStudentFeePayment(paymentId: String) {
-    if (!checkOnlineOrBlock("delete fee payment record")) return
-    _feePayments.update { list -> list.filter { it.id != paymentId } }
+  fun deleteStudentFeePayment(paymentId: String): Boolean {
+    if (!checkOnlineOrBlock("delete fee payment record")) return false
+    val existing = _allFeePayments.value.find { it.id == paymentId }
+    if (!requireAdminSession("deleteStudentFeePayment", existing?.instituteId)) return false
+    _allFeePayments.update { list -> list.filter { it.id != paymentId } }
+    refreshScopedStateFlows()
     repoScope.launch {
       studentBatchRepo?.deleteFeePayment(paymentId)
     }
     NetworkConnectivityManager.markDataUpdatedOnline()
+    return true
   }
 
   fun addFeeRecord(
@@ -2409,11 +3838,14 @@ object AppRepository {
     paidAmount: Int,
     month: String,
     studentId: String = ""
-  ) {
-    if (!checkOnlineOrBlock("create fee invoice")) return
-    val matchedStu = _students.value.find {
-      (studentId.isNotBlank() && it.id.equals(studentId, ignoreCase = true)) ||
-        (studentId.isBlank() && it.name.equals(studentName, ignoreCase = true))
+  ): Boolean {
+    if (!checkOnlineOrBlock("create fee invoice")) return false
+    if (!requireAdminSession("addFeeRecord")) return false
+    val activeInst = getCurrentInstituteId()
+    val matchedStu = _allStudents.value.find {
+      belongsToCurrentInstitute(it.instituteId) &&
+        ((studentId.isNotBlank() && it.id.equals(studentId, ignoreCase = true)) ||
+          (studentId.isBlank() && it.name.equals(studentName, ignoreCase = true)))
     }
     val resolvedStudentId = matchedStu?.id ?: studentId
     val resolvedBatchName = matchedStu?.batch ?: ""
@@ -2447,19 +3879,24 @@ object AppRepository {
       studentId = resolvedStudentId,
       batchName = resolvedBatchName,
       batchId = resolvedBatchId,
-      instituteId = matchedStu?.instituteId?.ifBlank { "FSI_MAIN" } ?: "FSI_MAIN"
+      instituteId = activeInst
     )
 
-    _fees.update { list -> list + newRec }
+    _allFees.update { list -> list + newRec }
     syncStudentFeeStatus(resolvedStudentId)
+    refreshScopedStateFlows()
     repoScope.launch {
       studentBatchRepo?.insertFeeInvoice(newRec)
     }
     NetworkConnectivityManager.markDataUpdatedOnline()
+    return true
   }
 
-  fun sendFeeReminder(recordId: String) {
-    if (!checkOnlineOrBlock("dispatch fee reminder")) return
+  fun sendFeeReminder(recordId: String): Boolean {
+    if (!checkOnlineOrBlock("dispatch fee reminder")) return false
+    val existing = _allFees.value.find { it.id == recordId } ?: return false
+    if (!requireAdminSession("sendFeeReminder", existing.instituteId)) return false
+
     val currentTimeStr = SimpleDateFormat("MMM dd, hh:mm a", Locale.getDefault()).format(Date())
     var studentName = ""
     var studentId = ""
@@ -2468,7 +3905,7 @@ object AppRepository {
     var dueDate = ""
     var updatedInvoice: FeeRecord? = null
 
-    _fees.update { list ->
+    _allFees.update { list ->
       list.map { rec ->
         if (rec.id == recordId) {
           studentName = rec.studentName
@@ -2485,6 +3922,7 @@ object AppRepository {
         } else rec
       }
     }
+    refreshScopedStateFlows()
 
     updatedInvoice?.let { inv ->
       repoScope.launch {
@@ -2493,7 +3931,7 @@ object AppRepository {
     }
 
     if (studentName.isNotEmpty()) {
-      addNotification(
+      addNotificationInternal(
         NotificationItem(
           id = "N_FEE_${System.currentTimeMillis()}",
           title = "💳 Fee Payment Reminder",
@@ -2501,43 +3939,56 @@ object AppRepository {
           time = "Just now",
           type = "Fee",
           recipientRole = "Parent",
-          targetStudentId = studentId
+          targetStudentId = studentId,
+          instituteId = existing.instituteId
         )
       )
     }
     NetworkConnectivityManager.markDataUpdatedOnline()
+    return true
   }
 
-  fun deleteFeeRecord(recordId: String) {
-    if (!checkOnlineOrBlock("delete fee record")) return
-    val targetStudentId = _fees.value.find { it.id == recordId }?.studentId ?: ""
-    _fees.update { current ->
+  fun deleteFeeRecord(recordId: String): Boolean {
+    if (!checkOnlineOrBlock("delete fee record")) return false
+    val existing = _allFees.value.find { it.id == recordId } ?: return false
+    if (!requireAdminSession("deleteFeeRecord", existing.instituteId)) return false
+    val targetStudentId = existing.studentId
+    _allFees.update { current ->
       current.filter { it.id != recordId }
     }
     if (targetStudentId.isNotBlank()) syncStudentFeeStatus(targetStudentId)
+    refreshScopedStateFlows()
     repoScope.launch {
       studentBatchRepo?.deleteFeeInvoice(recordId)
     }
     NetworkConnectivityManager.markDataUpdatedOnline()
+    return true
   }
 
   // Admission CRM Leads
-  private val _leads = MutableStateFlow<List<LeadRecord>>(emptyList())
-  val leads = _leads.asStateFlow()
+  private val _allLeads = MutableStateFlow<List<LeadRecord>>(emptyList())
+  private val _scopedLeads = MutableStateFlow<List<LeadRecord>>(emptyList())
+  val leads = _scopedLeads.asStateFlow()
 
-  fun addLead(l: LeadRecord) {
-    if (!checkOnlineOrBlock("record admission lead")) return
-    _leads.update { listOf(l) + it }
+  fun addLead(l: LeadRecord): Boolean {
+    if (!checkOnlineOrBlock("record admission lead")) return false
+    if (!requireAdminSession("addLead", l.instituteId)) return false
+    val normalized = l.copy(instituteId = getCurrentInstituteId())
+    _allLeads.update { listOf(normalized) + it }
+    refreshScopedStateFlows()
     repoScope.launch {
-      studentBatchRepo?.insertLead(l)
+      studentBatchRepo?.insertLead(normalized)
     }
     NetworkConnectivityManager.markDataUpdatedOnline()
+    return true
   }
 
-  fun updateLeadStatus(leadId: String, st: String) {
-    if (!checkOnlineOrBlock("update lead status")) return
+  fun updateLeadStatus(leadId: String, st: String): Boolean {
+    if (!checkOnlineOrBlock("update lead status")) return false
+    val existing = _allLeads.value.find { it.id == leadId } ?: return false
+    if (!requireAdminSession("updateLeadStatus", existing.instituteId)) return false
     var updatedLead: LeadRecord? = null
-    _leads.update { list ->
+    _allLeads.update { list ->
       list.map {
         if (it.id == leadId) {
           val copy = it.copy(status = st)
@@ -2546,31 +3997,40 @@ object AppRepository {
         } else it
       }
     }
+    refreshScopedStateFlows()
     updatedLead?.let { lead ->
       repoScope.launch {
         studentBatchRepo?.updateLead(lead)
       }
     }
     NetworkConnectivityManager.markDataUpdatedOnline()
+    return updatedLead != null
   }
 
   // Online Admission Form Submissions
-  private val _onlineForms = MutableStateFlow<List<OnlineFormSubmission>>(emptyList())
-  val onlineForms = _onlineForms.asStateFlow()
+  private val _allOnlineForms = MutableStateFlow<List<OnlineFormSubmission>>(emptyList())
+  private val _scopedOnlineForms = MutableStateFlow<List<OnlineFormSubmission>>(emptyList())
+  val onlineForms = _scopedOnlineForms.asStateFlow()
 
-  fun submitOnlineForm(form: OnlineFormSubmission) {
-    if (!checkOnlineOrBlock("submit online admission form")) return
-    _onlineForms.update { listOf(form) + it }
+  fun submitOnlineForm(form: OnlineFormSubmission): Boolean {
+    if (!checkOnlineOrBlock("submit online admission form")) return false
+    if (!requireAdminSession("submitOnlineForm", form.instituteId)) return false
+    val normalized = form.copy(instituteId = getCurrentInstituteId())
+    _allOnlineForms.update { listOf(normalized) + it }
+    refreshScopedStateFlows()
     repoScope.launch {
-      studentBatchRepo?.insertOnlineForm(form)
+      studentBatchRepo?.insertOnlineForm(normalized)
     }
     NetworkConnectivityManager.markDataUpdatedOnline()
+    return true
   }
 
-  fun processOnlineForm(formId: String, approve: Boolean) {
-    if (!checkOnlineOrBlock("process online admission application")) return
+  fun processOnlineForm(formId: String, approve: Boolean): Boolean {
+    if (!checkOnlineOrBlock("process online admission application")) return false
+    val existing = _allOnlineForms.value.find { it.id == formId } ?: return false
+    if (!requireAdminSession("processOnlineForm", existing.instituteId)) return false
     var updatedForm: OnlineFormSubmission? = null
-    _onlineForms.update { list ->
+    _allOnlineForms.update { list ->
       list.map {
         if (it.id == formId) {
           val copy = it.copy(status = if (approve) "Approved" else "Rejected")
@@ -2579,6 +4039,7 @@ object AppRepository {
         } else it
       }
     }
+    refreshScopedStateFlows()
     updatedForm?.let { f ->
       repoScope.launch {
         studentBatchRepo?.updateOnlineForm(f)
@@ -2594,31 +4055,36 @@ object AppRepository {
             source = "Online Form Portal",
             inquiryDate = getCurrentDateStr(),
             assignedCounselor = "Auto Assign",
-            status = "New"
+            status = "New",
+            instituteId = existing.instituteId
           )
         )
       }
     }
     NetworkConnectivityManager.markDataUpdatedOnline()
+    return updatedForm != null
   }
 
   // Question Bank (Persisted in Room)
-  private val _questions = MutableStateFlow<List<QuestionItem>>(SeedData.getDefaultQuestions())
-  val questions = _questions.asStateFlow()
-  val questionBank = _questions.asStateFlow()
+  private val _allQuestions = MutableStateFlow<List<QuestionItem>>(SeedData.getDefaultQuestions())
+  private val _scopedQuestions = MutableStateFlow<List<QuestionItem>>(emptyList())
+  val questions = _scopedQuestions.asStateFlow()
+  val questionBank = _scopedQuestions.asStateFlow()
 
   fun addQuestion(q: QuestionItem): Boolean {
     if (!checkOnlineOrBlock("add question to repository")) return false
-    val role = _currentRole.value
-    val isAdmin = role == UserRole.ADMIN || _currentUserAccount.value?.role == UserRole.ADMIN
-    if (!isAdmin && role != UserRole.TEACHER) return false
+    if (!requireTeacherOrAdminForBatch("addQuestion", "", q.instituteId)) return false
+    val activeInst = getCurrentInstituteId()
     val normalizedQ = q.copy(
       subjectId = q.subjectId.ifBlank {
-        _subjects.value.find { it.name.contains(q.subject, ignoreCase = true) }?.id ?: "SUB_PHY_12"
+        _allSubjects.value.find {
+          belongsToCurrentInstitute(it.instituteId) && it.name.contains(q.subject, ignoreCase = true)
+        }?.id ?: "SUB_PHY_12"
       },
-      instituteId = q.instituteId.ifBlank { "FSI_MAIN" }
+      instituteId = activeInst
     )
-    _questions.update { listOf(normalizedQ) + it.filterNot { existing -> existing.id == normalizedQ.id } }
+    _allQuestions.update { listOf(normalizedQ) + it.filterNot { existing -> existing.id == normalizedQ.id } }
+    refreshScopedStateFlows()
     repoScope.launch {
       studentBatchRepo?.insertQuestion(normalizedQ)
     }
@@ -2627,14 +4093,15 @@ object AppRepository {
   }
 
   // Doubts (Persisted in Room, strictly attributed to authenticated student)
-  private val _doubts = MutableStateFlow<List<DoubtItem>>(emptyList())
-  val doubts = _doubts.asStateFlow()
+  private val _allDoubts = MutableStateFlow<List<DoubtItem>>(emptyList())
+  private val _scopedDoubts = MutableStateFlow<List<DoubtItem>>(emptyList())
+  val doubts = _scopedDoubts.asStateFlow()
 
   fun getDoubtsForCurrentStudent(student: Student? = null): List<DoubtItem> {
-    val activeStu = student ?: getActiveStudentForCurrentSession() ?: return _doubts.value
-    return _doubts.value.filter { d ->
-      d.studentId.equals(activeStu.id, ignoreCase = true) ||
-        (d.studentId.isBlank() && d.studentName.equals(activeStu.name, ignoreCase = true))
+    val activeStu = resolveAuthorizedStudentTarget(requestedStudent = student) ?: return emptyList()
+    return _allDoubts.value.filter { d ->
+      belongsToCurrentInstitute(d.instituteId) &&
+        d.studentId.equals(activeStu.id, ignoreCase = true)
     }
   }
 
@@ -2647,19 +4114,16 @@ object AppRepository {
     studentNameOverride: String? = null
   ): DoubtItem? {
     if (!checkOnlineOrBlock("submit academic doubt")) return null
-    val isAdmin = _currentRole.value == UserRole.ADMIN || _currentUserAccount.value?.role == UserRole.ADMIN
-    val activeStudent = if (!studentIdOverride.isNullOrBlank() && isAdmin) {
-      _students.value.find { it.id.equals(studentIdOverride, ignoreCase = true) }
-    } else {
-      getActiveStudentForCurrentSession()
-    }
-    val studentId = activeStudent?.id ?: studentIdOverride ?: ""
-    if (studentId.isBlank()) return null
-    val studentName = activeStudent?.name ?: studentNameOverride ?: _currentUserIdentifier.value.ifBlank { "Student" }
-    val batchName = activeStudent?.batch ?: ""
-    val batchId = activeStudent?.batchId?.ifBlank { SeedData.batchIdForName(batchName) } ?: ""
-    val subjectId = _subjects.value.find {
-      it.name.equals(subject, ignoreCase = true) || it.name.contains(subject, ignoreCase = true)
+    if (!isAuthenticatedSession() || (!isStudentSession() && !isAdminSession())) return null
+    val activeStudent = resolveAuthorizedStudentTarget(requestedStudentId = studentIdOverride) ?: return null
+    val studentId = activeStudent.id
+    val studentName = activeStudent.name
+    val batchName = activeStudent.batch
+    val batchId = activeStudent.batchId.ifBlank { SeedData.batchIdForName(batchName) }
+    val activeInst = activeStudent.instituteId.ifBlank { getCurrentInstituteId() }
+    val subjectId = _allSubjects.value.find {
+      belongsToCurrentInstitute(it.instituteId) &&
+        (it.name.equals(subject, ignoreCase = true) || it.name.contains(subject, ignoreCase = true))
     }?.id ?: "SUB_PHY_12"
     val now = System.currentTimeMillis()
 
@@ -2677,13 +4141,14 @@ object AppRepository {
       studentId = studentId,
       batchName = batchName,
       repliedBy = "",
-      instituteId = activeStudent?.instituteId?.ifBlank { "FSI_MAIN" } ?: "FSI_MAIN",
+      instituteId = activeInst,
       subjectId = subjectId,
       batchId = batchId,
       createdAt = now,
       updatedAt = now
     )
-    _doubts.update { listOf(newDoubt) + it }
+    _allDoubts.update { listOf(newDoubt) + it }
+    refreshScopedStateFlows()
     repoScope.launch {
       studentBatchRepo?.insertDoubt(newDoubt)
     }
@@ -2693,23 +4158,24 @@ object AppRepository {
 
   fun replyToDoubt(doubtId: String, replyText: String): Boolean {
     if (!checkOnlineOrBlock("reply to student doubt")) return false
-    val role = _currentRole.value
-    val isAdmin = role == UserRole.ADMIN || _currentUserAccount.value?.role == UserRole.ADMIN
-    if (!isAdmin && role != UserRole.TEACHER) return false
-
-    val targetDoubt = _doubts.value.find { it.id == doubtId } ?: return false
-    if (!isAdmin && targetDoubt.batchName.isNotBlank() && !isTeacherAssignedToBatch(targetDoubt.batchId.ifBlank { targetDoubt.batchName })) {
+    val targetDoubt = _allDoubts.value.find { it.id == doubtId } ?: return false
+    if (!requireTeacherOrAdminForBatch(
+        actionName = "replyToDoubt",
+        batchNameOrId = targetDoubt.batchId.ifBlank { targetDoubt.batchName },
+        targetInstituteId = targetDoubt.instituteId
+      )
+    ) {
       return false
     }
 
-    val responderName = if (role == UserRole.TEACHER) {
+    val responderName = if (isTeacherSession()) {
       getActiveTeacherForCurrentSession()?.name ?: _currentUserIdentifier.value.ifBlank { "Faculty" }
     } else {
       _currentUserAccount.value?.name ?: "Institute Administrator"
     }
     val now = System.currentTimeMillis()
     var updatedDoubt: DoubtItem? = null
-    _doubts.update { list ->
+    _allDoubts.update { list ->
       list.map {
         if (it.id == doubtId) {
           val copy = it.copy(
@@ -2724,11 +4190,12 @@ object AppRepository {
         } else it
       }
     }
+    refreshScopedStateFlows()
     updatedDoubt?.let { d ->
       repoScope.launch {
         studentBatchRepo?.updateDoubt(d)
       }
-      addNotification(
+      addNotificationInternal(
         NotificationItem(
           id = "NOT_DBT_$now",
           title = "💡 Doubt Resolved (${d.subject})",
@@ -2738,7 +4205,8 @@ object AppRepository {
           recipientRole = "Student",
           targetStudentId = d.studentId,
           targetBatchName = d.batchName,
-          targetBatchId = d.batchId
+          targetBatchId = d.batchId,
+          instituteId = d.instituteId
         )
       )
     }
@@ -2747,15 +4215,18 @@ object AppRepository {
   }
 
   // Homework (Persisted in Room with Teacher -> Homework -> Subject -> Batch -> Students normalization)
-  private val _homework = MutableStateFlow<List<HomeworkItem>>(emptyList())
-  val homework = _homework.asStateFlow()
+  private val _allHomework = MutableStateFlow<List<HomeworkItem>>(emptyList())
+  private val _scopedHomework = MutableStateFlow<List<HomeworkItem>>(emptyList())
+  val homework = _scopedHomework.asStateFlow()
 
   fun getHomeworkForCurrentStudent(student: Student? = null): List<HomeworkItem> {
-    val activeStu = student ?: getActiveStudentForCurrentSession() ?: return _homework.value
-    return _homework.value.filter { hw ->
-      (activeStu.batchId.isNotBlank() && hw.batchId.equals(activeStu.batchId, ignoreCase = true)) ||
-        (activeStu.batch.isNotBlank() && hw.batchName.equals(activeStu.batch, ignoreCase = true)) ||
-        hw.batchName.isBlank()
+    val activeStu = resolveAuthorizedStudentTarget(requestedStudent = student) ?: return emptyList()
+    return _allHomework.value.filter { hw ->
+      belongsToCurrentInstitute(hw.instituteId) &&
+        ((activeStu.batchId.isNotBlank() && hw.batchId.equals(activeStu.batchId, ignoreCase = true)) ||
+          (activeStu.batch.isNotBlank() && hw.batchName.equals(activeStu.batch, ignoreCase = true)))
+    }.map { hw ->
+      hw.copy(completedByStudentIds = hw.completedByStudentIds.filter { it.equals(activeStu.id, ignoreCase = true) })
     }
   }
 
@@ -2770,27 +4241,27 @@ object AppRepository {
     batchId: String = ""
   ): Boolean {
     if (!checkOnlineOrBlock("assign homework")) return false
-    val role = _currentRole.value
-    val isAdmin = role == UserRole.ADMIN || _currentUserAccount.value?.role == UserRole.ADMIN
-    if (!isAdmin && role != UserRole.TEACHER) return false
     val targetBatchCheck = batchId.ifBlank { batchName }
-    if (!isAdmin && !isTeacherAssignedToBatch(targetBatchCheck)) return false
+    if (!requireTeacherOrAdminForBatch("addHomework", targetBatchCheck)) return false
 
+    val activeInst = getCurrentInstituteId()
     val activeTeacher = getActiveTeacherForCurrentSession()
     val teacherName = assignedBy.ifBlank {
       activeTeacher?.name ?: reconcileFacultyName(null, batchName, subject)
     }
-    val resolvedBatch = _batches.value.find {
-      (batchId.isNotBlank() && it.id.equals(batchId, ignoreCase = true)) ||
-        it.name.equals(batchName, ignoreCase = true) ||
-        it.id.equals(batchName, ignoreCase = true)
+    val resolvedBatch = _allBatches.value.find {
+      belongsToCurrentInstitute(it.instituteId) &&
+        ((batchId.isNotBlank() && it.id.equals(batchId, ignoreCase = true)) ||
+          it.name.equals(batchName, ignoreCase = true) ||
+          it.id.equals(batchName, ignoreCase = true))
     }
     val resolvedBatchId = batchId.ifBlank { resolvedBatch?.id ?: SeedData.batchIdForName(batchName) }
     val resolvedBatchName = resolvedBatch?.name ?: batchName
     val resolvedTeacherId = activeTeacher?.id ?: resolvedBatch?.teacherId ?: ""
     val resolvedSubjectId = subjectId.ifBlank {
-      _subjects.value.find {
-        it.name.equals(subject, ignoreCase = true) || it.name.contains(subject, ignoreCase = true)
+      _allSubjects.value.find {
+        belongsToCurrentInstitute(it.instituteId) &&
+          (it.name.equals(subject, ignoreCase = true) || it.name.contains(subject, ignoreCase = true))
       }?.id ?: "SUB_PHY_12"
     }
 
@@ -2808,13 +4279,14 @@ object AppRepository {
       batchId = resolvedBatchId,
       subjectId = resolvedSubjectId,
       teacherId = resolvedTeacherId,
-      instituteId = "FSI_MAIN"
+      instituteId = activeInst
     )
-    _homework.update { listOf(newHw) + it }
+    _allHomework.update { listOf(newHw) + it }
+    refreshScopedStateFlows()
     repoScope.launch {
       studentBatchRepo?.insertHomework(newHw)
     }
-    addNotification(
+    addNotificationInternal(
       NotificationItem(
         id = "NOT_HW_${System.currentTimeMillis()}",
         title = "📚 New Homework Assigned ($subject)",
@@ -2823,20 +4295,27 @@ object AppRepository {
         type = "Homework",
         recipientRole = "Student",
         targetBatchName = resolvedBatchName,
-        targetBatchId = resolvedBatchId
+        targetBatchId = resolvedBatchId,
+        instituteId = activeInst
       )
     )
     NetworkConnectivityManager.markDataUpdatedOnline()
     return true
   }
 
-  fun toggleHomeworkStatus(homeworkId: String, studentId: String = "", feedback: String? = null) {
-    if (!checkOnlineOrBlock("update homework status")) return
-    val resolvedStudentId = studentId.ifBlank { getActiveStudentForCurrentSession()?.id ?: "" }
-    if (resolvedStudentId.isBlank()) return
+  fun toggleHomeworkStatus(homeworkId: String, studentId: String = "", feedback: String? = null): Boolean {
+    if (!checkOnlineOrBlock("update homework status")) return false
+    if (!isAuthenticatedSession() || isParentSession()) return false
+    val targetHw = _allHomework.value.find { it.id == homeworkId } ?: return false
+    if (!belongsToCurrentInstitute(targetHw.instituteId)) return false
+    if (isTeacherSession() && !isTeacherAssignedToBatch(targetHw.batchId.ifBlank { targetHw.batchName })) {
+      return false
+    }
+    val authorizedStudent = resolveAuthorizedStudentTarget(requestedStudentId = studentId) ?: return false
+    val resolvedStudentId = authorizedStudent.id
     var updatedHw: HomeworkItem? = null
     val today = getCurrentDateStr()
-    _homework.update { list ->
+    _allHomework.update { list ->
       list.map { hw ->
         if (hw.id == homeworkId) {
           val isCurrentlyCompleted = hw.completedByStudentIds.contains(resolvedStudentId)
@@ -2857,23 +4336,30 @@ object AppRepository {
         } else hw
       }
     }
+    refreshScopedStateFlows()
     updatedHw?.let { hw ->
       repoScope.launch {
         studentBatchRepo?.updateHomework(hw)
       }
     }
     NetworkConnectivityManager.markDataUpdatedOnline()
+    return updatedHw != null
   }
 
   fun deleteHomework(homeworkId: String): Boolean {
     if (!checkOnlineOrBlock("delete homework")) return false
-    val role = _currentRole.value
-    val isAdmin = role == UserRole.ADMIN || _currentUserAccount.value?.role == UserRole.ADMIN
-    if (!isAdmin && role != UserRole.TEACHER) return false
-    val targetHw = _homework.value.find { it.id == homeworkId } ?: return false
-    if (!isAdmin && !isTeacherAssignedToBatch(targetHw.batchId.ifBlank { targetHw.batchName })) return false
+    val targetHw = _allHomework.value.find { it.id == homeworkId } ?: return false
+    if (!requireTeacherOrAdminForBatch(
+        actionName = "deleteHomework",
+        batchNameOrId = targetHw.batchId.ifBlank { targetHw.batchName },
+        targetInstituteId = targetHw.instituteId
+      )
+    ) {
+      return false
+    }
 
-    _homework.update { list -> list.filterNot { it.id == homeworkId } }
+    _allHomework.update { list -> list.filterNot { it.id == homeworkId } }
+    refreshScopedStateFlows()
     repoScope.launch {
       studentBatchRepo?.deleteHomework(homeworkId)
     }
@@ -2882,11 +4368,13 @@ object AppRepository {
   }
 
   // Timetable & Conflict Validation
-  private val _timetable = MutableStateFlow<List<TimetableItem>>(SeedData.getDefaultWeeklyTimetable())
-  val timetable = _timetable.asStateFlow()
+  private val _allTimetable = MutableStateFlow<List<TimetableItem>>(SeedData.getDefaultWeeklyTimetable())
+  private val _scopedTimetable = MutableStateFlow<List<TimetableItem>>(emptyList())
+  val timetable = _scopedTimetable.asStateFlow()
 
-  private val _dynamicTimetable = MutableStateFlow<List<DynamicTimetableEntry>>(emptyList())
-  val dynamicTimetable = _dynamicTimetable.asStateFlow()
+  private val _allDynamicTimetable = MutableStateFlow<List<DynamicTimetableEntry>>(emptyList())
+  private val _scopedDynamicTimetable = MutableStateFlow<List<DynamicTimetableEntry>>(emptyList())
+  val dynamicTimetable = _scopedDynamicTimetable.asStateFlow()
 
   /**
    * Parses a time string such as "08:00 AM", "01:30 PM", or "14:30" into minutes since midnight (0..1439).
@@ -3016,21 +4504,25 @@ object AppRepository {
       return "Start time ($startTime) must be earlier than end time ($endTime)"
     }
 
-    val targetBatch = _batches.value.find {
-      it.id.equals(batchNameOrId, ignoreCase = true) || it.name.equals(batchNameOrId, ignoreCase = true)
+    val activeInst = currentActiveInstituteId()
+    val targetBatch = _allBatches.value.find {
+      isSameInstitute(it.instituteId, activeInst) &&
+        (it.id.equals(batchNameOrId, ignoreCase = true) || it.name.equals(batchNameOrId, ignoreCase = true))
     }
     val batchId = targetBatch?.id ?: batchNameOrId
     val batchName = targetBatch?.name ?: batchNameOrId
 
-    val targetTeacher = _teachers.value.find {
-      it.id.equals(teacherNameOrId, ignoreCase = true) || it.name.equals(teacherNameOrId, ignoreCase = true)
+    val targetTeacher = _allTeachers.value.find {
+      isSameInstitute(it.instituteId, activeInst) &&
+        (it.id.equals(teacherNameOrId, ignoreCase = true) || it.name.equals(teacherNameOrId, ignoreCase = true))
     }
     val teacherId = targetTeacher?.id ?: ""
     val teacherName = targetTeacher?.name ?: teacherNameOrId
 
     if (day != null) {
-      // Check weekly timetable on the same day
-      for (item in _timetable.value) {
+      // Check weekly timetable on the same day within the current institute
+      for (item in _allTimetable.value) {
+        if (!isSameInstitute(item.instituteId, activeInst)) continue
         if (excludeEntryId != null && item.id == excludeEntryId) continue
         if (!item.day.equals(day, ignoreCase = true)) continue
         val itemStart = parseTimeToMinutes(item.startTime) ?: continue
@@ -3049,8 +4541,9 @@ object AppRepository {
         }
       }
     } else {
-      // Check active dynamic timetable entries (based on scheduled session end time, not createdAt)
-      for (entry in _dynamicTimetable.value) {
+      // Check active dynamic timetable entries (based on scheduled session end time, not createdAt) within the current institute
+      for (entry in _allDynamicTimetable.value) {
+        if (!isSameInstitute(entry.instituteId, activeInst)) continue
         if (excludeEntryId != null && entry.id == excludeEntryId) continue
         if (isDynamicEntryArchived(entry)) continue
         val itemStart = parseTimeToMinutes(entry.startTime) ?: continue
@@ -3074,25 +4567,34 @@ object AppRepository {
 
   fun addWeeklyTimetableItem(item: TimetableItem): Pair<Boolean, String?> {
     if (!checkOnlineOrBlock("add weekly timetable slot")) return false to "Offline"
-    val role = _currentRole.value
-    val isAdmin = role == UserRole.ADMIN || _currentUserAccount.value?.role == UserRole.ADMIN
-    if (!isAdmin && role != UserRole.TEACHER) return false to "Unauthorized role"
-    if (!isAdmin && !isTeacherAssignedToBatch(item.batchId.ifBlank { item.batch })) {
-      return false to "Teacher is not assigned to batch ${item.batch}"
+    val activeInst = currentActiveInstituteId()
+    val batchKey = item.batchId.ifBlank { item.batch }
+    if (!requireTeacherOrAdminForBatch(
+        actionName = "addWeeklyTimetableItem",
+        batchNameOrId = batchKey,
+        targetInstituteId = item.instituteId.ifBlank { activeInst }
+      )
+    ) {
+      return false to "Unauthorized role or batch assignment"
     }
 
-    val batchObj = _batches.value.find {
-      it.id.equals(item.batchId, ignoreCase = true) || it.name.equals(item.batch, ignoreCase = true)
+    val batchObj = _allBatches.value.find {
+      isSameInstitute(it.instituteId, activeInst) &&
+        (it.id.equals(item.batchId, ignoreCase = true) || it.name.equals(item.batch, ignoreCase = true))
     }
     val resolvedBatchId = item.batchId.ifBlank { batchObj?.id ?: SeedData.batchIdForName(item.batch) }
     val resolvedBatchName = batchObj?.name ?: item.batch
     val resolvedTeacherName = item.teacherName.ifBlank { batchObj?.teacherName ?: reconcileFacultyName(null, resolvedBatchName, item.subject) }
-    val teacherObj = _teachers.value.find {
-      it.id.equals(item.teacherId, ignoreCase = true) || it.name.equals(resolvedTeacherName, ignoreCase = true)
+    val teacherObj = _allTeachers.value.find {
+      isSameInstitute(it.instituteId, activeInst) &&
+        (it.id.equals(item.teacherId, ignoreCase = true) || it.name.equals(resolvedTeacherName, ignoreCase = true))
     }
     val resolvedTeacherId = item.teacherId.ifBlank { teacherObj?.id ?: batchObj?.teacherId ?: "" }
     val resolvedSubjectId = item.subjectId.ifBlank {
-      _subjects.value.find { it.name.contains(item.subject.substringBefore("•").trim(), ignoreCase = true) }?.id ?: "SUB_PHY_12"
+      _allSubjects.value.find {
+        isSameInstitute(it.instituteId, activeInst) &&
+          it.name.contains(item.subject.substringBefore("•").trim(), ignoreCase = true)
+      }?.id ?: "SUB_PHY_12"
     }
 
     val conflict = detectTimetableConflict(
@@ -3113,9 +4615,10 @@ object AppRepository {
       teacherName = resolvedTeacherName,
       teacherId = resolvedTeacherId,
       subjectId = resolvedSubjectId,
-      instituteId = item.instituteId.ifBlank { "FSI_MAIN" }
+      instituteId = activeInst
     )
-    _timetable.update { listOf(normalized) + it.filterNot { existing -> existing.id == normalized.id } }
+    _allTimetable.update { listOf(normalized) + it.filterNot { existing -> existing.id == normalized.id } }
+    refreshScopedStateFlows()
     repoScope.launch {
       studentBatchRepo?.insertWeeklyTimetableEntry(normalized)
     }
@@ -3135,16 +4638,22 @@ object AppRepository {
     dateStr: String = ""
   ): Boolean {
     if (!checkOnlineOrBlock("schedule dynamic class")) return false
-    val role = _currentRole.value
-    val isAdmin = role == UserRole.ADMIN || _currentUserAccount.value?.role == UserRole.ADMIN
-    if (!isAdmin && role != UserRole.TEACHER) return false
-    if (!isAdmin && !isTeacherAssignedToBatch(batchId.ifBlank { batch })) return false
+    val activeInst = currentActiveInstituteId()
+    if (!requireTeacherOrAdminForBatch(
+        actionName = "addDynamicTimetableEntry",
+        batchNameOrId = batchId.ifBlank { batch },
+        targetInstituteId = activeInst
+      )
+    ) {
+      return false
+    }
     if (!isValidTimeRange(startTime, endTime)) return false
 
-    val batchObj = _batches.value.find {
-      (batchId.isNotBlank() && it.id.equals(batchId, ignoreCase = true)) ||
-        it.name.equals(batch, ignoreCase = true) ||
-        it.id.equals(batch, ignoreCase = true)
+    val batchObj = _allBatches.value.find {
+      isSameInstitute(it.instituteId, activeInst) &&
+        ((batchId.isNotBlank() && it.id.equals(batchId, ignoreCase = true)) ||
+          it.name.equals(batch, ignoreCase = true) ||
+          it.id.equals(batch, ignoreCase = true))
     }
     val resolvedBatchId = batchId.ifBlank { batchObj?.id ?: SeedData.batchIdForName(batch) }
     val resolvedBatchName = batchObj?.name ?: batch
@@ -3154,13 +4663,15 @@ object AppRepository {
     } else {
       reconcileFacultyName(teacherName, resolvedBatchName, subject)
     }
-    val teacherObj = _teachers.value.find {
-      (teacherId.isNotBlank() && it.id.equals(teacherId, ignoreCase = true)) ||
-        it.name.equals(resolvedTeacher, ignoreCase = true)
+    val teacherObj = _allTeachers.value.find {
+      isSameInstitute(it.instituteId, activeInst) &&
+        ((teacherId.isNotBlank() && it.id.equals(teacherId, ignoreCase = true)) ||
+          it.name.equals(resolvedTeacher, ignoreCase = true))
     }
     val resolvedTeacherId = teacherId.ifBlank { teacherObj?.id ?: batchObj?.teacherId ?: "" }
-    val resolvedSubjectId = _subjects.value.find {
-      it.name.contains(subject.substringBefore("•").trim(), ignoreCase = true)
+    val resolvedSubjectId = _allSubjects.value.find {
+      isSameInstitute(it.instituteId, activeInst) &&
+        it.name.contains(subject.substringBefore("•").trim(), ignoreCase = true)
     }?.id ?: "SUB_PHY_12"
 
     val conflict = detectTimetableConflict(
@@ -3190,15 +4701,16 @@ object AppRepository {
       batchId = resolvedBatchId,
       teacherId = resolvedTeacherId,
       subjectId = resolvedSubjectId,
-      instituteId = "FSI_MAIN",
+      instituteId = activeInst,
       dateStr = effectiveDateStr,
       scheduledStartMillis = schedStart,
       scheduledEndMillis = schedEnd,
       isArchived = archived
     )
-    _dynamicTimetable.update { current ->
+    _allDynamicTimetable.update { current ->
       listOf(newEntry) + current
     }
+    refreshScopedStateFlows()
     studentBatchRepo?.let { repo ->
       repoScope.launch {
         repo.insertTimetableEntry(newEntry)
@@ -3218,15 +4730,21 @@ object AppRepository {
     dateStr: String = ""
   ): Boolean {
     if (!checkOnlineOrBlock("schedule dynamic classes")) return false
-    val role = _currentRole.value
-    val isAdmin = role == UserRole.ADMIN || _currentUserAccount.value?.role == UserRole.ADMIN
-    if (!isAdmin && role != UserRole.TEACHER) return false
-    if (!isAdmin && !isTeacherAssignedToBatch(batchId.ifBlank { batch })) return false
+    val activeInst = currentActiveInstituteId()
+    if (!requireTeacherOrAdminForBatch(
+        actionName = "addDynamicTimetableEntries",
+        batchNameOrId = batchId.ifBlank { batch },
+        targetInstituteId = activeInst
+      )
+    ) {
+      return false
+    }
 
-    val batchObj = _batches.value.find {
-      (batchId.isNotBlank() && it.id.equals(batchId, ignoreCase = true)) ||
-        it.name.equals(batch, ignoreCase = true) ||
-        it.id.equals(batch, ignoreCase = true)
+    val batchObj = _allBatches.value.find {
+      isSameInstitute(it.instituteId, activeInst) &&
+        ((batchId.isNotBlank() && it.id.equals(batchId, ignoreCase = true)) ||
+          it.name.equals(batch, ignoreCase = true) ||
+          it.id.equals(batch, ignoreCase = true))
     }
     val resolvedBatchId = batchId.ifBlank { batchObj?.id ?: SeedData.batchIdForName(batch) }
     val resolvedBatchName = batchObj?.name ?: batch
@@ -3249,13 +4767,15 @@ object AppRepository {
       } else {
         reconcileFacultyName(teacherName, resolvedBatchName, item.first)
       }
-      val teacherObj = _teachers.value.find {
-        (teacherId.isNotBlank() && it.id.equals(teacherId, ignoreCase = true)) ||
-          it.name.equals(entryTeacher, ignoreCase = true)
+      val teacherObj = _allTeachers.value.find {
+        isSameInstitute(it.instituteId, activeInst) &&
+          ((teacherId.isNotBlank() && it.id.equals(teacherId, ignoreCase = true)) ||
+            it.name.equals(entryTeacher, ignoreCase = true))
       }
       val resolvedTeacherId = teacherId.ifBlank { teacherObj?.id ?: batchObj?.teacherId ?: "" }
-      val resolvedSubjectId = _subjects.value.find {
-        it.name.contains(item.first.substringBefore("•").trim(), ignoreCase = true)
+      val resolvedSubjectId = _allSubjects.value.find {
+        isSameInstitute(it.instituteId, activeInst) &&
+          it.name.contains(item.first.substringBefore("•").trim(), ignoreCase = true)
       }?.id ?: "SUB_PHY_12"
       val schedStart = computeScheduledStartMillis(effectiveDateStr, item.second, createdAt)
       val schedEnd = computeScheduledEndMillis(effectiveDateStr, item.third, createdAt)
@@ -3272,16 +4792,17 @@ object AppRepository {
         batchId = resolvedBatchId,
         teacherId = resolvedTeacherId,
         subjectId = resolvedSubjectId,
-        instituteId = "FSI_MAIN",
+        instituteId = activeInst,
         dateStr = effectiveDateStr,
         scheduledStartMillis = schedStart,
         scheduledEndMillis = schedEnd,
         isArchived = archived
       )
     }
-    _dynamicTimetable.update { current ->
+    _allDynamicTimetable.update { current ->
       newEntries + current
     }
+    refreshScopedStateFlows()
     studentBatchRepo?.let { repo ->
       repoScope.launch {
         repo.insertTimetableEntries(newEntries)
@@ -3293,17 +4814,19 @@ object AppRepository {
 
   fun deleteDynamicTimetableEntry(id: String): Boolean {
     if (!checkOnlineOrBlock("delete timetable entry")) return false
-    val role = _currentRole.value
-    val isAdmin = role == UserRole.ADMIN || _currentUserAccount.value?.role == UserRole.ADMIN
-    val targetEntry = _dynamicTimetable.value.find { it.id == id } ?: return false
-    if (!isAdmin) {
-      if (role != UserRole.TEACHER || !isTeacherAssignedToBatch(targetEntry.batchId.ifBlank { targetEntry.batch })) {
-        return false
-      }
+    val targetEntry = _allDynamicTimetable.value.find { it.id == id } ?: return false
+    if (!requireTeacherOrAdminForBatch(
+        actionName = "deleteDynamicTimetableEntry",
+        batchNameOrId = targetEntry.batchId.ifBlank { targetEntry.batch },
+        targetInstituteId = targetEntry.instituteId
+      )
+    ) {
+      return false
     }
-    _dynamicTimetable.update { current ->
+    _allDynamicTimetable.update { current ->
       current.filter { it.id != id }
     }
+    refreshScopedStateFlows()
     studentBatchRepo?.let { repo ->
       repoScope.launch {
         repo.deleteTimetableEntry(id)
@@ -3314,69 +4837,135 @@ object AppRepository {
   }
 
   // Study Logs (Persisted in Room, scoped to authenticated student)
-  private val _studyLogs = MutableStateFlow<List<StudyLogItem>>(emptyList())
-  val studyLogs = _studyLogs.asStateFlow()
+  private val _allStudyLogs = MutableStateFlow<List<StudyLogItem>>(emptyList())
+  private val _scopedStudyLogs = MutableStateFlow<List<StudyLogItem>>(emptyList())
+  val studyLogs = _scopedStudyLogs.asStateFlow()
 
   fun getStudyLogsForCurrentStudent(student: Student? = null): List<StudyLogItem> {
-    val activeStu = student ?: getActiveStudentForCurrentSession() ?: return _studyLogs.value
-    return _studyLogs.value.filter { log ->
-      log.studentId.equals(activeStu.id, ignoreCase = true) || log.studentId.isBlank()
+    if (!isAuthenticatedSession()) return emptyList()
+    val activeStu = resolveAuthorizedStudentTarget(student?.id) ?: return emptyList()
+    return _allStudyLogs.value.filter { log ->
+      isSameInstitute(log.instituteId, activeStu.instituteId) &&
+        log.studentId.equals(activeStu.id, ignoreCase = true)
     }
   }
 
-  fun logDailyStudy(hours: Float, subjects: String, chapters: String, studentIdOverride: String? = null) {
-    if (!checkOnlineOrBlock("log study session")) return
-    val stu = if (!studentIdOverride.isNullOrBlank()) {
-      _students.value.find { it.id.equals(studentIdOverride, ignoreCase = true) }
-    } else {
-      getActiveStudentForCurrentSession()
+  fun logDailyStudy(hours: Float, subjects: String, chapters: String, studentIdOverride: String? = null): Boolean {
+    if (!checkOnlineOrBlock("log study session")) return false
+    if (!isAuthenticatedSession()) {
+      logRbacDenial("logDailyStudy", "Unauthenticated session")
+      return false
     }
-    val resolvedStudentId = stu?.id ?: studentIdOverride ?: ""
+    val role = currentVerifiedRole()
+    val isAdmin = isCurrentSessionAdmin()
+    if (!isAdmin && role != UserRole.STUDENT) {
+      logRbacDenial("logDailyStudy", "Role $role cannot log study sessions")
+      return false
+    }
+    val stu = resolveAuthorizedStudentTarget(if (isAdmin) studentIdOverride else null)
+    if (stu == null) {
+      logRbacDenial("logDailyStudy", "No authorized student identity resolved")
+      return false
+    }
+    if (!isAdmin && !studentIdOverride.isNullOrBlank() && !studentIdOverride.equals(stu.id, ignoreCase = true)) {
+      logRbacDenial("logDailyStudy", "Student ${stu.id} attempted to log study session for $studentIdOverride")
+      return false
+    }
+    val activeInst = currentActiveInstituteId()
     val logItem = StudyLogItem(
       id = "SL_${System.currentTimeMillis()}",
       date = getCurrentDateStr(),
       hours = hours,
       subjects = subjects,
       chapters = chapters,
-      studentId = resolvedStudentId,
-      instituteId = stu?.instituteId?.ifBlank { "FSI_MAIN" } ?: "FSI_MAIN",
+      studentId = stu.id,
+      instituteId = stu.instituteId.ifBlank { activeInst },
       timestamp = System.currentTimeMillis()
     )
-    _studyLogs.update { listOf(logItem) + it }
+    _allStudyLogs.update { listOf(logItem) + it }
+    refreshScopedStateFlows()
     repoScope.launch {
       studentBatchRepo?.insertStudyLog(logItem)
     }
     NetworkConnectivityManager.markDataUpdatedOnline()
+    return true
   }
 
   // Student Goals (Persisted in Room, scoped to authenticated student)
-  private val _studentGoal = MutableStateFlow(
+  private val _allStudentGoals = MutableStateFlow<List<GoalItem>>(emptyList())
+  private val _scopedStudentGoal = MutableStateFlow(
     GoalItem(targetMarks = 260, targetPercent = 90, targetRank = 3, targetAttendance = 95, weeklyStudyHours = 28)
   )
-  val studentGoal = _studentGoal.asStateFlow()
+  val studentGoal = _scopedStudentGoal.asStateFlow()
 
   fun getGoalForCurrentStudent(student: Student? = null): GoalItem {
-    val activeStu = student ?: getActiveStudentForCurrentSession()
-    val current = _studentGoal.value
-    return if (activeStu != null && current.studentId.isBlank()) {
-      current.copy(studentId = activeStu.id)
+    val activeInst = currentActiveInstituteId()
+    val defaultGoal = GoalItem(
+      targetMarks = 260,
+      targetPercent = 90,
+      targetRank = 3,
+      targetAttendance = 95,
+      weeklyStudyHours = 28,
+      studentId = "",
+      instituteId = activeInst
+    )
+    if (!isAuthenticatedSession()) return defaultGoal
+    val activeStu = resolveAuthorizedStudentTarget(requestedStudent = student, requestedStudentId = student?.id) ?: return defaultGoal
+    val matchedFromList = _allStudentGoals.value.find {
+      isSameInstitute(it.instituteId, activeStu.instituteId) &&
+        it.studentId.equals(activeStu.id, ignoreCase = true)
+    }
+    if (matchedFromList != null) {
+      return matchedFromList
+    }
+    val current = _scopedStudentGoal.value
+    if (!isSameInstitute(current.instituteId, activeStu.instituteId)) {
+      return defaultGoal.copy(studentId = activeStu.id, instituteId = activeStu.instituteId)
+    }
+    return if (current.studentId.equals(activeStu.id, ignoreCase = true)) {
+      current.copy(studentId = activeStu.id, instituteId = activeStu.instituteId)
     } else {
-      current
+      defaultGoal.copy(studentId = activeStu.id, instituteId = activeStu.instituteId)
     }
   }
 
-  fun updateStudentGoal(g: GoalItem) {
-    if (!checkOnlineOrBlock("modify academic goals")) return
-    val stu = getActiveStudentForCurrentSession()
+  fun updateStudentGoal(g: GoalItem): Boolean {
+    if (!checkOnlineOrBlock("modify academic goals")) return false
+    if (!isAuthenticatedSession()) {
+      logRbacDenial("updateStudentGoal", "Unauthenticated session")
+      return false
+    }
+    val role = currentVerifiedRole()
+    val isAdmin = isCurrentSessionAdmin()
+    if (!isAdmin && role != UserRole.STUDENT) {
+      logRbacDenial("updateStudentGoal", "Role $role cannot modify student academic goals")
+      return false
+    }
+    val stu = resolveAuthorizedStudentTarget(if (isAdmin) g.studentId else null)
+    if (stu == null) {
+      logRbacDenial("updateStudentGoal", "No authorized student identity resolved")
+      return false
+    }
+    if (!isAdmin && g.studentId.isNotBlank() && !g.studentId.equals(stu.id, ignoreCase = true)) {
+      logRbacDenial("updateStudentGoal", "Student ${stu.id} attempted to update goal for ${g.studentId}")
+      return false
+    }
     val normalizedGoal = g.copy(
-      studentId = g.studentId.ifBlank { stu?.id ?: "DEFAULT" },
-      instituteId = g.instituteId.ifBlank { stu?.instituteId ?: "FSI_MAIN" }
+      studentId = stu.id,
+      instituteId = stu.instituteId.ifBlank { currentActiveInstituteId() }
     )
-    _studentGoal.value = normalizedGoal
+    _allStudentGoals.update { list ->
+      listOf(normalizedGoal) + list.filterNot {
+        isSameInstitute(it.instituteId, normalizedGoal.instituteId) &&
+          it.studentId.equals(normalizedGoal.studentId, ignoreCase = true)
+      }
+    }
+    _scopedStudentGoal.value = normalizedGoal
     repoScope.launch {
       studentBatchRepo?.insertStudentGoal(normalizedGoal)
     }
     NetworkConnectivityManager.markDataUpdatedOnline()
+    return true
   }
 
   // Badges
@@ -3384,37 +4973,71 @@ object AppRepository {
   val badges = _badges.asStateFlow()
 
   // Notifications
-  private val _notifications = MutableStateFlow<List<NotificationItem>>(emptyList())
-  val notifications = _notifications.asStateFlow()
+  private val _allNotifications = MutableStateFlow<List<NotificationItem>>(emptyList())
+  private val _scopedNotifications = MutableStateFlow<List<NotificationItem>>(emptyList())
+  val notifications = _scopedNotifications.asStateFlow()
 
-  fun addNotification(n: NotificationItem) {
-    _notifications.update { listOf(n) + it }
+  private fun addNotificationInternal(n: NotificationItem) {
+    val activeInst = currentActiveInstituteId()
+    val normalized = n.copy(
+      instituteId = n.instituteId.ifBlank { activeInst }
+    )
+    _allNotifications.update { listOf(normalized) + it }
+    refreshScopedStateFlows()
     repoScope.launch {
-      studentBatchRepo?.insertNotification(n)
+      studentBatchRepo?.insertNotification(normalized)
     }
     appContext?.let { ctx ->
-      com.example.utils.NotificationHelper.sendPushNotification(ctx, n.title, n.message)
+      com.example.utils.NotificationHelper.sendPushNotification(ctx, normalized.title, normalized.message)
     }
   }
 
+  fun addNotification(n: NotificationItem): Boolean {
+    if (!isAuthenticatedSession()) {
+      logRbacDenial("addNotification", "Unauthenticated session")
+      return false
+    }
+    if (!isAdminSession() && !isTeacherSession()) {
+      logRbacDenial("addNotification", "Role ${_currentRole.value} cannot broadcast notifications")
+      return false
+    }
+    val activeInst = currentActiveInstituteId()
+    if (n.instituteId.isNotBlank() && !isSameInstitute(n.instituteId, activeInst)) {
+      logRbacDenial("addNotification", "Cross-institute notification blocked")
+      return false
+    }
+    addNotificationInternal(n.copy(instituteId = activeInst))
+    return true
+  }
+
   fun markAllNotificationsAsRead() {
-    _notifications.update { list -> list.map { it.copy(isRead = true) } }
+    if (!isAuthenticatedSession()) return
+    val activeInst = currentActiveInstituteId()
+    _allNotifications.update { list ->
+      list.map {
+        if (isSameInstitute(it.instituteId, activeInst)) it.copy(isRead = true) else it
+      }
+    }
+    refreshScopedStateFlows()
     repoScope.launch {
       studentBatchRepo?.markAllNotificationsAsRead()
     }
   }
 
   fun markNotificationAsRead(id: String) {
+    if (!isAuthenticatedSession()) return
+    val activeInst = currentActiveInstituteId()
     var updatedItem: NotificationItem? = null
-    _notifications.update { list ->
+    _allNotifications.update { list ->
       list.map {
-        if (it.id == id) {
+        if (it.id == id && isSameInstitute(it.instituteId, activeInst)) {
           val copy = it.copy(isRead = true)
           updatedItem = copy
           copy
         } else it
       }
     }
+    refreshScopedStateFlows()
     updatedItem?.let { item ->
       repoScope.launch {
         studentBatchRepo?.updateNotification(item)
@@ -3422,50 +5045,93 @@ object AppRepository {
     }
   }
 
-  fun deleteNotification(id: String) {
-    _notifications.update { list -> list.filter { it.id != id } }
+  fun deleteNotification(id: String): Boolean {
+    if (!isAuthenticatedSession()) {
+      logRbacDenial("deleteNotification", "Unauthenticated session")
+      return false
+    }
+    val activeInst = currentActiveInstituteId()
+    val existing = _allNotifications.value.find { it.id == id } ?: return false
+    if (!isSameInstitute(existing.instituteId, activeInst)) {
+      logRbacDenial("deleteNotification", "Cross-institute notification deletion blocked")
+      return false
+    }
+    if (!isCurrentSessionAdmin() && _scopedNotifications.value.none { it.id == id }) {
+      logRbacDenial("deleteNotification", "Notification $id does not belong to current user scope")
+      return false
+    }
+    _allNotifications.update { list -> list.filter { it.id != id } }
+    refreshScopedStateFlows()
     repoScope.launch {
       studentBatchRepo?.deleteNotification(id)
     }
+    return true
   }
 
-  fun deleteAllNotifications() {
-    _notifications.value = emptyList()
+  fun deleteAllNotifications(): Boolean {
+    if (!requireAdminSession("deleteAllNotifications")) return false
+    val activeInst = currentActiveInstituteId()
+    _allNotifications.update { list ->
+      list.filterNot { isSameInstitute(it.instituteId, activeInst) }
+    }
+    refreshScopedStateFlows()
     repoScope.launch {
       studentBatchRepo?.deleteAllNotifications()
     }
+    return true
   }
 
   // Parent Meetings (Persisted in Room, scoped to linked parent/student/teacher)
-  private val _meetings = MutableStateFlow<List<ParentMeetingItem>>(emptyList())
-  val meetings = _meetings.asStateFlow()
+  private val _allMeetings = MutableStateFlow<List<ParentMeetingItem>>(emptyList())
+  private val _scopedMeetings = MutableStateFlow<List<ParentMeetingItem>>(emptyList())
+  val meetings = _scopedMeetings.asStateFlow()
 
   fun getMeetingsForCurrentParent(): List<ParentMeetingItem> {
-    val isAdmin = _currentRole.value == UserRole.ADMIN || _currentUserAccount.value?.role == UserRole.ADMIN
-    if (isAdmin) return _meetings.value
+    if (!isAuthenticatedSession()) return emptyList()
+    val activeInst = currentActiveInstituteId()
+    val isAdmin = isCurrentSessionAdmin()
+    if (isAdmin) {
+      return _allMeetings.value.filter { isSameInstitute(it.instituteId, activeInst) }
+    }
     val linkedIds = getLinkedStudentsForCurrentParent().map { it.id.lowercase() }.toSet()
     if (linkedIds.isEmpty()) return emptyList()
-    return _meetings.value.filter { it.studentId.lowercase() in linkedIds }
+    return _allMeetings.value.filter {
+      isSameInstitute(it.instituteId, activeInst) && it.studentId.lowercase() in linkedIds
+    }
   }
 
-  fun scheduleParentMeeting(teacherName: String, date: String, time: String, notes: String, studentIdOverride: String? = null) {
-    if (!checkOnlineOrBlock("schedule parent meeting")) return
-    val isAdmin = _currentRole.value == UserRole.ADMIN || _currentUserAccount.value?.role == UserRole.ADMIN
-    val linkedChildren = getLinkedStudentsForCurrentParent()
-    val student = if (!studentIdOverride.isNullOrBlank()) {
-      if (isAdmin || linkedChildren.any { it.id.equals(studentIdOverride, ignoreCase = true) }) {
-        _students.value.find { it.id.equals(studentIdOverride, ignoreCase = true) }
-      } else {
-        linkedChildren.firstOrNull()
-      }
-    } else {
-      linkedChildren.firstOrNull() ?: getActiveStudentForCurrentSession()
+  fun scheduleParentMeeting(
+    teacherName: String,
+    date: String,
+    time: String,
+    notes: String,
+    studentIdOverride: String? = null
+  ): Boolean {
+    if (!checkOnlineOrBlock("schedule parent meeting")) return false
+    if (!isAuthenticatedSession()) {
+      logRbacDenial("scheduleParentMeeting", "Unauthenticated session")
+      return false
     }
-    val studentId = student?.id ?: ""
-    val studentName = student?.name ?: "Student"
-    val parentId = student?.parentId ?: _currentUserAccount.value?.userId ?: ""
-    val parentName = student?.parentName?.ifBlank { "Parent" } ?: "Parent"
-    val teacherObj = _teachers.value.find { it.name.equals(teacherName, ignoreCase = true) || it.id.equals(teacherName, ignoreCase = true) }
+    val role = currentVerifiedRole()
+    val isAdmin = isCurrentSessionAdmin()
+    if (!isAdmin && role != UserRole.PARENT && role != UserRole.TEACHER) {
+      logRbacDenial("scheduleParentMeeting", "Role $role cannot schedule parent meetings")
+      return false
+    }
+    val activeInst = currentActiveInstituteId()
+    val student = resolveAuthorizedStudentTarget(studentIdOverride)
+    if (student == null) {
+      logRbacDenial("scheduleParentMeeting", "Unauthorized or unresolved student target ($studentIdOverride)")
+      return false
+    }
+    val studentId = student.id
+    val studentName = student.name
+    val parentId = student.parentId.ifBlank { _currentUserAccount.value?.userId ?: "" }
+    val parentName = student.parentName.ifBlank { "Parent" }
+    val teacherObj = _allTeachers.value.find {
+      isSameInstitute(it.instituteId, activeInst) &&
+        (it.name.equals(teacherName, ignoreCase = true) || it.id.equals(teacherName, ignoreCase = true))
+    }
     val meetingItem = ParentMeetingItem(
       id = "PM_${System.currentTimeMillis()}",
       studentName = studentName,
@@ -3479,13 +5145,15 @@ object AppRepository {
       studentId = studentId,
       parentId = parentId,
       teacherId = teacherObj?.id ?: "",
-      instituteId = student?.instituteId?.ifBlank { "FSI_MAIN" } ?: "FSI_MAIN"
+      instituteId = student.instituteId.ifBlank { activeInst }
     )
-    _meetings.update { listOf(meetingItem) + it }
+    _allMeetings.update { listOf(meetingItem) + it }
+    refreshScopedStateFlows()
     repoScope.launch {
       studentBatchRepo?.insertParentMeeting(meetingItem)
     }
     NetworkConnectivityManager.markDataUpdatedOnline()
+    return true
   }
 
   fun getCurrentDateStr(): String {
@@ -3501,7 +5169,8 @@ object AppRepository {
     role: UserRole,
     linkedEntityId: String = "",
     linkedStudentIds: List<String> = emptyList(),
-    preserveExistingToken: String = ""
+    preserveExistingToken: String = "",
+    instituteId: String = ""
   ): Boolean {
     val cleanId = identifier.trim()
     if (cleanId.isBlank()) return false
@@ -3511,7 +5180,7 @@ object AppRepository {
     val resolvedRole = status.role ?: vaultRole ?: role
 
     if (resolvedRole == UserRole.TEACHER) {
-      val t = _teachers.value.find {
+      val t = _allTeachers.value.find {
         it.email.equals(cleanId, true) ||
           it.id.equals(cleanId, true) ||
           it.contact.equals(cleanId, true)
@@ -3521,7 +5190,7 @@ object AppRepository {
       }
     }
 
-    val matchedUserAcc = _userAccounts.value.find {
+    val matchedUserAcc = _allUserAccounts.value.find {
       it.email.equals(cleanId, ignoreCase = true) ||
         it.userId.equals(cleanId, ignoreCase = true) ||
         it.linkedEntityId.equals(cleanId, ignoreCase = true) ||
@@ -3544,10 +5213,22 @@ object AppRepository {
       emptyList()
     }
 
+    val directoryInstituteId = matchedUserAcc?.instituteId?.takeIf {
+      com.example.security.SecurityEngine.isValidInstituteId(it) && it != "FSI_MAIN"
+    } ?: status.instituteId.takeIf {
+      com.example.security.SecurityEngine.isValidInstituteId(it) && it != "FSI_MAIN"
+    }
+    val resolvedInstituteId = directoryInstituteId
+      ?: instituteId.trim().takeIf { com.example.security.SecurityEngine.isValidInstituteId(it) }
+      ?: matchedUserAcc?.instituteId?.takeIf { com.example.security.SecurityEngine.isValidInstituteId(it) }
+      ?: status.instituteId.takeIf { com.example.security.SecurityEngine.isValidInstituteId(it) }
+      ?: "FSI_MAIN"
+
     val resolvedAccount = matchedUserAcc?.copy(
       role = resolvedRole,
       linkedEntityId = effectiveLinkedId,
-      linkedStudentIds = effectiveLinkedStudentIds
+      linkedStudentIds = effectiveLinkedStudentIds,
+      instituteId = resolvedInstituteId
     ) ?: UserAccount(
       userId = "USR_${cleanId.lowercase()}",
       email = cleanId,
@@ -3555,13 +5236,18 @@ object AppRepository {
       name = status.displayName.ifBlank { cleanId },
       role = resolvedRole,
       linkedEntityId = effectiveLinkedId,
-      linkedStudentIds = effectiveLinkedStudentIds
+      linkedStudentIds = effectiveLinkedStudentIds,
+      instituteId = resolvedInstituteId
     )
 
     val sessionToken = preserveExistingToken.ifBlank {
       com.example.security.SecurityEngine.issueSessionToken(cleanId, resolvedAccount.role)
     }
 
+    _currentInstituteId.value = resolvedInstituteId
+    _instituteConfig.value = instituteConfigsByTenant.getOrPut(resolvedInstituteId) {
+      InstituteConfig(instituteId = resolvedInstituteId)
+    }
     _currentUserAccount.value = resolvedAccount
     _currentUserIdentifier.value = cleanId
     _currentRole.value = resolvedAccount.role
@@ -3574,13 +5260,14 @@ object AppRepository {
         _selectedChildIdForParent.value = linkedChildren.first().id
       }
     }
+    refreshScopedStateFlows()
 
     val currentList = _savedAccounts.value.toMutableList()
     val existingIdx = currentList.indexOfFirst { it.identifier.equals(cleanId, true) }
     val displayName = status.displayName.ifBlank {
       cleanId.substringBefore("@").replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() }
     }
-    val newAcc = SavedAccount(cleanId, _currentRole.value, displayName)
+    val newAcc = SavedAccount(cleanId, _currentRole.value, displayName, resolvedInstituteId)
     if (existingIdx >= 0) {
       currentList[existingIdx] = newAcc
     } else {
@@ -3595,13 +5282,15 @@ object AppRepository {
     identifier: String,
     role: UserRole,
     linkedEntityId: String = "",
-    linkedStudentIds: List<String> = emptyList()
+    linkedStudentIds: List<String> = emptyList(),
+    instituteId: String = ""
   ): Boolean {
     return bindAuthenticatedUserSession(
       identifier = identifier,
       role = role,
       linkedEntityId = linkedEntityId,
-      linkedStudentIds = linkedStudentIds
+      linkedStudentIds = linkedStudentIds,
+      instituteId = instituteId
     )
   }
 
@@ -3674,8 +5363,10 @@ object AppRepository {
     _currentUserIdentifier.value = ""
     _currentUserAccount.value = null
     _currentRole.value = UserRole.STUDENT
+    _currentInstituteId.value = "FSI_MAIN"
     _selectedChildIdForParent.value = null
     saveSession(false, "", UserRole.STUDENT)
+    refreshScopedStateFlows()
   }
 
   fun logoutAllAccounts() {
@@ -3688,14 +5379,20 @@ object AppRepository {
     _currentUserIdentifier.value = ""
     _currentUserAccount.value = null
     _currentRole.value = UserRole.STUDENT
+    _currentInstituteId.value = "FSI_MAIN"
     _selectedChildIdForParent.value = null
     saveSession(false, "", UserRole.STUDENT)
+    refreshScopedStateFlows()
   }
 
-  fun registerStudent(name: String, email: String, rawPassword: String) {
-    if (!checkOnlineOrBlock("register student")) return
-    if (email.isBlank() || rawPassword.length < 6) return
-    val existing = _students.value.find { it.email.equals(email, true) }
+  fun registerStudent(name: String, email: String, rawPassword: String): Boolean {
+    if (!checkOnlineOrBlock("register student")) return false
+    if (!requireAdminSession("registerStudent")) return false
+    if (email.isBlank() || rawPassword.length < 6) return false
+    val activeInst = currentActiveInstituteId()
+    val existing = _allStudents.value.find {
+      isSameInstitute(it.instituteId, activeInst) && it.email.equals(email, true)
+    }
     if (existing == null) {
       val stuId = "STU${System.currentTimeMillis().toString().takeLast(4)}"
       val newStudent = Student(
@@ -3724,7 +5421,8 @@ object AppRepository {
         strongestSubject = "General",
         weakestSubject = "General",
         recentScores = emptyList(),
-        isActivated = true
+        isActivated = true,
+        instituteId = activeInst
       )
       addStudent(newStudent)
       repoScope.launch(Dispatchers.Default) {
@@ -3736,12 +5434,16 @@ object AppRepository {
         )
       }
       NetworkConnectivityManager.markDataUpdatedOnline()
+      return true
     }
+    return false
   }
 
-  fun registerTeacher(name: String, email: String, mobile: String, subject: String, rawPassword: String) {
-    if (!checkOnlineOrBlock("register teacher")) return
-    if (email.isBlank() || rawPassword.length < 6) return
+  fun registerTeacher(name: String, email: String, mobile: String, subject: String, rawPassword: String): Boolean {
+    if (!checkOnlineOrBlock("register teacher")) return false
+    if (!requireAdminSession("registerTeacher")) return false
+    if (email.isBlank() || rawPassword.length < 6) return false
+    val activeInst = currentActiveInstituteId()
     val newT = Teacher(
       id = "FAC_${System.currentTimeMillis()}",
       name = name,
@@ -3758,9 +5460,11 @@ object AppRepository {
       deductions = 0,
       status = "Pending Approval",
       email = email,
-      isActivated = true
+      isActivated = true,
+      instituteId = activeInst
     )
-    _teachers.update { it + newT }
+    _allTeachers.update { it + newT }
+    refreshScopedStateFlows()
     repoScope.launch {
       studentBatchRepo?.insertTeacher(newT)
     }
@@ -3779,20 +5483,25 @@ object AppRepository {
       )
     }
     NetworkConnectivityManager.markDataUpdatedOnline()
+    return true
   }
 
-  fun approveTeacher(teacherId: String) {
-    if (!checkOnlineOrBlock("approve teacher account")) return
-    _teachers.update { list ->
+  fun approveTeacher(teacherId: String): Boolean {
+    if (!checkOnlineOrBlock("approve teacher account")) return false
+    val existing = _allTeachers.value.find { it.id == teacherId } ?: return false
+    if (!requireAdminSession("approveTeacher", existing.instituteId)) return false
+    _allTeachers.update { list ->
       list.map { if (it.id == teacherId) it.copy(status = "Active", isActivated = true) else it }
     }
-    val updated = _teachers.value.find { it.id == teacherId }
+    refreshScopedStateFlows()
+    val updated = _allTeachers.value.find { it.id == teacherId }
     if (updated != null) {
       repoScope.launch {
         studentBatchRepo?.updateTeacher(updated)
       }
     }
     NetworkConnectivityManager.markDataUpdatedOnline()
+    return true
   }
 
   fun resetUserPassword(identifier: String, onResult: ((Boolean, String) -> Unit)? = null) {
@@ -3829,35 +5538,43 @@ object AppRepository {
     _passwordResetNotice.value = null
   }
 
-  fun clearAllAppData(context: android.content.Context) {
-    if (!checkOnlineOrBlock("purge system data")) return
+  fun clearAllAppData(context: android.content.Context): Boolean {
+    if (!checkOnlineOrBlock("purge system data")) return false
+    if (!requireAdminSession("clearAllAppData")) return false
+    val activeInst = currentActiveInstituteId()
+
     preferences?.edit()?.apply {
       putBoolean("is_data_cleared", true)
       remove("saved_attendance_records")
       apply()
     }
 
-    _students.value = emptyList()
-    _teachers.value = emptyList()
-    _batches.value = emptyList()
-    _subjects.value = emptyList()
-    _tests.value = emptyList()
-    _fees.value = emptyList()
-    _feePayments.value = emptyList()
-    _attendance.value = emptyList()
-    _leads.value = emptyList()
-    _onlineForms.value = emptyList()
-    _questions.value = emptyList()
-    _doubts.value = emptyList()
-    _homework.value = emptyList()
-    _timetable.value = emptyList()
-    _dynamicTimetable.value = emptyList()
-    _studyLogs.value = emptyList()
-    _notifications.value = emptyList()
-    _meetings.value = emptyList()
+    _allStudents.update { list -> list.filterNot { isSameInstitute(it.instituteId, activeInst) } }
+    _allTeachers.update { list -> list.filterNot { isSameInstitute(it.instituteId, activeInst) } }
+    _allBatches.update { list -> list.filterNot { isSameInstitute(it.instituteId, activeInst) } }
+    _allSubjects.update { list -> list.filterNot { isSameInstitute(it.instituteId, activeInst) } }
+    _allTests.update { list -> list.filterNot { isSameInstitute(it.instituteId, activeInst) } }
+    _allStudentTestAttempts.update { list -> list.filterNot { isSameInstitute(it.instituteId, activeInst) } }
+    _allStudentGoals.update { list -> list.filterNot { isSameInstitute(it.instituteId, activeInst) } }
+    _allFees.update { list -> list.filterNot { isSameInstitute(it.instituteId, activeInst) } }
+    _allFeePayments.update { list -> list.filterNot { isSameInstitute(it.instituteId, activeInst) } }
+    _allAttendance.update { list -> list.filterNot { isSameInstitute(it.instituteId, activeInst) } }
+    _allLeads.update { list -> list.filterNot { isSameInstitute(it.instituteId, activeInst) } }
+    _allOnlineForms.update { list -> list.filterNot { isSameInstitute(it.instituteId, activeInst) } }
+    _allQuestions.update { list -> list.filterNot { isSameInstitute(it.instituteId, activeInst) } }
+    _allDoubts.update { list -> list.filterNot { isSameInstitute(it.instituteId, activeInst) } }
+    _allHomework.update { list -> list.filterNot { isSameInstitute(it.instituteId, activeInst) } }
+    _allTimetable.update { list -> list.filterNot { isSameInstitute(it.instituteId, activeInst) } }
+    _allDynamicTimetable.update { list -> list.filterNot { isSameInstitute(it.instituteId, activeInst) } }
+    _allStudyLogs.update { list -> list.filterNot { isSameInstitute(it.instituteId, activeInst) } }
+    _allNotifications.update { list -> list.filterNot { isSameInstitute(it.instituteId, activeInst) } }
+    _allMeetings.update { list -> list.filterNot { isSameInstitute(it.instituteId, activeInst) } }
+    refreshScopedStateFlows()
 
-    repoScope.launch {
-      studentBatchRepo?.clearAllData()
+    if (activeInst == "FSI_MAIN") {
+      repoScope.launch {
+        studentBatchRepo?.clearAllData()
+      }
     }
 
     NetworkConnectivityManager.markDataUpdatedOnline()
@@ -3866,45 +5583,60 @@ object AppRepository {
       NotificationItem(
         id = "NOT_CLR_${System.currentTimeMillis()}",
         title = "🧹 All System Data Purged",
-        message = "All sample & legacy database records cleared. Platform is clean and ready for 1,000 real users.",
+        message = "All sample & legacy database records cleared for institute $activeInst.",
         time = getCurrentTimeStr(),
         type = "System",
-        recipientRole = "All"
+        recipientRole = "All",
+        instituteId = activeInst
       )
     )
+    return true
   }
 
-  fun initializeCleanInstituteStructure() {
-    if (!checkOnlineOrBlock("reset institute structure")) return
+  fun initializeCleanInstituteStructure(): Boolean {
+    if (!checkOnlineOrBlock("reset institute structure")) return false
+    if (!requireAdminSession("initializeCleanInstituteStructure")) return false
+    val activeInst = currentActiveInstituteId()
     val cleanBatches = listOf(
-      Batch("BATCH_10_B", "Class 10 Board Target", "Mon - Sat (08:00 AM - 12:00 PM)", 0, "Faculty Team"),
-      Batch("BATCH_11_S", "11th Science Stream", "Mon - Sat (01:00 PM - 05:00 PM)", 0, "Science Faculty"),
-      Batch("BATCH_12_S", "12th Science Stream", "Mon - Sat (08:00 AM - 01:30 PM)", 0, "Senior Faculty"),
-      Batch("BATCH_JEE", "JEE Competitive Target", "Mon - Sat (07:00 AM - 02:00 PM)", 0, "IITian Mentors"),
-      Batch("BATCH_NEET", "NEET Medical Target", "Mon - Sat (08:00 AM - 02:00 PM)", 0, "Medical Faculty")
+      Batch("BATCH_10_B", "Class 10 Board Target", "Mon - Sat (08:00 AM - 12:00 PM)", 0, "Faculty Team", instituteId = activeInst),
+      Batch("BATCH_11_S", "11th Science Stream", "Mon - Sat (01:00 PM - 05:00 PM)", 0, "Science Faculty", instituteId = activeInst),
+      Batch("BATCH_12_S", "12th Science Stream", "Mon - Sat (08:00 AM - 01:30 PM)", 0, "Senior Faculty", instituteId = activeInst),
+      Batch("BATCH_JEE", "JEE Competitive Target", "Mon - Sat (07:00 AM - 02:00 PM)", 0, "IITian Mentors", instituteId = activeInst),
+      Batch("BATCH_NEET", "NEET Medical Target", "Mon - Sat (08:00 AM - 02:00 PM)", 0, "Medical Faculty", instituteId = activeInst)
     )
-    _batches.value = cleanBatches
-    _students.value = emptyList()
-    _teachers.value = emptyList()
-    _fees.value = emptyList()
+    _allBatches.update { list -> list.filterNot { isSameInstitute(it.instituteId, activeInst) } + cleanBatches }
+    _allStudents.update { list -> list.filterNot { isSameInstitute(it.instituteId, activeInst) } }
+    _allTeachers.update { list -> list.filterNot { isSameInstitute(it.instituteId, activeInst) } }
+    _allFees.update { list -> list.filterNot { isSameInstitute(it.instituteId, activeInst) } }
+    refreshScopedStateFlows()
 
-    repoScope.launch {
-      studentBatchRepo?.clearAllData()
-      cleanBatches.forEach { studentBatchRepo?.insertBatch(it) }
+    if (activeInst == "FSI_MAIN") {
+      repoScope.launch {
+        studentBatchRepo?.clearAllData()
+        cleanBatches.forEach { studentBatchRepo?.insertBatch(it) }
+      }
+    } else {
+      repoScope.launch {
+        cleanBatches.forEach { studentBatchRepo?.insertBatch(it) }
+      }
     }
     NetworkConnectivityManager.markDataUpdatedOnline()
+    return true
   }
 
-  fun generateAndBulkImportRealUsers(count: Int = 1000) {
-    if (!checkOnlineOrBlock("generate mock records")) return
+  fun generateAndBulkImportRealUsers(count: Int = 1000): Boolean {
+    if (!checkOnlineOrBlock("generate mock records")) return false
+    if (!requireAdminSession("generateAndBulkImportRealUsers")) return false
+    if (count <= 0) return false
+    val activeInst = currentActiveInstituteId()
     val batchesList = listOf(
-      Batch("BATCH_10_B", "Class 10 Board Target", "Mon - Sat (08:00 AM - 12:00 PM)", count / 4, "Faculty Team"),
-      Batch("BATCH_11_S", "11th Science Stream", "Mon - Sat (01:00 PM - 05:00 PM)", count / 4, "Science Faculty"),
-      Batch("BATCH_12_S", "12th Science Stream", "Mon - Sat (08:00 AM - 01:30 PM)", count / 4, "Senior Faculty"),
-      Batch("BATCH_JEE_APEX", "JEE Apex Competitive", "Mon - Sat (07:00 AM - 02:00 PM)", count / 4, "IITian Mentors")
+      Batch("BATCH_10_B", "Class 10 Board Target", "Mon - Sat (08:00 AM - 12:00 PM)", count / 4, "Faculty Team", instituteId = activeInst),
+      Batch("BATCH_11_S", "11th Science Stream", "Mon - Sat (01:00 PM - 05:00 PM)", count / 4, "Science Faculty", instituteId = activeInst),
+      Batch("BATCH_12_S", "12th Science Stream", "Mon - Sat (08:00 AM - 01:30 PM)", count / 4, "Senior Faculty", instituteId = activeInst),
+      Batch("BATCH_JEE_APEX", "JEE Apex Competitive", "Mon - Sat (07:00 AM - 02:00 PM)", count / 4, "IITian Mentors", instituteId = activeInst)
     )
 
-    _batches.value = batchesList
+    _allBatches.update { list -> list.filterNot { isSameInstitute(it.instituteId, activeInst) } + batchesList }
     repoScope.launch {
       batchesList.forEach { studentBatchRepo?.insertBatch(it) }
     }
@@ -3957,11 +5689,12 @@ object AppRepository {
         rank = index,
         strongestSubject = if (index % 2 == 0) "Physics" else "Mathematics",
         weakestSubject = if (index % 2 == 0) "Chemistry" else "Physics",
-        recentScores = listOf("Physics" to 82, "Chemistry" to 78, "Mathematics" to 88)
+        recentScores = listOf("Physics" to 82, "Chemistry" to 78, "Mathematics" to 88),
+        instituteId = activeInst
       )
     }
 
-    _students.value = generatedStudents
+    _allStudents.update { list -> list.filterNot { isSameInstitute(it.instituteId, activeInst) } + generatedStudents }
 
     val newFees = generatedStudents.mapIndexed { idx, stu ->
       val feeAmt = 45000
@@ -3979,10 +5712,13 @@ object AppRepository {
         remindedCount = 0,
         lastReminded = "",
         studentId = stu.id,
-        batchName = stu.batch
+        batchName = stu.batch,
+        batchId = stu.batchId,
+        instituteId = activeInst
       )
     }
-    _fees.value = newFees
+    _allFees.update { list -> list.filterNot { isSameInstitute(it.instituteId, activeInst) } + newFees }
+    refreshScopedStateFlows()
 
     repoScope.launch {
       studentBatchRepo?.bulkInsertStudents(generatedStudents)
@@ -3996,14 +5732,18 @@ object AppRepository {
         message = "Bulk onboarding completed. $count active student profiles and fee ledgers generated and indexed in database.",
         time = getCurrentTimeStr(),
         type = "System",
-        recipientRole = "All"
+        recipientRole = "All",
+        instituteId = activeInst
       )
     )
     NetworkConnectivityManager.markDataUpdatedOnline()
+    return true
   }
 
-  fun bulkImportStudentsFromCsv(rawCsv: String) {
-    if (!checkOnlineOrBlock("import CSV records")) return
+  fun bulkImportStudentsFromCsv(rawCsv: String): Boolean {
+    if (!checkOnlineOrBlock("import CSV records")) return false
+    if (!requireAdminSession("bulkImportStudentsFromCsv")) return false
+    val activeInst = currentActiveInstituteId()
     val lines = rawCsv.split("\n").map { it.trim() }.filter { it.isNotBlank() }
     val newStudents = mutableListOf<Student>()
     lines.forEachIndexed { idx, line ->
@@ -4041,15 +5781,17 @@ object AppRepository {
           rank = idx + 1,
           strongestSubject = "General",
           weakestSubject = "General",
-          recentScores = emptyList()
+          recentScores = emptyList(),
+          instituteId = activeInst
         )
         newStudents.add(s)
       }
     }
 
     if (newStudents.isNotEmpty()) {
-      _students.update { it + newStudents }
+      _allStudents.update { it + newStudents }
       syncBatchStudentCounts()
+      refreshScopedStateFlows()
       repoScope.launch {
         studentBatchRepo?.bulkInsertStudents(newStudents)
       }
@@ -4061,9 +5803,12 @@ object AppRepository {
           message = "Successfully imported ${newStudents.size} students into roster.",
           time = getCurrentTimeStr(),
           type = "System",
-          recipientRole = "All"
+          recipientRole = "All",
+          instituteId = activeInst
         )
       )
+      return true
     }
+    return false
   }
 }

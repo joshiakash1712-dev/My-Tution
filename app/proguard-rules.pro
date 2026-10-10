@@ -1,5 +1,6 @@
 # Add project specific ProGuard rules here.
-# Keep application data models and Room entities
+# Keep application classes, ViewModels, data models, and Room entities
+-keep class com.example.** { *; }
 -keep class com.example.data.** { *; }
 -keep class com.example.data.db.** { *; }
 

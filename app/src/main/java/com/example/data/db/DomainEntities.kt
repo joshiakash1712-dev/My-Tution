@@ -2,6 +2,7 @@ package com.example.data.db
 
 import androidx.room.Dao
 import androidx.room.Entity
+import androidx.room.ForeignKey
 import androidx.room.Index
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
@@ -100,6 +101,9 @@ interface UserAccountDao {
   @Query("DELETE FROM user_accounts WHERE userId = :userId")
   suspend fun deleteAccountById(userId: String)
 
+  @Query("UPDATE user_accounts SET status = 'Inactive' WHERE linkedEntityId IN (:entityIds)")
+  suspend fun deactivateAccountsByLinkedEntities(entityIds: List<String>)
+
   @Query("DELETE FROM user_accounts WHERE linkedEntityId IN (:entityIds)")
   suspend fun deleteAccountsByLinkedEntities(entityIds: List<String>)
 }
@@ -109,7 +113,20 @@ interface UserAccountDao {
 // =========================================================================
 @Entity(
   tableName = "fee_invoices",
-  indices = [Index(value = ["studentId"])]
+  foreignKeys = [
+    ForeignKey(
+      entity = StudentEntity::class,
+      parentColumns = ["id"],
+      childColumns = ["studentId"],
+      onDelete = ForeignKey.RESTRICT,
+      onUpdate = ForeignKey.CASCADE,
+      deferred = true
+    )
+  ],
+  indices = [
+    Index(value = ["studentId"]),
+    Index(value = ["instituteId"])
+  ]
 )
 data class FeeInvoiceEntity(
   @PrimaryKey val id: String,
@@ -283,7 +300,23 @@ interface HomeworkDao {
 // =========================================================================
 // 4. DOUBT ENTITY & DAO (With Student ID & Teacher Reply Persistence)
 // =========================================================================
-@Entity(tableName = "doubts")
+@Entity(
+  tableName = "doubts",
+  foreignKeys = [
+    ForeignKey(
+      entity = StudentEntity::class,
+      parentColumns = ["id"],
+      childColumns = ["studentId"],
+      onDelete = ForeignKey.RESTRICT,
+      onUpdate = ForeignKey.CASCADE,
+      deferred = true
+    )
+  ],
+  indices = [
+    Index(value = ["studentId"]),
+    Index(value = ["instituteId"])
+  ]
+)
 data class DoubtEntity(
   @PrimaryKey val id: String,
   val studentId: String,
@@ -820,6 +853,16 @@ interface QuestionDao {
 // =========================================================================
 @Entity(
   tableName = "student_test_attempts",
+  foreignKeys = [
+    ForeignKey(
+      entity = StudentEntity::class,
+      parentColumns = ["id"],
+      childColumns = ["studentId"],
+      onDelete = ForeignKey.RESTRICT,
+      onUpdate = ForeignKey.CASCADE,
+      deferred = true
+    )
+  ],
   indices = [Index(value = ["studentId"]), Index(value = ["testId"])]
 )
 data class StudentAttemptEntity(
@@ -916,7 +959,23 @@ interface StudentAttemptDao {
 // =========================================================================
 // 11. STUDY LOG, GOAL, PARENT MEETING & WEEKLY TIMETABLE ENTITIES & DAOS
 // =========================================================================
-@Entity(tableName = "study_logs")
+@Entity(
+  tableName = "study_logs",
+  foreignKeys = [
+    ForeignKey(
+      entity = StudentEntity::class,
+      parentColumns = ["id"],
+      childColumns = ["studentId"],
+      onDelete = ForeignKey.RESTRICT,
+      onUpdate = ForeignKey.CASCADE,
+      deferred = true
+    )
+  ],
+  indices = [
+    Index(value = ["studentId"]),
+    Index(value = ["instituteId"])
+  ]
+)
 data class StudyLogEntity(
   @PrimaryKey val id: String,
   val studentId: String,
@@ -964,7 +1023,22 @@ interface StudyLogDao {
   suspend fun deleteAllStudyLogs()
 }
 
-@Entity(tableName = "student_goals")
+@Entity(
+  tableName = "student_goals",
+  foreignKeys = [
+    ForeignKey(
+      entity = StudentEntity::class,
+      parentColumns = ["id"],
+      childColumns = ["studentId"],
+      onDelete = ForeignKey.RESTRICT,
+      onUpdate = ForeignKey.CASCADE,
+      deferred = true
+    )
+  ],
+  indices = [
+    Index(value = ["studentId"])
+  ]
+)
 data class StudentGoalEntity(
   @PrimaryKey val studentId: String,
   val targetMarks: Int,
@@ -1010,7 +1084,23 @@ interface StudentGoalDao {
   suspend fun deleteAllGoals()
 }
 
-@Entity(tableName = "parent_meetings")
+@Entity(
+  tableName = "parent_meetings",
+  foreignKeys = [
+    ForeignKey(
+      entity = StudentEntity::class,
+      parentColumns = ["id"],
+      childColumns = ["studentId"],
+      onDelete = ForeignKey.RESTRICT,
+      onUpdate = ForeignKey.CASCADE,
+      deferred = true
+    )
+  ],
+  indices = [
+    Index(value = ["studentId"]),
+    Index(value = ["teacherId"])
+  ]
+)
 data class ParentMeetingEntity(
   @PrimaryKey val id: String,
   val studentId: String,

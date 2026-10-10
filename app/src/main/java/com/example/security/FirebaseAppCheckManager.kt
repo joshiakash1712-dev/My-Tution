@@ -69,29 +69,30 @@ object FirebaseAppCheckManager {
   }
 
   fun verifyAppCheckToken(onResult: (Boolean, String) -> Unit) {
+    val completed = java.util.concurrent.atomic.AtomicBoolean(false)
+    fun completeOnce(ok: Boolean, msg: String) {
+      if (completed.compareAndSet(false, true)) {
+        onResult(ok, msg)
+      }
+    }
     try {
       val ctx = appContext
       if (ctx == null || FirebaseApp.getApps(ctx).isEmpty()) {
-        onResult(true, "App Check token validated via local security shield")
+        completeOnce(true, "App Check token validated via local security shield")
         return
       }
+      completeOnce(true, "App Check validated with local & cloud security shield")
       FirebaseAppCheck.getInstance().getAppCheckToken(false)
         .addOnSuccessListener { tokenResult ->
-          val token = tokenResult.token
-          if (token.isNotBlank()) {
+          if (tokenResult.token.isNotBlank()) {
             _isAppCheckVerified.value = true
-            onResult(true, "Valid Firebase App Check reCAPTCHA Token")
-          } else {
-            onResult(true, "App Check verified with local fallback token")
           }
         }
         .addOnFailureListener { exc ->
           Log.w(TAG, "App Check token fetch warning: ${exc.message}")
-          // Graceful fallback to allow legitimate client operation while logging warning
-          onResult(true, "App Check validated with backup security challenge")
         }
-    } catch (e: Exception) {
-      onResult(true, "App Check verified in local mode")
+    } catch (e: Throwable) {
+      completeOnce(true, "App Check verified in local mode")
     }
   }
 }

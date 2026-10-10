@@ -24,4 +24,24 @@ class RoomConverters {
       emptyList()
     }
   }
+
+  @TypeConverter
+  fun fromSyncOperationType(value: SyncOperationType?): String {
+    return (value ?: SyncOperationType.UPDATE).name
+  }
+
+  @TypeConverter
+  fun toSyncOperationType(value: String?): SyncOperationType {
+    return SyncOperationType.fromString(value)
+  }
+
+  @TypeConverter
+  fun fromSyncQueueStatus(value: SyncQueueStatus?): String {
+    return (value ?: SyncQueueStatus.PENDING).name
+  }
+
+  @TypeConverter
+  fun toSyncQueueStatus(value: String?): SyncQueueStatus {
+    return SyncQueueStatus.fromString(value)
+  }
 }
