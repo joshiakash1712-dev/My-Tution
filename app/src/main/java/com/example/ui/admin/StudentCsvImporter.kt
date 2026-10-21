@@ -39,6 +39,7 @@ import androidx.compose.ui.window.DialogProperties
 import com.example.data.AppRepository
 import com.example.data.Batch
 import com.example.data.Student
+import kotlinx.coroutines.launch
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.text.SimpleDateFormat
@@ -278,6 +279,7 @@ fun StudentCsvImportDialog(
 ) {
   val context = LocalContext.current
   val clipboardManager = LocalClipboardManager.current
+  val coroutineScope = rememberCoroutineScope()
 
   val existingStudents by AppRepository.students.collectAsState()
   val activeBatches by AppRepository.batches.collectAsState()
@@ -916,10 +918,17 @@ fun StudentCsvImportDialog(
                 }
 
                 if (finalStudents.isNotEmpty()) {
-                  AppRepository.addStudents(finalStudents)
-                  Toast.makeText(context, "Successfully imported ${finalStudents.size} students!", Toast.LENGTH_LONG).show()
-                  onImportComplete(finalStudents)
-                  onDismiss()
+                  coroutineScope.launch {
+                    val success = AppRepository.addStudents(finalStudents)
+                    if (success) {
+                      Toast.makeText(context, "Successfully imported ${finalStudents.size} students!", Toast.LENGTH_LONG).show()
+                      onImportComplete(finalStudents)
+                      onDismiss()
+                    } else {
+                      Toast.makeText(context, "Failed to import student records into database.", Toast.LENGTH_SHORT).show()
+                      isProcessing = false
+                    }
+                  }
                 } else {
                   Toast.makeText(context, "No students to import after applying duplicate filter.", Toast.LENGTH_SHORT).show()
                   isProcessing = false

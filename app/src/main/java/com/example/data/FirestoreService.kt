@@ -13,8 +13,14 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlin.coroutines.suspendCoroutine
+import kotlin.coroutines.resume
 import java.util.concurrent.ConcurrentHashMap
 
 data class CachedResource<T>(
@@ -633,11 +639,11 @@ object FirestoreService {
   }
 
   // CREATE/ADD Student Profile to Firestore
-  fun createStudentProfile(
+  suspend fun createStudentProfile(
     student: FirestoreStudent,
-    onSuccess: () -> Unit,
-    onFailure: (Exception) -> Unit
-  ) {
+    onSuccess: () -> Unit = {},
+    onFailure: (Exception) -> Unit = {}
+  ) = withContext(Dispatchers.IO) {
     val activeInstituteId = AppRepository.getCurrentInstituteId()
     val targetInstituteId = student.instituteId.ifBlank { activeInstituteId }
     if (!com.example.security.SecurityEngine.isValidInstituteId(targetInstituteId) ||
@@ -646,21 +652,21 @@ object FirestoreService {
       val ex = SecurityException("Cross-institute or invalid instituteId '${student.instituteId}' rejected.")
       _syncStatus.value = "Security Error: Cross-institute write blocked."
       onFailure(ex)
-      return
+      return@withContext
     }
     val existingProfile = _remoteProfiles.value.find { it.id == student.id }
-    val existingInstituteId = existingProfile?.instituteId ?: AppRepository.findExistingStudentInstituteId(student.id)
+    val existingInstituteId = existingProfile?.instituteId ?: AppRepository.findExistingStudentInstituteIdCached(student.id)
     if (existingInstituteId != null && !existingInstituteId.equals(targetInstituteId, ignoreCase = true)) {
       val ex = SecurityException("Cannot change student instituteId from '$existingInstituteId' to '$targetInstituteId'.")
       _syncStatus.value = "Security Error: Institute reassignment blocked."
       onFailure(ex)
-      return
+      return@withContext
     }
     if (AppRepository.isLoggedIn.value && AppRepository.currentRole.value != UserRole.ADMIN) {
       val ex = SecurityException("Only an Institute Admin can create student profiles.")
       _syncStatus.value = "Security Error: Insufficient role permissions."
       onFailure(ex)
-      return
+      return@withContext
     }
     val scopedStudent = student.copy(instituteId = targetInstituteId)
     val createEnvelope = FirestoreSyncEnvelope(
@@ -682,7 +688,7 @@ object FirestoreService {
       val ex = IllegalStateException("Cannot create student profile in Offline Mode. Queued in Room sync_queue.")
       _syncStatus.value = "Offline Mode: CREATE queued in persistent sync_queue."
       onFailure(ex)
-      return
+      return@withContext
     }
 
     if (!NetworkConnectivityManager.isFirebaseReachable.value) {
@@ -692,7 +698,7 @@ object FirestoreService {
       val ex = IllegalStateException("Cloud Service Unavailable. CREATE queued in Room sync_queue.")
       _syncStatus.value = "Saved locally (Cloud Service Unavailable — Sync Pending)"
       onFailure(ex)
-      return
+      return@withContext
     }
 
     if (simulateImmediateWriteFailure) {
@@ -702,7 +708,7 @@ object FirestoreService {
       val ex = IllegalStateException(simulatedWriteErrorMessage)
       _syncStatus.value = "Cloud Sync Error: $simulatedWriteErrorMessage"
       onFailure(ex)
-      return
+      return@withContext
     }
 
     // Immediately write-through to in-memory cache and pagination state
@@ -718,7 +724,7 @@ object FirestoreService {
     if (database == null) {
       _syncStatus.value = "Local memory update: Student '${scopedStudent.name}' saved."
       onSuccess()
-      return
+      return@withContext
     }
 
     database.collection(COLLECTION_NAME)
@@ -731,11 +737,15 @@ object FirestoreService {
       }
       .addOnFailureListener { e ->
         Log.e(TAG, "Error writing student profile to Firestore", e)
-        persistCreateOrUpdateToRoomQueue(createEnvelope, targetInstituteId)
-        NetworkConnectivityManager.recordLocalMutation()
-        NetworkConnectivityManager.recordSyncFailure(e.message ?: "Firestore write error")
-        _syncStatus.value = "Cloud Sync Error: ${e.message}"
-        onFailure(e)
+        serviceScope.launch {
+          persistCreateOrUpdateToRoomQueue(createEnvelope, targetInstituteId)
+          NetworkConnectivityManager.recordLocalMutation()
+          NetworkConnectivityManager.recordSyncFailure(e.message ?: "Firestore write error")
+          _syncStatus.value = "Cloud Sync Error: ${e.message}"
+          withContext(Dispatchers.Main) {
+            onFailure(e)
+          }
+        }
       }
   }
 
@@ -965,11 +975,11 @@ object FirestoreService {
   }
 
   // UPDATE existing Student Profile in Firestore collection
-  fun updateStudentProfile(
+  suspend fun updateStudentProfile(
     student: FirestoreStudent,
-    onSuccess: () -> Unit,
-    onFailure: (Exception) -> Unit
-  ) {
+    onSuccess: () -> Unit = {},
+    onFailure: (Exception) -> Unit = {}
+  ) = withContext(Dispatchers.IO) {
     val activeInstituteId = AppRepository.getCurrentInstituteId()
     val targetInstituteId = student.instituteId.ifBlank { activeInstituteId }
     if (!com.example.security.SecurityEngine.isValidInstituteId(targetInstituteId) ||
@@ -978,15 +988,15 @@ object FirestoreService {
       val ex = SecurityException("Cross-institute update blocked for institute '${student.instituteId}'.")
       _syncStatus.value = "Security Error: Cross-institute update blocked."
       onFailure(ex)
-      return
+      return@withContext
     }
     val existingProfile = _remoteProfiles.value.find { it.id == student.id }
-    val existingInstituteId = existingProfile?.instituteId ?: AppRepository.findExistingStudentInstituteId(student.id)
+    val existingInstituteId = existingProfile?.instituteId ?: AppRepository.findExistingStudentInstituteIdCached(student.id)
     if (existingInstituteId != null && !existingInstituteId.equals(targetInstituteId, ignoreCase = true)) {
       val ex = SecurityException("Cannot change student instituteId from '$existingInstituteId' to '$targetInstituteId'.")
       _syncStatus.value = "Security Error: Institute reassignment blocked."
       onFailure(ex)
-      return
+      return@withContext
     }
 
     val scopedStudent = student.copy(instituteId = existingInstituteId ?: targetInstituteId)
@@ -1009,7 +1019,7 @@ object FirestoreService {
       val ex = IllegalStateException("Cannot update student in Offline Mode. Queued in Room sync_queue.")
       _syncStatus.value = "Offline Mode: UPDATE queued in persistent sync_queue."
       onFailure(ex)
-      return
+      return@withContext
     }
 
     if (!NetworkConnectivityManager.isFirebaseReachable.value) {
@@ -1019,7 +1029,7 @@ object FirestoreService {
       val ex = IllegalStateException("Cloud Service Unavailable. UPDATE queued in Room sync_queue.")
       _syncStatus.value = "Saved locally (Cloud Service Unavailable — Sync Pending)"
       onFailure(ex)
-      return
+      return@withContext
     }
 
     if (simulateImmediateWriteFailure) {
@@ -1029,7 +1039,7 @@ object FirestoreService {
       val ex = IllegalStateException(simulatedWriteErrorMessage)
       _syncStatus.value = "Update Error: $simulatedWriteErrorMessage"
       onFailure(ex)
-      return
+      return@withContext
     }
 
     // Write-through update local memory & pagination states immediately
@@ -1044,7 +1054,7 @@ object FirestoreService {
     if (database == null) {
       _syncStatus.value = "Local update: ${scopedStudent.name}'s profile modified."
       onSuccess()
-      return
+      return@withContext
     }
 
     database.collection(COLLECTION_NAME)
@@ -1057,24 +1067,28 @@ object FirestoreService {
       }
       .addOnFailureListener { e ->
         Log.e(TAG, "Error updating student profile", e)
-        persistCreateOrUpdateToRoomQueue(updateEnvelope, scopedStudent.instituteId)
-        NetworkConnectivityManager.recordLocalMutation()
-        NetworkConnectivityManager.recordSyncFailure(e.message ?: "Firestore write error")
-        _syncStatus.value = "Update Error: ${e.message}"
-        onFailure(e)
+        serviceScope.launch {
+          persistCreateOrUpdateToRoomQueue(updateEnvelope, scopedStudent.instituteId)
+          NetworkConnectivityManager.recordLocalMutation()
+          NetworkConnectivityManager.recordSyncFailure(e.message ?: "Firestore write error")
+          _syncStatus.value = "Update Error: ${e.message}"
+          withContext(Dispatchers.Main) {
+            onFailure(e)
+          }
+        }
       }
   }
 
   // DELETE Student Profile from Firestore collection
-  fun deleteStudentProfile(
+  suspend fun deleteStudentProfile(
     studentId: String,
-    onSuccess: () -> Unit,
-    onFailure: (Exception) -> Unit
-  ) {
+    onSuccess: () -> Unit = {},
+    onFailure: (Exception) -> Unit = {}
+  ) = withContext(Dispatchers.IO) {
     val cleanId = studentId.trim()
     if (cleanId.isBlank()) {
       onFailure(IllegalArgumentException("Student ID cannot be blank."))
-      return
+      return@withContext
     }
     val activeInstituteId = AppRepository.getCurrentInstituteId()
     if (!com.example.security.SecurityEngine.isValidInstituteId(activeInstituteId)) {
@@ -1087,10 +1101,10 @@ object FirestoreService {
       val ex = SecurityException("Invalid active instituteId '$activeInstituteId'.")
       _syncStatus.value = "Security Error: Invalid institute."
       onFailure(ex)
-      return
+      return@withContext
     }
     val existingProfile = _remoteProfiles.value.find { it.id == cleanId }
-    val existingInstituteId = existingProfile?.instituteId ?: AppRepository.findExistingStudentInstituteId(cleanId)
+    val existingInstituteId = existingProfile?.instituteId ?: AppRepository.findExistingStudentInstituteIdCached(cleanId)
     if (existingInstituteId != null && !existingInstituteId.equals(activeInstituteId, ignoreCase = true)) {
       com.example.security.SecurityEngine.logEvent(
         severity = com.example.security.SecuritySeverity.ALERT,
@@ -1101,13 +1115,13 @@ object FirestoreService {
       val ex = SecurityException("Cross-institute delete blocked for student '$cleanId'.")
       _syncStatus.value = "Security Error: Cross-institute delete blocked."
       onFailure(ex)
-      return
+      return@withContext
     }
     if (AppRepository.isLoggedIn.value && AppRepository.currentRole.value != UserRole.ADMIN) {
       val ex = SecurityException("Only an Institute Admin can delete student profiles.")
       _syncStatus.value = "Security Error: Insufficient role permissions."
       onFailure(ex)
-      return
+      return@withContext
     }
 
     val targetInstituteId = existingInstituteId ?: activeInstituteId
@@ -1144,7 +1158,7 @@ object FirestoreService {
       val ex = IllegalStateException("Cannot delete student in Offline Mode. DELETE queued in Room sync_queue.")
       _syncStatus.value = "Offline Mode: DELETE queued in persistent sync_queue."
       onFailure(ex)
-      return
+      return@withContext
     }
 
     if (!NetworkConnectivityManager.isFirebaseReachable.value) {
@@ -1154,7 +1168,7 @@ object FirestoreService {
       val ex = IllegalStateException("Cloud Service Unavailable. DELETE queued in Room sync_queue.")
       _syncStatus.value = "Saved locally (Cloud Service Unavailable — DELETE Sync Pending)"
       onFailure(ex)
-      return
+      return@withContext
     }
 
     if (simulateImmediateWriteFailure) {
@@ -1164,14 +1178,14 @@ object FirestoreService {
       val ex = IllegalStateException(simulatedWriteErrorMessage)
       _syncStatus.value = "Delete Error: $simulatedWriteErrorMessage"
       onFailure(ex)
-      return
+      return@withContext
     }
 
     val database = db
     if (database == null) {
       _syncStatus.value = "Local remove: Student ID $cleanId deleted."
       onSuccess()
-      return
+      return@withContext
     }
 
     database.collection(COLLECTION_NAME)
@@ -1184,11 +1198,15 @@ object FirestoreService {
       }
       .addOnFailureListener { e ->
         Log.e(TAG, "Error deleting profile", e)
-        persistCreateOrUpdateToRoomQueue(deleteEnvelope, targetInstituteId)
-        NetworkConnectivityManager.recordLocalMutation()
-        NetworkConnectivityManager.recordSyncFailure(e.message ?: "Firestore delete error")
-        _syncStatus.value = "Delete Error: ${e.message}"
-        onFailure(e)
+        serviceScope.launch {
+          persistCreateOrUpdateToRoomQueue(deleteEnvelope, targetInstituteId)
+          NetworkConnectivityManager.recordLocalMutation()
+          NetworkConnectivityManager.recordSyncFailure(e.message ?: "Firestore delete error")
+          _syncStatus.value = "Delete Error: ${e.message}"
+          withContext(Dispatchers.Main) {
+            onFailure(e)
+          }
+        }
       }
   }
 
@@ -1611,6 +1629,8 @@ object FirestoreService {
   private val activeListenerKeys = ConcurrentHashMap.newKeySet<String>()
 
   // Pending synchronization queue (Section 26 & 27: Room -> Firestore with stable IDs and metadata)
+  private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+  private val syncQueueMutex = Mutex()
   private val pendingSyncEnvelopes = ConcurrentHashMap<String, FirestoreSyncEnvelope>()
   private val _pendingSyncList = MutableStateFlow<List<FirestoreSyncEnvelope>>(emptyList())
   val pendingSyncList = _pendingSyncList.asStateFlow()
@@ -1659,24 +1679,24 @@ object FirestoreService {
     )
   }
 
-  private fun persistCreateOrUpdateToRoomQueue(
+  suspend fun persistCreateOrUpdateToRoomQueue(
     envelope: FirestoreSyncEnvelope,
     targetInstituteId: String
-  ): com.example.data.db.SyncQueueEntity? {
-    val operationType = com.example.data.db.SyncOperationType.fromString(envelope.operation)
-    val key = "${envelope.collection}:${envelope.documentId}"
-    val queueEntity = toSyncQueueEntity(
-      envelope = envelope.copy(
-        instituteId = targetInstituteId,
-        operation = operationType.name,
-        syncStatus = "PENDING_SYNC"
-      ),
-      activeInstituteId = targetInstituteId
-    )
+  ): com.example.data.db.SyncQueueEntity? = withContext(Dispatchers.IO) {
+    syncQueueMutex.withLock {
+      val operationType = com.example.data.db.SyncOperationType.fromString(envelope.operation)
+      val key = "${envelope.collection}:${envelope.documentId}"
+      val queueEntity = toSyncQueueEntity(
+        envelope = envelope.copy(
+          instituteId = targetInstituteId,
+          operation = operationType.name,
+          syncStatus = "PENDING_SYNC"
+        ),
+        activeInstituteId = targetInstituteId
+      )
 
-    val dao = resolveSyncQueueDao()
-    val persistedEntity = if (dao != null) {
-      kotlinx.coroutines.runBlocking {
+      val dao = resolveSyncQueueDao()
+      val persistedEntity = if (dao != null) {
         val existingActive = dao.getActiveItemsForEntityAndOperation(
           instituteId = queueEntity.instituteId,
           entityType = queueEntity.entityType,
@@ -1696,68 +1716,80 @@ object FirestoreService {
           dao.insert(queueEntity)
           queueEntity
         }
+      } else {
+        queueEntity
       }
-    } else {
-      queueEntity
-    }
 
-    val syncedEnvelope = FirestoreSyncEnvelope.fromSyncQueueEntity(persistedEntity)
-    pendingSyncEnvelopes[key] = syncedEnvelope
-    refreshPendingSyncStateFromRoom()
-    return persistedEntity
+      val syncedEnvelope = FirestoreSyncEnvelope.fromSyncQueueEntity(persistedEntity)
+      pendingSyncEnvelopes[key] = syncedEnvelope
+      refreshPendingSyncStateFromRoomInternal()
+      persistedEntity
+    }
   }
 
-  private fun refreshPendingSyncStateFromRoom() {
+  private suspend fun refreshPendingSyncStateFromRoomInternal() = withContext(Dispatchers.IO) {
     val dao = resolveSyncQueueDao()
     if (dao != null) {
       try {
-        val items = kotlinx.coroutines.runBlocking { dao.getPendingItems() }
+        val items = dao.getPendingItems()
         val converted = items.map { FirestoreSyncEnvelope.fromSyncQueueEntity(it) }
         pendingSyncEnvelopes.clear()
         converted.forEach { env ->
           pendingSyncEnvelopes["${env.collection}:${env.documentId}"] = env
         }
         _pendingSyncList.value = converted
-        return
+        return@withContext
       } catch (_: Exception) {
       }
     }
     _pendingSyncList.value = pendingSyncEnvelopes.values.sortedBy { it.createdAt }
   }
 
-  fun getPendingSyncEnvelopes(): List<FirestoreSyncEnvelope> {
+  suspend fun refreshPendingSyncStateFromRoom() = refreshPendingSyncStateFromRoomInternal()
+
+  suspend fun getPendingSyncEnvelopes(): List<FirestoreSyncEnvelope> = withContext(Dispatchers.IO) {
     val dao = resolveSyncQueueDao()
     if (dao != null) {
-      return try {
-        val items = kotlinx.coroutines.runBlocking { dao.getPendingItems() }
+      return@withContext try {
+        val items = dao.getPendingItems()
         items.map { FirestoreSyncEnvelope.fromSyncQueueEntity(it) }
       } catch (_: Exception) {
         pendingSyncEnvelopes.values.toList()
       }
     }
+    pendingSyncEnvelopes.values.toList()
+  }
+
+  fun getPendingSyncEnvelopesCached(): List<FirestoreSyncEnvelope> {
     return pendingSyncEnvelopes.values.toList()
   }
 
-  fun getPendingSyncCount(): Int {
+  suspend fun getPendingSyncCount(): Int = withContext(Dispatchers.IO) {
     val dao = resolveSyncQueueDao()
     if (dao != null) {
-      return try {
-        kotlinx.coroutines.runBlocking { dao.countPendingItems() }
+      return@withContext try {
+        dao.countPendingItems()
       } catch (_: Exception) {
         pendingSyncEnvelopes.size
       }
     }
+    pendingSyncEnvelopes.size
+  }
+
+  fun getPendingSyncCountCached(): Int {
     return pendingSyncEnvelopes.size
   }
 
-  fun clearPendingSyncQueue() {
-    pendingSyncEnvelopes.clear()
-    _pendingSyncList.value = emptyList()
-    val dao = resolveSyncQueueDao()
-    if (dao != null) {
-      try {
-        kotlinx.coroutines.runBlocking { dao.clearAll() }
-      } catch (_: Exception) {
+  suspend fun clearPendingSyncQueue() = withContext(Dispatchers.IO) {
+    syncQueueMutex.withLock {
+      pendingSyncEnvelopes.clear()
+      _pendingSyncList.value = emptyList()
+      val dao = resolveSyncQueueDao()
+      if (dao != null) {
+        try {
+          dao.clearAll()
+        } catch (_: Exception) {
+        }
       }
     }
   }
@@ -1767,13 +1799,13 @@ object FirestoreService {
     _pendingSyncList.value = emptyList()
   }
 
-  fun enqueueOrSyncEnvelope(
+  suspend fun enqueueOrSyncEnvelope(
     envelope: FirestoreSyncEnvelope,
     onComplete: ((Boolean) -> Unit)? = null
-  ) {
+  ) = withContext(Dispatchers.IO) {
     if (envelope.documentId.isBlank() || envelope.collection.isBlank()) {
       onComplete?.invoke(false)
-      return
+      return@withContext
     }
     val activeInstituteId = AppRepository.getCurrentInstituteId()
     val targetInstId = envelope.instituteId.trim().ifBlank { activeInstituteId }
@@ -1785,7 +1817,7 @@ object FirestoreService {
         details = "Blocked sync to ${envelope.collection}/${envelope.documentId} with invalid instituteId '$targetInstId'."
       )
       onComplete?.invoke(false)
-      return
+      return@withContext
     }
     val normalizedOpType = com.example.data.db.SyncOperationType.fromString(envelope.operation)
     if ((AppRepository.isLoggedIn.value || normalizedOpType == com.example.data.db.SyncOperationType.DELETE) &&
@@ -1802,7 +1834,7 @@ object FirestoreService {
         details = "Blocked cross-institute ${normalizedOpType.name} from '$activeInstituteId' to '$targetInstId' on ${envelope.collection}/${envelope.documentId}."
       )
       onComplete?.invoke(false)
-      return
+      return@withContext
     }
 
     val payloadInstituteId = (envelope.payload["instituteId"] as? String)?.trim()
@@ -1814,12 +1846,12 @@ object FirestoreService {
         details = "Blocked sync with mismatched payload instituteId '$payloadInstituteId' vs '$targetInstId' on ${envelope.collection}/${envelope.documentId}."
       )
       onComplete?.invoke(false)
-      return
+      return@withContext
     }
 
     if (envelope.collection == COLLECTION_NAME) {
       val existingRemoteInst = _remoteProfiles.value.find { it.id == envelope.documentId }?.instituteId
-      val existingInstId = existingRemoteInst ?: AppRepository.findExistingStudentInstituteId(envelope.documentId)
+      val existingInstId = existingRemoteInst ?: AppRepository.findExistingStudentInstituteIdCached(envelope.documentId)
       if (existingInstId != null &&
         (!existingInstId.equals(targetInstId, ignoreCase = true) ||
           !existingInstId.equals(activeInstituteId, ignoreCase = true))
@@ -1835,7 +1867,7 @@ object FirestoreService {
           details = "Blocked attempt to queue ${normalizedOpType.name} for ${envelope.collection}/${envelope.documentId} under institute '$targetInstId' (active '$activeInstituteId') when entity belongs to '$existingInstId'."
         )
         onComplete?.invoke(false)
-        return
+        return@withContext
       }
     }
 
@@ -1878,9 +1910,9 @@ object FirestoreService {
     if (!NetworkConnectivityManager.isOnline.value) {
       persistCreateOrUpdateToRoomQueue(pendingEnv, targetInstId)
       NetworkConnectivityManager.recordLocalMutation()
-      _syncStatus.value = "Saved locally (Pending Cloud Sync: ${getPendingSyncCount()} item(s))"
+      _syncStatus.value = "Saved locally (Pending Cloud Sync: ${pendingSyncEnvelopes.size} item(s))"
       onComplete?.invoke(false)
-      return
+      return@withContext
     }
 
     if (!NetworkConnectivityManager.isFirebaseReachable.value) {
@@ -1889,7 +1921,7 @@ object FirestoreService {
       NetworkConnectivityManager.recordServiceUnavailable("Firebase service unreachable")
       _syncStatus.value = "Saved locally (Cloud Service Unavailable — Sync Pending)"
       onComplete?.invoke(false)
-      return
+      return@withContext
     }
 
     if (simulateImmediateWriteFailure) {
@@ -1898,7 +1930,7 @@ object FirestoreService {
       NetworkConnectivityManager.recordSyncFailure(simulatedWriteErrorMessage)
       _syncStatus.value = "Cloud Sync Failed: $simulatedWriteErrorMessage"
       onComplete?.invoke(false)
-      return
+      return@withContext
     }
 
     val database = db
@@ -1910,7 +1942,7 @@ object FirestoreService {
       NetworkConnectivityManager.recordSyncSuccess()
       _syncStatus.value = "Cloud Sync Complete (${envelope.collection}/${envelope.documentId})"
       onComplete?.invoke(true)
-      return
+      return@withContext
     }
 
     val docRef = database.collection(envelope.collection).document(envelope.documentId)
@@ -1921,35 +1953,43 @@ object FirestoreService {
     }
     task
       .addOnSuccessListener {
-        pendingSyncEnvelopes.remove(key)
-        refreshPendingSyncStateFromRoom()
-        _lastSyncTimestamp.value = System.currentTimeMillis()
-        if (pendingSyncEnvelopes.isEmpty()) {
-          NetworkConnectivityManager.recordSyncSuccess()
-          _syncStatus.value = "Cloud Sync Complete (${envelope.collection}/${envelope.documentId})"
-        } else {
-          _syncStatus.value = "Synced ${envelope.collection}/${envelope.documentId} (${pendingSyncEnvelopes.size} remaining)"
+        serviceScope.launch {
+          pendingSyncEnvelopes.remove(key)
+          refreshPendingSyncStateFromRoomInternal()
+          _lastSyncTimestamp.value = System.currentTimeMillis()
+          if (pendingSyncEnvelopes.isEmpty()) {
+            NetworkConnectivityManager.recordSyncSuccess()
+            _syncStatus.value = "Cloud Sync Complete (${envelope.collection}/${envelope.documentId})"
+          } else {
+            _syncStatus.value = "Synced ${envelope.collection}/${envelope.documentId} (${pendingSyncEnvelopes.size} remaining)"
+          }
+          withContext(Dispatchers.Main) {
+            onComplete?.invoke(true)
+          }
         }
-        onComplete?.invoke(true)
       }
       .addOnFailureListener { e ->
-        persistCreateOrUpdateToRoomQueue(pendingEnv, targetInstId)
-        NetworkConnectivityManager.recordLocalMutation()
-        NetworkConnectivityManager.recordSyncFailure(e.message ?: "Firestore write error")
-        _syncStatus.value = "Cloud Sync Failed: ${e.message ?: "Temporary network error"}"
-        onComplete?.invoke(false)
+        serviceScope.launch {
+          persistCreateOrUpdateToRoomQueue(pendingEnv, targetInstId)
+          NetworkConnectivityManager.recordLocalMutation()
+          NetworkConnectivityManager.recordSyncFailure(e.message ?: "Firestore write error")
+          _syncStatus.value = "Cloud Sync Failed: ${e.message ?: "Temporary network error"}"
+          withContext(Dispatchers.Main) {
+            onComplete?.invoke(false)
+          }
+        }
       }
   }
 
-  fun syncStudentToCloud(
+  suspend fun syncStudentToCloud(
     student: Student,
     createdBy: String = "SYSTEM",
     operationType: com.example.data.db.SyncOperationType = com.example.data.db.SyncOperationType.UPDATE,
     onComplete: ((Boolean) -> Unit)? = null
-  ) {
+  ) = withContext(Dispatchers.IO) {
     if (student.id.isBlank()) {
       onComplete?.invoke(false)
-      return
+      return@withContext
     }
     val resolvedInstituteId = student.instituteId.trim().ifBlank { AppRepository.getCurrentInstituteId() }
     val fsStudent = FirestoreStudent.fromDomain(student.copy(instituteId = resolvedInstituteId))
@@ -1968,34 +2008,37 @@ object FirestoreService {
     enqueueOrSyncEnvelope(envelope, onComplete)
   }
 
-  fun flushPendingSyncQueue(onComplete: ((Int) -> Unit)? = null): Boolean {
-    if (!NetworkConnectivityManager.isOnline.value || !NetworkConnectivityManager.isFirebaseReachable.value) {
-      onComplete?.invoke(0)
-      return false
-    }
-    val items = pendingSyncEnvelopes.values.toList()
-    if (items.isEmpty()) {
-      onComplete?.invoke(0)
-      return true
-    }
-    val database = db
-    if (database == null) {
-      // In local test environment when explicitly flushing while online & reachable, mark synced if simulated
-      onComplete?.invoke(0)
-      return false
-    }
-    var syncedCount = 0
-    var processed = 0
-    items.forEach { env ->
-      enqueueOrSyncEnvelope(env) { ok ->
-        if (ok) syncedCount++
-        processed++
-        if (processed == items.size) {
-          onComplete?.invoke(syncedCount)
-        }
+  suspend fun flushPendingSyncQueue(onComplete: ((Int) -> Unit)? = null): Boolean = withContext(Dispatchers.IO) {
+    syncQueueMutex.withLock {
+      if (!NetworkConnectivityManager.isOnline.value || !NetworkConnectivityManager.isFirebaseReachable.value) {
+        onComplete?.invoke(0)
+        return@withContext false
       }
+      val items = pendingSyncEnvelopes.values.toList()
+      if (items.isEmpty()) {
+        onComplete?.invoke(0)
+        return@withContext true
+      }
+      val database = db
+      if (database == null) {
+        // In local test environment when explicitly flushing while online & reachable, mark synced if simulated
+        onComplete?.invoke(0)
+        return@withContext false
+      }
+      var syncedCount = 0
+      for (env in items) {
+        val ok = suspendCoroutine<Boolean> { cont ->
+          serviceScope.launch {
+            enqueueOrSyncEnvelope(env) { res ->
+              cont.resume(res)
+            }
+          }
+        }
+        if (ok) syncedCount++
+      }
+      onComplete?.invoke(syncedCount)
+      true
     }
-    return true
   }
 
   // REALTIME LISTENER for Student Profiles (Section 27 & 32: controlled lifecycle ownership, no duplicates, tenant-scoped)

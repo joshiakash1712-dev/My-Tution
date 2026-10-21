@@ -52,4 +52,63 @@ class AppRepositoryStartupOptimizationTest {
     AppRepository.login("admin@mytuition.com", UserRole.ADMIN, instituteId = "FSI_MAIN")
     assertTrue("User must be logged in", AppRepository.isLoggedIn.value)
   }
+
+  @Test
+  fun testStudentMutationsExecuteSafelyOnDispatchersIO() = runBlocking {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    com.example.security.SecurityEngine.initialize(context)
+    AppRepository.initialize(context)
+    AppRepository.awaitInitialDemoDataSeeded()
+
+    AppRepository.login("admin@mytuition.com", UserRole.ADMIN, instituteId = "FSI_MAIN")
+
+    val student = Student(
+      id = "STU_IO_TEST_101",
+      name = "IO Test Student",
+      photo = "",
+      mobile = "9988776655",
+      parentName = "IO Parent",
+      parentContact = "9988776656",
+      email = "io.test@mytuition.com",
+      dob = "15/05/2007",
+      gender = "Male",
+      address = "Pune",
+      school = "City High School",
+      className = "Class 12",
+      batch = "12th Science",
+      batchId = "BATCH_12_SCI",
+      stream = "Science",
+      admissionDate = "01/06/2026",
+      status = "Active",
+      isActivated = true,
+      instituteId = "FSI_MAIN"
+    )
+
+    // 1. Add student
+    val addResult = AppRepository.addStudent(student)
+    assertTrue("addStudent must succeed", addResult)
+    val found = AppRepository.findStudentLocal("STU_IO_TEST_101")
+    assertNotNull("Student must be found locally", found)
+
+    // 2. Update student status
+    val statusResult = AppRepository.updateStudentStatus("STU_IO_TEST_101", "Alumni")
+    assertTrue("updateStudentStatus must succeed", statusResult)
+
+    // 3. Batch enrollment update
+    val targetBatch = Batch(
+      id = "BATCH_JEE_MAINS",
+      name = "JEE Mains Batch",
+      schedule = "Mon-Fri 09:00 AM",
+      studentCount = 10,
+      teacherName = "Faculty One",
+      teacherId = "FAC_001",
+      instituteId = "FSI_MAIN"
+    )
+    val enrollResult = AppRepository.enrollStudentInBatch(found!!, targetBatch)
+    assertTrue("enrollStudentInBatch must succeed", enrollResult)
+
+    // 4. Deactivate student
+    val deleteResult = AppRepository.deleteStudent("STU_IO_TEST_101")
+    assertTrue("deleteStudent must succeed", deleteResult)
+  }
 }

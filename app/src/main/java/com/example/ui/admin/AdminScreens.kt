@@ -88,6 +88,7 @@ fun AdminMainContent(
   val onlineForms by AppRepository.onlineForms.collectAsState()
   val questions by AppRepository.questions.collectAsState()
   val instituteConfig by AppRepository.instituteConfig.collectAsState()
+  val coroutineScope = rememberCoroutineScope()
 
   var showInstituteSetup by remember { mutableStateOf(false) }
   var showAdmissionForm by remember { mutableStateOf(false) }
@@ -115,8 +116,12 @@ fun AdminMainContent(
     InstituteAdmissionFormDialog(
       onDismiss = { showAdmissionForm = false },
       onSaveStudent = { student ->
-        AppRepository.addStudent(student)
-        showAdmissionForm = false
+        coroutineScope.launch {
+          val success = AppRepository.addStudent(student)
+          if (success) {
+            showAdmissionForm = false
+          }
+        }
       }
     )
   }
@@ -1883,6 +1888,7 @@ fun AdminStudentsTab(
   onAdmitClick: () -> Unit,
   onCreateAccountClick: () -> Unit
 ) {
+  val coroutineScope = rememberCoroutineScope()
   var studentSubTab by remember { mutableStateOf(0) } // 0 = List, 1 = Take Attendance, 2 = Attendance History
   var selectedBatchFilter by remember { mutableStateOf("All") }
   var searchQuery by remember { mutableStateOf("") }
@@ -2268,7 +2274,7 @@ fun AdminStudentsTab(
           }
         }
 
-        items(displayStudents) { stu ->
+        items(displayStudents, key = { it.id }) { stu ->
           var showIdDialog by remember { mutableStateOf(false) }
           if (showIdDialog) {
             DigitalIdCardDialog(stu) { showIdDialog = false }
@@ -2613,10 +2619,15 @@ fun AdminStudentsTab(
         Button(
           onClick = {
             val count = selectedStudentIds.size
-            AppRepository.deleteStudents(selectedStudentIds.toList())
-            selectedStudentIds = emptySet()
-            isMultiSelectMode = false
-            showDeleteConfirmationDialog = false
+            val idsToDelete = selectedStudentIds.toList()
+            coroutineScope.launch {
+              val success = AppRepository.deleteStudents(idsToDelete)
+              if (success) {
+                selectedStudentIds = emptySet()
+                isMultiSelectMode = false
+                showDeleteConfirmationDialog = false
+              }
+            }
           },
           colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626)),
           shape = RoundedCornerShape(10.dp)

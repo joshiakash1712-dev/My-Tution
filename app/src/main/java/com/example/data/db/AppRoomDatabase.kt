@@ -97,7 +97,6 @@ abstract class AppRoomDatabase : RoomDatabase() {
             "my_tuition_fsi_database"
           )
             .addMigrations(*ALL_MIGRATIONS)
-            .allowMainThreadQueries()
             .build()
           INSTANCE = instance
           instance

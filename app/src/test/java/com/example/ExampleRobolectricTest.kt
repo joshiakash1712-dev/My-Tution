@@ -45,6 +45,7 @@ class ExampleRobolectricTest {
 
   @Test
   fun `verify faculty consistency between batches, timetable entries, and staff directory`() {
+    com.example.data.AppRepository.logout()
     val officialTeachers = com.example.data.SeedData.defaultTeachers
     val officialTeacherNames = officialTeachers.map { it.name }
 
@@ -1026,6 +1027,7 @@ class ExampleRobolectricTest {
     val context = ApplicationProvider.getApplicationContext<Context>()
     com.example.security.SecurityEngine.initialize(context)
     com.example.data.AppRepository.initialize(context)
+    com.example.data.AppRepository.awaitInitialDemoDataSeeded()
     com.example.data.AppRepository.logout()
 
     // Ensure baseline demo data is available in AppRepository via an Admin session

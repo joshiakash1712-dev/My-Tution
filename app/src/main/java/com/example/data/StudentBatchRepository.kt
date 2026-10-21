@@ -1022,7 +1022,7 @@ class StudentBatchRepository(private val context: Context) {
     }
   }
 
-  private fun syncStudentToFirestore(
+  private suspend fun syncStudentToFirestore(
     student: Student,
     operationType: SyncOperationType = SyncOperationType.UPDATE
   ) {

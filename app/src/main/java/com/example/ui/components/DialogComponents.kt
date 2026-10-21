@@ -25,6 +25,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.layout.ContentScale
 import coil.compose.AsyncImage
 import com.example.data.*
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -339,6 +340,7 @@ fun AddStudentDialog(onDismiss: () -> Unit, onSave: (Student) -> Unit) {
 
 @Composable
 fun CreateUserAccountDialog(onDismiss: () -> Unit) {
+  val coroutineScope = rememberCoroutineScope()
   var fullName by remember { mutableStateOf("") }
   var email by remember { mutableStateOf("") }
   var password by remember { mutableStateOf("") }
@@ -466,7 +468,9 @@ fun CreateUserAccountDialog(onDismiss: () -> Unit) {
                   weakestSubject = "Revision",
                   recentScores = listOf("Entry Test" to 85)
                 )
-                AppRepository.addStudent(s)
+                coroutineScope.launch {
+                  AppRepository.addStudent(s)
+                }
               } else if (selectedRole == UserRole.TEACHER) {
                 val t = Teacher(
                   id = "FAC${System.currentTimeMillis().toString().takeLast(3)}",
